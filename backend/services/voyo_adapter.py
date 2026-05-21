@@ -1,13 +1,8 @@
-import os
-import sys
 import logging
-from pathlib import Path
 from typing import Dict, Any, List
+from pathlib import Path
 
-# Ensure the root directory is in system path so we can import voyo_auth
-sys.path.append(str(Path("d:/ProjektiApp/videodownloadservisi").resolve()))
-
-from voyo_auth import VoyoAuth, VoyoConfig
+from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
 from backend.config import config
 
 logger = logging.getLogger(__name__)
@@ -142,30 +137,55 @@ class VoyoAdapter:
     @staticmethod
     def make_download_cmd(target: str, mode: str, episodes_range: str = "", resolution: str = "1080p") -> List[str]:
         """
-        Build CLI command to run voyo_downloader.py.
-        target can be a video/series ID or URL.
-        mode can be 'video' or 'series'.
+        Build download command (for backwards compatibility with queue manager).
+        Returns a list representing Python function call args.
         """
-        cmd = ["python", "voyo_downloader.py"]
-        
         output_dir = config.get_output_dir()
-        cmd += ["-o", output_dir]
+        return ["voyo_download", target, mode, episodes_range, resolution, output_dir]
 
-        if resolution:
-            cmd += ["--resolution", resolution]
+    @staticmethod
+    def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:
+        """Download a single Voyo video."""
+        try:
+            vcfg = VoyoConfig()
+            email, password, device_id = vcfg.get_credentials()
+            if not email:
+                raise RuntimeError("No Voyo credentials configured")
             
-        if mode == "video":
-            if target.isdigit():
-                cmd += ["--video", target]
-            else:
-                cmd.append(target)  # URL
-        else: # series
-            if target.isdigit():
-                cmd += ["--series", target]
-            else:
-                cmd.append(target) # URL
-                
-            if episodes_range:
-                cmd += ["--episodes", episodes_range]
-                
-        return cmd
+            auth = VoyoAuth()
+            if device_id:
+                auth.state.device_id = device_id
+                auth.session.headers['device-id'] = device_id
+            auth.login(email, password)
+            vcfg.update_device_id(auth.state.device_id)
+            
+            out_dir = output_dir or config.get_output_dir()
+            downloader = VoyoDownloader(auth, out_dir, resolution)
+            return downloader.download_video(video_id)
+        except Exception as e:
+            logging.error(f"Download failed: {e}")
+            return False
+
+    @staticmethod
+    def download_series(series_id: int, episodes_range: str = "", 
+                       output_dir: str = None, resolution: str = "1080p") -> tuple:
+        """Download Voyo series episodes."""
+        try:
+            vcfg = VoyoConfig()
+            email, password, device_id = vcfg.get_credentials()
+            if not email:
+                raise RuntimeError("No Voyo credentials configured")
+            
+            auth = VoyoAuth()
+            if device_id:
+                auth.state.device_id = device_id
+                auth.session.headers['device-id'] = device_id
+            auth.login(email, password)
+            vcfg.update_device_id(auth.state.device_id)
+            
+            out_dir = output_dir or config.get_output_dir()
+            downloader = VoyoDownloader(auth, out_dir, resolution)
+            return downloader.download_series(series_id, episodes_range)
+        except Exception as e:
+            logging.error(f"Series download failed: {e}")
+            return 0, 0
