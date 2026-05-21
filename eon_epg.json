@@ -1,0 +1,12 @@
+{
+  "channels": {
+    "Example Live Channel": [
+      {
+        "title": "Morning Program",
+        "start": "2026-05-21T08:00:00+02:00",
+        "end": "2026-05-21T10:00:00+02:00",
+        "description": "Example EPG entry."
+      }
+    ]
+  }
+}

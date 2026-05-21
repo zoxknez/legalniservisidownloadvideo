@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "id": "12345",
+      "title": "EON VOD Film 12345",
+      "url": "https://example.com/vod/12345/manifest.mpd"
+    },
+    {
+      "id": "example-movie",
+      "title": "Example Movie",
+      "url": "https://example.com/vod/example-movie.m3u8"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "channels": [
+    {
+      "name": "RTS 1",
+      "url": "https://example.com/live/rts1/manifest.mpd"
+    },
+    {
+      "name": "Example Live Channel",
+      "url": "https://example.com/live/channel.m3u8"
+    }
+  ]
+}
