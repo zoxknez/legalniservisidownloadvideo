@@ -158,8 +158,8 @@ def import_session(req: SessionImportRequest):
             return {"success": True, "message": "HRTi token uspešno uvezen!"}
 
         elif service == "rtsplaneta" or service == "rts":
-            from backend.core.services.rtsplaneta.auth import RtsConfig
-            rcfg = RtsConfig()
+            from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaConfig
+            rcfg = RTSPlanetaConfig()
             token = data
             if data.startswith("{"):
                 try:
