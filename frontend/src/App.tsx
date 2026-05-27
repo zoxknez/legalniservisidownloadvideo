@@ -30,7 +30,9 @@ import {
   Clapperboard,
   Maximize2,
   Minimize2,
-  RotateCcw
+  RotateCcw,
+  Clock,
+  Hash
 } from "lucide-react";
 
 // Interface definitions
@@ -1923,14 +1925,19 @@ export default function App() {
         {activeTab === "hrti" && (
           <div key="hrti" className="tab-content">
             <div className="tab-page-header tab-header-hrti mb-8">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#06b6d4,#0284c7)"}}>
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#06b6d4,#0284c7)"}}>
                 <Film style={{width:24,height:24,color:"white"}} />
               </div>
-              <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-                  <Film className="w-6 h-6 text-cyan-400" /> HRTi Catalog
-                </h2>
-                <p className="text-text-secondary text-sm">Pregledajte, pretražujte i preuzmite filmove i serije sa HRTi streaming servisa.</p>
+              <div style={{flex:1}}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                    <Film className="w-6 h-6 text-cyan-400" /> HRTi Catalog
+                  </h2>
+                  <span className="badge flex items-center gap-1.5 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+                    <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+                  </span>
+                </div>
+                <p className="text-text-secondary text-sm">Pregledajte, pretražujte i preuzmite filmove i serije sa HRTi streaming servisa uz automatsko dekodiranje.</p>
               </div>
             </div>
 
@@ -1939,9 +1946,9 @@ export default function App() {
               <div className="md:col-span-2 flex flex-col gap-6">
                 
                 {/* Category selector & Search bar */}
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col md:flex-row gap-4 justify-between items-center">
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col md:flex-row gap-4 justify-between items-center glow-cyan-card glow-card-premium">
                   <div className="flex items-center gap-3 w-full md:w-auto">
-                    <label className="m-0 text-xs" style={{whiteSpace:"nowrap"}}>Kategorija:</label>
+                    <label className="m-0 text-xs text-text-secondary font-bold" style={{whiteSpace:"nowrap"}}>Kategorija:</label>
                     <CustomSelect
                       value={selectedCat}
                       options={hrtiCats}
@@ -1954,22 +1961,37 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="flex gap-2 w-full md:w-96">
+                  <div className="password-wrapper w-full md:w-96">
+                    <Search className="absolute left-4 text-text-muted w-4 h-4" />
                     <input
                       type="text"
+                      className="input-premium pl-11 pr-24"
                       placeholder="Pretraži film ili seriju..."
                       value={hrtiSearchQuery}
                       onChange={(e) => setHrtiSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && searchHrti()}
+                      style={{"--focused-border": "#06b6d4", "--focused-glow": "rgba(6,182,212,0.25)"} as any}
                     />
-                    <button onClick={searchHrti} className="btn btn-secondary">
-                      <Search className="w-4 h-4" />
+                    <button
+                      onClick={searchHrti}
+                      className="btn btn-premium-primary absolute right-1.5 top-1.5 bottom-1.5 h-auto py-1 px-4 text-xs font-bold"
+                      style={{
+                        "--btn-grad-start": "#06b6d4",
+                        "--btn-grad-end": "#0891b2",
+                        "--btn-glow": "rgba(6,182,212,0.25)",
+                        "--btn-glow-hover": "rgba(6,182,212,0.45)",
+                        height: "calc(100% - 6px)",
+                        display: "flex",
+                        alignItems: "center"
+                      } as any}
+                    >
+                      Pretraži
                     </button>
                   </div>
                 </div>
 
                 {/* Items Grid */}
-                <div className="glass-panel p-8 rounded-xl border border-glass min-h-96 relative">
+                <div className="glass-panel p-8 rounded-xl border border-glass min-h-96 relative glow-cyan-card glow-card-premium">
                   {hrtiLoadingItems && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-xl">
                       <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
@@ -2080,36 +2102,54 @@ export default function App() {
 
               {/* Right Column — Status & Details */}
               <div className="flex flex-col gap-6">
-                <div className="glass-panel p-6 rounded-xl border border-glass">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
-                    <User className="w-5 h-5 text-indigo-400" />
+                <div className="glass-panel p-6 rounded-xl border border-glass glow-cyan-card glow-card-premium">
+                  <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
+                    <User className="w-5 h-5 text-cyan-400" />
                     Status Naloga
                   </h3>
                   
                   {status?.services.hrti.authenticated ? (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-connected">Prijavljen</span>
-                      <p className="text-sm font-semibold text-white">E-mail: <span className="text-text-secondary font-normal">{status.services.hrti.email}</span></p>
+                      <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max" style={{animation: "pulseGlowBrighter 2s infinite", "--glow-color": "rgba(16, 185, 129, 0.2)"} as any}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span> PRIJAVLJEN PROFIL
+                      </span>
+                      <div className="flex flex-col gap-1.5 border-t border-white/[0.03] pt-3">
+                        <p className="text-xs font-bold text-text-secondary">E-mail adresa:</p>
+                        <p className="text-sm font-semibold text-white truncate bg-black/20 p-2 rounded border border-white/[0.02]">{status.services.hrti.email}</p>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-missing">Nije prijavljen</span>
-                      <p className="text-xs text-text-secondary">Prijavite se u "Postavkama" da biste otključali HRTi preuzimanja.</p>
+                      <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NIJE PRIJAVLJEN
+                      </span>
+                      <p className="text-xs text-text-secondary leading-relaxed mt-1">Prijavite se u <strong>"Postavkama"</strong> sa vašim HRTi parametrima da biste otključali Widevine preuzimanja.</p>
                     </div>
                   )}
                 </div>
 
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
-                  <h4 className="font-bold text-sm flex items-center gap-2 text-cyan-400">
-                    <Info className="w-4 h-4" />
-                    O HRTi Katalogu
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-cyan-card glow-card-premium">
+                  <h4 className="font-extrabold text-sm flex items-center gap-2 text-cyan-400 border-b border-white/[0.04] pb-3">
+                    <ShieldAlert className="w-4 h-4" />
+                    Widevine & Decryption Engine
                   </h4>
                   <p className="text-xs text-text-secondary leading-relaxed">
-                    HRTi katalog učitava najnovije filmove i serije direktno sa HRT platforme.
+                    HRTi katalog i strimovi koriste Widevine DRM L3 i AES-128 enkripciju. Aplikacija vrši automatsku dekripciju:
                   </p>
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    Preuzimanje serija podržava automatsko izlistavanje i selekciju pojedinačnih epizoda za preuzimanje.
-                  </p>
+                  <ul className="text-xs text-text-secondary flex flex-col gap-2.5 border-t border-white/[0.03] pt-3">
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <span>Ekstrakcija HLS/DASH manifest metapodataka</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <span>Pronalaženje DRM ključeva za HRT1/2/3/4 i VOD</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <span>Brzo preuzimanje i spajanje sa demuksiranjem</span>
+                    </li>
+                  </ul>
                 </div>
               </div>
             </div>
@@ -2120,31 +2160,36 @@ export default function App() {
         {activeTab === "eon" && (
           <div key="eon" className="tab-content">
             <div className="tab-page-header tab-header-eon mb-8">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#10b981,#059669)"}}>
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#10b981,#059669)"}}>
                 <Play style={{width:24,height:24,color:"white"}} />
               </div>
-              <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-                  <Play className="w-6 h-6 text-emerald-400" /> EON TV
-                </h2>
+              <div style={{flex:1}}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                    <Play className="w-6 h-6 text-emerald-400" /> EON TV
+                  </h2>
+                  <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+                    <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+                  </span>
+                </div>
                 <p className="text-text-secondary text-sm">VOD sadržaj, serije i TV kanali uživo sa Widevine DRM dekripcijom i API katalogom.</p>
               </div>
             </div>
 
             {eonStatus && !eonReady && (
-              <div className="mb-6 p-4 rounded-lg border border-amber-500/20 bg-amber-500/10 flex flex-col gap-2">
-                <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
-                  <ShieldAlert className="w-4 h-4" />
-                  EON nije spreman
+              <div className="mb-6 p-5 rounded-xl border border-amber-500/20 bg-amber-500/10 flex flex-col gap-2.5 glow-amber-card glow-card-premium transition-all">
+                <div className="flex items-center gap-2 text-amber-300 font-extrabold text-sm">
+                  <ShieldAlert className="w-5 h-5 animate-pulse" />
+                  EON Nije Spreman
                 </div>
                 <p className="text-xs text-text-secondary">{eonStatus.error || "Proverite EON konfiguraciju."}</p>
                 {eonMissing.length > 0 && (
-                  <p className="text-[10px] text-text-muted font-mono">
+                  <p className="text-[10px] text-text-muted font-mono bg-black/30 p-2 rounded border border-white/[0.02] break-all">
                     Nedostaje: {eonMissing.join(", ")}
                   </p>
                 )}
                 {eonOptionalMissing.length > 0 && (
-                  <p className="text-[10px] text-text-muted font-mono">
+                  <p className="text-[10px] text-text-muted font-mono bg-black/30 p-2 rounded border border-white/[0.02] break-all">
                     Opciono nedostaje: {eonOptionalMissing.join(", ")}
                   </p>
                 )}
@@ -2153,7 +2198,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               
-              <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+              <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-green-card glow-card-premium">
                 <div>
                   <label>Mod Rada (EON)</label>
                   <div className="sliding-tabs-wrapper">
@@ -2168,7 +2213,7 @@ export default function App() {
                       <button
                         key={mode}
                         type="button"
-                        onClick={() => { setEonMode(mode as any); setEonTarget(""); }}
+                        onClick={() => { setEonTarget(""); setEonMode(mode as any); }}
                         className={`sliding-tabs-btn ${eonMode === mode ? "active" : ""}`}
                       >
                         {mode === "vod" && "VOD / URL"}
@@ -2223,12 +2268,17 @@ export default function App() {
                     ) : (
                       <div>
                         <label>Direktan Live URL (.m3u8 / .mpd)</label>
-                        <input
-                          type="text"
-                          placeholder="npr. https://.../live/index.m3u8"
-                          value={eonTarget}
-                          onChange={(e) => setEonTarget(e.target.value)}
-                        />
+                        <div className="password-wrapper">
+                          <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                          <input
+                            type="text"
+                            placeholder="npr. https://.../live/index.m3u8"
+                            value={eonTarget}
+                            onChange={(e) => setEonTarget(e.target.value)}
+                            className="input-premium pl-11"
+                            style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                          />
+                        </div>
                         <p className="text-[10px] text-text-muted mt-1.5">Zalepite m3u8 manifest link iz browsera ili m3u8 strim.</p>
                       </div>
                     )}
@@ -2236,12 +2286,21 @@ export default function App() {
                 ) : (
                   <div>
                     <label>{eonMode === "vod" ? "Direktan VOD media URL" : "Series ID iz lokalnog kataloga"}</label>
-                    <input
-                      type="text"
-                      placeholder={eonMode === "vod" ? "npr. https://.../video.m3u8 ili .mpd/.mp4" : "npr. 162073-s1"}
-                      value={eonTarget}
-                      onChange={(e) => setEonTarget(e.target.value)}
-                    />
+                    <div className="password-wrapper">
+                      {eonMode === "vod" ? (
+                        <Film className="absolute left-4 text-text-muted w-4 h-4" />
+                      ) : (
+                        <List className="absolute left-4 text-text-muted w-4 h-4" />
+                      )}
+                      <input
+                        type="text"
+                        placeholder={eonMode === "vod" ? "npr. https://.../video.m3u8 ili .mpd/.mp4" : "npr. 162073-s1"}
+                        value={eonTarget}
+                        onChange={(e) => setEonTarget(e.target.value)}
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                      />
+                    </div>
                     <p className="text-[10px] text-text-muted mt-1.5">
                       {eonMode === "vod"
                         ? "Unesite EON VOD ID (npr. sa linka /ondemand/detail/12345), manifest URL ili direktan video link."
@@ -2255,11 +2314,16 @@ export default function App() {
                     <div>
                       {/* F5: Default 3600s (1h) */}
                       <label>Trajanje snimanja (sekunde)</label>
-                      <input
-                        type="number"
-                        value={eonDuration}
-                        onChange={(e) => setEonDuration(parseInt(e.target.value) || 0)}
-                      />
+                      <div className="password-wrapper">
+                        <Clock className="absolute left-4 text-text-muted w-4 h-4" />
+                        <input
+                          type="number"
+                          value={eonDuration}
+                          onChange={(e) => setEonDuration(parseInt(e.target.value) || 0)}
+                          className="input-premium pl-11"
+                          style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                        />
+                      </div>
                       <p className="text-[10px] text-text-muted mt-1">
                         * 0 = snimaj bez prestanka &nbsp;|&nbsp; 3600 = 1 sat &nbsp;|&nbsp; 7200 = 2 sata
                       </p>
@@ -2282,44 +2346,68 @@ export default function App() {
                 {eonMode === "live" && eonPlay && (
                   <div>
                     <label>Putanja do video plejera (VLC/MPV - Opciono)</label>
-                    <input
-                      type="text"
-                      placeholder="npr. C:\Program Files\VideoLAN\VLC\vlc.exe"
-                      value={eonPlayerPath}
-                      onChange={(e) => setEonPlayerPath(e.target.value)}
-                    />
+                    <div className="password-wrapper">
+                      <Play className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type="text"
+                        placeholder="npr. C:\Program Files\VideoLAN\VLC\vlc.exe"
+                        value={eonPlayerPath}
+                        onChange={(e) => setEonPlayerPath(e.target.value)}
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                      />
+                    </div>
                   </div>
                 )}
 
                 {eonMode === "series" && (
                   <div>
                     <label>Raspon Epizoda</label>
-                    <input
-                      type="text"
-                      placeholder="npr. 1-3, 2-, -5, 4 (ostavi prazno za sve epizode)"
-                      value={eonEpisodesRange}
-                      onChange={(e) => setEonEpisodesRange(e.target.value)}
-                    />
+                    <div className="password-wrapper">
+                      <Hash className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type="text"
+                        placeholder="npr. 1-3, 2-, -5, 4 (ostavi prazno za sve epizode)"
+                        value={eonEpisodesRange}
+                        onChange={(e) => setEonEpisodesRange(e.target.value)}
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                      />
+                    </div>
                   </div>
                 )}
 
                 {eonMode === "vod" && (
                   <div className="border-t border-glass pt-5 flex flex-col gap-3">
                     <label>Pretraga VOD kataloga</label>
-                    <div className="flex flex-col md:flex-row gap-3">
+                    <div className="password-wrapper w-full">
+                      <Search className="absolute left-4 text-text-muted w-4 h-4" />
                       <input
                         type="text"
                         value={eonSearchQuery}
                         onChange={(e) => setEonSearchQuery(e.target.value)}
                         placeholder="Pretraži lokalni katalog ili API"
-                        className="flex-1"
+                        className="input-premium pl-11 pr-24"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                       />
-                      <button onClick={searchEonVod} className="btn btn-secondary text-xs">
+                      <button
+                        onClick={searchEonVod}
+                        className="btn btn-premium-primary absolute right-1.5 top-1.5 bottom-1.5 h-auto py-1 px-4 text-xs font-bold"
+                        style={{
+                          "--btn-grad-start": "#10b981",
+                          "--btn-grad-end": "#059669",
+                          "--btn-glow": "rgba(16,185,129,0.25)",
+                          "--btn-glow-hover": "rgba(16,185,129,0.45)",
+                          height: "calc(100% - 6px)",
+                          display: "flex",
+                          alignItems: "center"
+                        } as any}
+                      >
                         Pretraži
                       </button>
                     </div>
                     {eonSearchResults.length > 0 && (
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-2 mt-2">
                         {eonSearchResults.slice(0, 6).map((item, idx) => {
                           const label = item.title || item.name || item.id || `Rezultat ${idx + 1}`;
                           const target = item.url || item.id || label;
@@ -2361,7 +2449,13 @@ export default function App() {
                 <button
                   onClick={startEonDownload}
                   disabled={!eonTarget || !eonReady}
-                  className="btn btn-primary w-full py-4"
+                  className="btn btn-premium-primary w-full py-4 text-white font-bold"
+                  style={{
+                    "--btn-grad-start": "#10b981",
+                    "--btn-grad-end": "#059669",
+                    "--btn-glow": "rgba(16,185,129,0.25)",
+                    "--btn-glow-hover": "rgba(16,185,129,0.45)"
+                  } as any}
                   title={!eonReady ? "EON engine, credentials or dependencies are missing." : undefined}
                 >
                   <Download className="w-5 h-5" />
@@ -2371,21 +2465,32 @@ export default function App() {
 
               {/* Status card */}
               <div className="flex flex-col gap-6">
-                <div className="glass-panel p-6 rounded-xl border border-glass">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
-                    <User className="w-5 h-5 text-indigo-400" />
+                <div className="glass-panel p-6 rounded-xl border border-glass glow-green-card glow-card-premium">
+                  <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
+                    <User className="w-5 h-5 text-emerald-400" />
                     Status Uređaja / Naloga
                   </h3>
 
                   {eonStatus?.ready ? (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-connected">Spreman</span>
-                      <p className="text-sm font-semibold text-white">Nalog: <span className="text-text-secondary font-normal">{eonStatus.username}</span></p>
-                      <p className="text-xs text-text-muted">Serijski broj: {eonStatus.serial}</p>
-                      <p className="text-xs text-text-muted">Broj uredjaja: {eonStatus.number}</p>
+                      <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max" style={{animation: "pulseGlowBrighter 2s infinite", "--glow-color": "rgba(16, 185, 129, 0.2)"} as any}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span> EON UREĐAJ SPREMAN
+                      </span>
+                      <div className="flex flex-col gap-1.5 border-t border-white/[0.03] pt-3 text-xs text-text-secondary">
+                        <p className="font-bold text-text-secondary">Korisnički nalog:</p>
+                        <p className="text-sm font-semibold text-white truncate bg-black/20 p-2 rounded border border-white/[0.02]">{eonStatus.username}</p>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-mono text-text-muted bg-black/10 p-2 rounded border border-white/[0.02]">
+                        <span>Serijski broj:</span>
+                        <span className="text-white font-bold">{eonStatus.serial}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] font-mono text-text-muted bg-black/10 p-2 rounded border border-white/[0.02]">
+                        <span>Broj uređaja:</span>
+                        <span className="text-white font-bold">{eonStatus.number}</span>
+                      </div>
                       
                       {/* EON API status details */}
-                      <div className="border-t border-glass pt-3 mt-1 flex flex-col gap-1.5">
+                      <div className="border-t border-white/[0.04] pt-3 mt-1 flex flex-col gap-1.5">
                         <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">EON API & CDM status:</span>
                         <div className="flex justify-between items-center text-xs">
                           <span className="text-text-secondary">API Konekcija:</span>
@@ -2400,20 +2505,22 @@ export default function App() {
                           </span>
                         </div>
                         {eonStatus.engine_status?.token?.expires_at && (
-                          <div className="flex flex-col text-[10px] text-text-muted mt-1">
+                          <div className="flex flex-col text-[10px] text-text-muted mt-1 bg-black/20 p-2 rounded border border-white/[0.02] truncate">
                             <span>Token ističe:</span>
-                            <span className="font-mono text-white truncate">{eonStatus.engine_status.token.expires_at}</span>
+                            <span className="font-mono text-white mt-0.5">{eonStatus.engine_status.token.expires_at}</span>
                           </div>
                         )}
                       </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-warning">Nije spreman</span>
-                      <p className="text-xs text-text-secondary">{eonStatus?.error || "Registrujte EON nalog i proverite engine/dependencies."}</p>
+                      <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NIJE SPREMAN
+                      </span>
+                      <p className="text-xs text-text-secondary leading-relaxed mt-1">{eonStatus?.error || "Registrujte EON nalog i proverite engine/dependencies."}</p>
                       
                       {/* EON API status details even when not fully ready */}
-                      <div className="border-t border-glass pt-3 mt-1 flex flex-col gap-1.5">
+                      <div className="border-t border-white/[0.04] pt-3 mt-1 flex flex-col gap-1.5">
                         <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">EON API & CDM status:</span>
                         <div className="flex justify-between items-center text-xs">
                           <span className="text-text-secondary">API Konekcija:</span>
@@ -2430,39 +2537,66 @@ export default function App() {
                       </div>
 
                       {eonMissing.length > 0 && (
-                        <p className="text-[10px] text-text-muted font-mono break-all">Missing: {eonMissing.join(", ")}</p>
+                        <p className="text-[10px] text-text-muted font-mono bg-black/20 p-2 rounded border border-white/[0.02] break-all">Missing: {eonMissing.join(", ")}</p>
                       )}
                       {eonOptionalMissing.length > 0 && (
-                        <p className="text-[10px] text-text-muted font-mono break-all">Optional: {eonOptionalMissing.join(", ")}</p>
+                        <p className="text-[10px] text-text-muted font-mono bg-black/20 p-2 rounded border border-white/[0.02] break-all">Optional: {eonOptionalMissing.join(", ")}</p>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4">
-                  <h3 className="font-bold text-base flex items-center gap-2">
-                    <Lock className="w-5 h-5 text-indigo-400" />
-                    EON podaci
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-green-card glow-card-premium">
+                  <h3 className="font-extrabold text-base flex items-center gap-2 text-white border-b border-white/[0.04] pb-3">
+                    <Lock className="w-5 h-5 text-emerald-400" />
+                    EON Kredencijali
                   </h3>
                   <div>
                     <label>Korisničko ime / email</label>
-                    <input
-                      type="text"
-                      value={eonUsername}
-                      onChange={(e) => setEonUsername(e.target.value)}
-                      placeholder="sbb_user@email.com"
-                    />
+                    <div className="password-wrapper">
+                      <User className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type="text"
+                        value={eonUsername}
+                        onChange={(e) => setEonUsername(e.target.value)}
+                        placeholder="sbb_user@email.com"
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                      />
+                    </div>
                   </div>
                   <div>
                     <label>Lozinka</label>
-                    <input
-                      type="password"
-                      value={eonPassword}
-                      onChange={(e) => setEonPassword(e.target.value)}
-                      placeholder="••••••••"
-                    />
+                    <div className="password-wrapper">
+                      <Lock className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type={showEonPass ? "text" : "password"}
+                        value={eonPassword}
+                        onChange={(e) => setEonPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="input-premium pl-11 pr-10"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                      />
+                      <button
+                        type="button"
+                        className="password-eye-btn"
+                        onClick={() => setShowEonPass(!showEonPass)}
+                      >
+                        {showEonPass ? (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                            <line x1="1" y1="1" x2="23" y2="23" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                       <label>Device serial</label>
                       <input
@@ -2470,6 +2604,8 @@ export default function App() {
                         value={eonSerial}
                         onChange={(e) => setEonSerial(e.target.value)}
                         placeholder="device-serial"
+                        className="input-premium font-mono text-xs"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                       />
                     </div>
                     <div>
@@ -2479,13 +2615,21 @@ export default function App() {
                         value={eonNumber}
                         onChange={(e) => setEonNumber(e.target.value)}
                         placeholder="device-number"
+                        className="input-premium font-mono text-xs"
+                        style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                       />
                     </div>
                   </div>
                   <button
                     onClick={() => submitLogin("eon", { username: eonUsername, password: eonPassword, serial: eonSerial, number: eonNumber })}
                     disabled={!eonUsername || !eonPassword || !eonSerial || !eonNumber}
-                    className="btn btn-secondary text-xs"
+                    className="btn btn-premium-primary text-xs w-full mt-1"
+                    style={{
+                      "--btn-grad-start": "#10b981",
+                      "--btn-grad-end": "#059669",
+                      "--btn-glow": "rgba(16,185,129,0.25)",
+                      "--btn-glow-hover": "rgba(16,185,129,0.45)"
+                    } as any}
                   >
                     Sačuvaj EON podatke
                   </button>
@@ -2493,50 +2637,49 @@ export default function App() {
                     <button
                       onClick={loginEonApi}
                       disabled={!eonUsername || !eonPassword || !eonSerial || !eonNumber}
-                      className="btn btn-secondary text-xs"
+                      className="btn btn-premium-secondary text-xs"
                     >
                       API login token
                     </button>
                     <button
                       onClick={refreshEonApiToken}
-                      className="btn btn-secondary text-xs"
+                      className="btn btn-premium-secondary text-xs"
                     >
                       Osveži API token
                     </button>
                   </div>
-                  <p className="text-[10px] text-text-muted">
+                  <p className="text-[10px] text-text-muted leading-relaxed">
                     Ova dugmad koriste samo vaš lokalni eon_api.json šablon. Ako API nije popunjen, možete i dalje koristiti lokalne kataloge i direktne media URL-ove.
                   </p>
                 </div>
 
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4">
-                  <h3 className="font-bold text-base flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-indigo-400" />
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-green-card glow-card-premium">
+                  <h3 className="font-extrabold text-base flex items-center gap-2 text-white border-b border-white/[0.04] pb-3">
+                    <FileText className="w-5 h-5 text-emerald-400" />
                     Lokalne datoteke
                   </h3>
                   <div className="flex flex-col gap-2">
-                    <span className={`badge ${deviceWvdInfo?.found ? "badge-connected" : "badge-missing"}`}>
-                      {deviceWvdInfo?.found ? "device.wvd pronađen" : "device.wvd nije podešen"}
+                    <span className={`badge flex items-center gap-1 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-bold px-2 py-0.5 rounded text-[10px] w-max ${deviceWvdInfo?.found ? "badge-connected" : "badge-missing"}`}>
+                      {deviceWvdInfo?.found ? "✓ device.wvd pronađen" : "✗ device.wvd nije podešen"}
                     </span>
                     <input
                       type="text"
                       value={binariesPaths.device_wvd || ""}
                       onChange={(e) => setBinariesPaths({ ...binariesPaths, device_wvd: e.target.value })}
                       placeholder="D:\ProjektiApp\videodownloadservisi\device.wvd"
-                      className="font-mono text-xs"
+                      className="font-mono text-xs input-premium"
+                      style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                     />
-                    <button onClick={handleSaveDeviceWvdPath} className="btn btn-secondary text-xs">
+                    <button onClick={handleSaveDeviceWvdPath} className="btn btn-premium-secondary text-xs w-full">
                       Sačuvaj device.wvd
                     </button>
                   </div>
-                  <div className="border-t border-glass pt-4 text-[10px] text-text-muted font-mono break-all">
-                    Katalog kanala: {eonCatalogPath("eon_channels.json")}
-                    <br />
-                    Katalog serija: {eonCatalogPath("eon_series.json")}
-                    <br />
-                    API šablon: {eonCatalogPath("eon_api.json")}
+                  <div className="border-t border-white/[0.04] pt-4 text-[10px] text-text-muted font-mono flex flex-col gap-1.5 leading-normal">
+                    <span>Katalog kanala: <span className="text-text-secondary select-all">{eonCatalogPath("eon_channels.json")}</span></span>
+                    <span>Katalog serija: <span className="text-text-secondary select-all">{eonCatalogPath("eon_series.json")}</span></span>
+                    <span>API šablon: <span className="text-text-secondary select-all">{eonCatalogPath("eon_api.json")}</span></span>
                   </div>
-                  <button onClick={initEonCatalogs} className="btn btn-secondary text-xs">
+                  <button onClick={initEonCatalogs} className="btn btn-premium-secondary text-xs w-full">
                     Napravi početne katalog fajlove
                   </button>
                 </div>
@@ -2549,50 +2692,70 @@ export default function App() {
         {activeTab === "rts" && (
           <div key="rts" className="tab-content">
             <div className="tab-page-header tab-header-rts mb-8">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#f43f5e,#e11d48)"}}>
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#f43f5e,#e11d48)"}}>
                 <Radio style={{width:24,height:24,color:"white"}} />
               </div>
-              <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-                  <Radio className="w-6 h-6 text-rose-500" /> RTS Planeta
-                </h2>
+              <div style={{flex:1}}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                    <Radio className="w-6 h-6 text-rose-500" /> RTS Planeta
+                  </h2>
+                  <span className="badge flex items-center gap-1.5 bg-rose-500/10 border-rose-500/30 text-rose-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+                    <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+                  </span>
+                </div>
                 <p className="text-text-secondary text-sm">Preuzmite filmove i epizode serija sa RTS Planeta platforme. Podržava Widevine L3 dekripciju.</p>
-                <p className="text-xs text-text-muted mt-1">Primeri linkova: <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">rtsplaneta.rs/sr_lat/serial/...</code> ili <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">.../film/...</code></p>
+                <p className="text-xs text-text-muted mt-1.5">Primeri linkova: <code className="font-mono text-rose-400 bg-white/[0.04] px-1.5 py-0.5 rounded">rtsplaneta.rs/sr_lat/serial/...</code> ili <code className="font-mono text-rose-400 bg-white/[0.04] px-1.5 py-0.5 rounded">.../film/...</code></p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               
-              <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+              <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-rose-card glow-card-premium">
                 <div>
                   <label>URL Sadržaja sa RTS Planete</label>
-                  <input
-                    type="text"
-                    placeholder="npr. https://rtsplaneta.rs/sr_lat/serial/4276399/ranjeni-orao"
-                    value={rtsTarget}
-                    onChange={(e) => setRtsTarget(e.target.value)}
-                  />
+                  <div className="password-wrapper">
+                    <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                    <input
+                      type="text"
+                      placeholder="npr. https://rtsplaneta.rs/sr_lat/serial/4276399/ranjeni-orao"
+                      value={rtsTarget}
+                      onChange={(e) => setRtsTarget(e.target.value)}
+                      className="input-premium pl-11"
+                      style={{"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"} as any}
+                    />
+                  </div>
                   <p className="text-[10px] text-text-muted mt-1.5">Unesite link ka epizodi ili glavnoj seriji.</p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label>Početna Epizoda (opciono)</label>
-                    <input
-                      type="number"
-                      placeholder="npr. 1"
-                      value={rtsStartEp}
-                      onChange={(e) => setRtsStartEp(e.target.value)}
-                    />
+                    <div className="password-wrapper">
+                      <Hash className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type="number"
+                        placeholder="npr. 1"
+                        value={rtsStartEp}
+                        onChange={(e) => setRtsStartEp(e.target.value)}
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"} as any}
+                      />
+                    </div>
                   </div>
                   <div>
                     <label>Krajnja Epizoda (opciono)</label>
-                    <input
-                      type="number"
-                      placeholder="npr. 5"
-                      value={rtsEndEp}
-                      onChange={(e) => setRtsEndEp(e.target.value)}
-                    />
+                    <div className="password-wrapper">
+                      <Hash className="absolute left-4 text-text-muted w-4 h-4" />
+                      <input
+                        type="number"
+                        placeholder="npr. 5"
+                        value={rtsEndEp}
+                        onChange={(e) => setRtsEndEp(e.target.value)}
+                        className="input-premium pl-11"
+                        style={{"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"} as any}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -2609,7 +2772,13 @@ export default function App() {
                 <button
                   onClick={startRtsDownload}
                   disabled={!rtsTarget}
-                  className="btn btn-primary w-full py-4"
+                  className="btn btn-premium-primary w-full py-4 text-white font-bold"
+                  style={{
+                    "--btn-grad-start": "#f43f5e",
+                    "--btn-grad-end": "#e11d48",
+                    "--btn-glow": "rgba(244,63,94,0.25)",
+                    "--btn-glow-hover": "rgba(244,63,94,0.45)"
+                  } as any}
                 >
                   <Download className="w-5 h-5" />
                   Započni Preuzimanje
@@ -2618,49 +2787,71 @@ export default function App() {
 
               {/* Status details */}
               <div className="flex flex-col gap-6">
-                <div className="glass-panel p-6 rounded-xl border border-glass">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
-                    <User className="w-5 h-5 text-indigo-400" />
+                <div className="glass-panel p-6 rounded-xl border border-glass glow-rose-card glow-card-premium">
+                  <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
+                    <User className="w-5 h-5 text-rose-400" />
                     Kredencijali
                   </h3>
                   
                   {status?.services.rtsplaneta.authenticated ? (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-connected">Povezano</span>
-                      <p className="text-sm text-text-secondary">E-mail nalog je registrovan i spreman.</p>
+                      <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max" style={{animation: "pulseGlowBrighter 2s infinite", "--glow-color": "rgba(16, 185, 129, 0.2)"} as any}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span> POVEZAN NALOG
+                      </span>
+                      <div className="flex flex-col gap-1.5 border-t border-white/[0.03] pt-3">
+                        <p className="text-xs font-bold text-text-secondary">E-mail adresa:</p>
+                        <p className="text-sm font-semibold text-white truncate bg-black/20 p-2 rounded border border-white/[0.02]">{status.services.rtsplaneta.email}</p>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-warning">Nedostaju</span>
-                      <p className="text-xs text-text-secondary">Sačuvajte vaše RTS kredencijale u "Postavkama".</p>
+                      <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NEDOSTAJU
+                      </span>
+                      <p className="text-xs text-text-secondary leading-relaxed mt-1">Sačuvajte vaše RTS kredencijale u <strong>"Postavkama"</strong> da biste otključali RTS preuzimanja.</p>
                     </div>
                   )}
                 </div>
 
                 {/* CDM alert */}
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
-                  <h4 className="font-bold text-sm flex items-center gap-2 text-amber-500">
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3 glow-rose-card glow-card-premium">
+                  <h4 className="font-extrabold text-sm flex items-center gap-2 text-rose-400 border-b border-white/[0.04] pb-3">
                     <ShieldAlert className="w-4 h-4" />
                     Widevine L3 Potreban
                   </h4>
-                  <p className="text-xs text-text-secondary">
-                    RTS Planeta koristi Widevine enkripciju. Proverite da li imate sačuvan <code className="font-mono text-indigo-400 bg-white/[0.04] px-1 py-0.5 rounded">device.wvd</code> fajl u folderu binaries ili rootu aplikacije.
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    RTS Planeta koristi Widevine enkripciju. Proverite da li imate sačuvan <code className="font-mono text-rose-400 bg-white/[0.04] px-1.5 py-0.5 rounded">device.wvd</code> fajl u folderu binaries ili rootu aplikacije za automatsko dešifrovanje strimova.
                   </p>
                 </div>
 
                 {/* RTS Tutorial Box */}
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
-                  <h4 className="font-bold text-sm flex items-center gap-2 text-indigo-400">
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3 glow-rose-card glow-card-premium">
+                  <h4 className="font-extrabold text-sm flex items-center gap-2 text-rose-400 border-b border-white/[0.04] pb-3">
                     <Info className="w-4 h-4" />
                     Kako preuzeti sa RTS-a:
                   </h4>
-                  <ol className="text-xs text-text-secondary list-decimal pl-4 flex flex-col gap-2">
-                    <li>Prijavite se na sajt <a href="https://rtsplaneta.rs" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">rtsplaneta.rs</a>.</li>
-                    <li>Kopirajte URL adresu filma ili serije.</li>
-                    <li>Nalepite link u polje sa leve strane.</li>
-                    <li>Unesite raspon epizoda po potrebi.</li>
-                    <li>Kliknite "Započni Preuzimanje" za preuzimanje epizoda.</li>
-                  </ol>
+                  <ul className="text-xs text-text-secondary flex flex-col gap-3">
+                    <li className="flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                      <span>Prijavite se na sajt <a href="https://rtsplaneta.rs" target="_blank" rel="noreferrer" className="text-rose-400 hover:underline font-bold">rtsplaneta.rs</a>.</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                      <span>Kopirajte URL adresu filma ili serije.</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                      <span>Nalepite link u polje sa leve strane.</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">4</span>
+                      <span>Unesite raspon epizoda po potrebi.</span>
+                    </li>
+                    <li className="flex items-start gap-2.5">
+                      <span className="w-5 h-5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 font-extrabold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">5</span>
+                      <span>Kliknite "Započni Preuzimanje" za preuzimanje epizoda.</span>
+                    </li>
+                  </ul>
                 </div>
               </div>
             </div>
@@ -2671,13 +2862,18 @@ export default function App() {
         {activeTab === "hbo" && (
           <div key="hbo" className="tab-content">
             <div className="tab-page-header tab-header-hbo mb-6">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#9333ea,#7e22ce)"}}>
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#9333ea,#7e22ce)"}}>
                 <Clapperboard style={{width:24,height:24,color:"white"}} />
               </div>
-              <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-                  <Clapperboard className="w-6 h-6 text-purple-400" /> HBO Max
-                </h2>
+              <div style={{flex:1}}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                    <Clapperboard className="w-6 h-6 text-purple-400" /> HBO Max
+                  </h2>
+                  <span className="badge flex items-center gap-1.5 bg-purple-500/10 border-purple-500/30 text-purple-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+                    <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+                  </span>
+                </div>
                 <p className="text-text-secondary text-sm">Prijava uređaja, preuzimanje po Video ID-u, ili Bypass Mode sa direktnim MPD/License URL-ovima.</p>
               </div>
             </div>
@@ -2714,9 +2910,9 @@ export default function App() {
                 {!hboDirectMode ? (
                   <>
                     {/* Login trigger card */}
-                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-purple-card glow-card-premium">
                       <h3 className="font-extrabold text-lg text-white">Prijava (Login)</h3>
-                      <p className="text-xs text-text-secondary">
+                      <p className="text-xs text-text-secondary leading-relaxed">
                         HBO koristi autentifikaciju preko koda. Klikom na dugme pokrećete sesiju u pozadini koja će izgenerisati kod za prijavu. Detaljan kod i link ćete videti otvaranjem <strong>Logs</strong> dugmeta na kartici prijave u redu preuzimanja!
                       </p>
                       
@@ -2733,7 +2929,7 @@ export default function App() {
                         
                         <button
                           onClick={startHboLogin}
-                          className="btn btn-secondary btn-align-select px-6"
+                          className="btn btn-premium-secondary btn-align-select px-6"
                         >
                           Pokreni Prijavu
                         </button>
@@ -2741,17 +2937,22 @@ export default function App() {
                     </div>
 
                     {/* Standard Downloader Form */}
-                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-purple-card glow-card-premium">
                       <h3 className="font-extrabold text-lg text-white">Preuzimanje Videa (po ID-u)</h3>
                       
                       <div>
                         <label>Video ID (Zadnji deo URL-a)</label>
-                        <input
-                          type="text"
-                          placeholder="npr. de4c9160-1b67-4c1e-8cad-e7b0e42c5fdf"
-                          value={hboTarget}
-                          onChange={(e) => setHboTarget(e.target.value)}
-                        />
+                        <div className="password-wrapper">
+                          <Film className="absolute left-4 text-text-muted w-4 h-4" />
+                          <input
+                            type="text"
+                            placeholder="npr. de4c9160-1b67-4c1e-8cad-e7b0e42c5fdf"
+                            value={hboTarget}
+                            onChange={(e) => setHboTarget(e.target.value)}
+                            className="input-premium pl-11"
+                            style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                          />
+                        </div>
                         <p className="text-[10px] text-text-muted mt-1.5">
                           URL na HBO Max izgleda ovako: <code className="font-mono bg-white/[0.04] px-1 py-0.5 rounded text-indigo-400">.../watch/&lt;id1&gt;/&lt;id2&gt;</code>. Kopirajte samo <code className="font-mono text-indigo-400 font-bold">&lt;id2&gt;</code> (zadnji UUID).
                         </p>
@@ -2759,18 +2960,29 @@ export default function App() {
 
                       <div>
                         <label>Jezici za titlove (odvojeni zarezom)</label>
-                        <input
-                          type="text"
-                          placeholder="npr. sr,hr,mk,bs,sl ili 'none' za bez titlova"
-                          value={hboSubs}
-                          onChange={(e) => setHboSubs(e.target.value)}
-                        />
+                        <div className="password-wrapper">
+                          <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                          <input
+                            type="text"
+                            placeholder="npr. sr,hr,mk,bs,sl ili 'none' za bez titlova"
+                            value={hboSubs}
+                            onChange={(e) => setHboSubs(e.target.value)}
+                            className="input-premium pl-11"
+                            style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                          />
+                        </div>
                       </div>
 
                       <button
                         onClick={startHboDownload}
                         disabled={!hboTarget}
-                        className="btn btn-primary w-full py-4"
+                        className="btn btn-premium-primary w-full py-4 text-white font-bold"
+                        style={{
+                          "--btn-grad-start": "#9333ea",
+                          "--btn-grad-end": "#7e22ce",
+                          "--btn-glow": "rgba(147,51,234,0.25)",
+                          "--btn-glow-hover": "rgba(147,51,234,0.45)"
+                        } as any}
                       >
                         <Download className="w-5 h-5" />
                         Započni Preuzimanje
@@ -2779,7 +2991,7 @@ export default function App() {
                   </>
                 ) : (
                   /* ─── BYPASS / DIRECT MODE ─── */
-                  <div className="glass-panel p-8 rounded-xl border border-indigo-500/40 flex flex-col gap-6" style={{background: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.06) 100%)"}}>
+                  <div className="glass-panel p-8 rounded-xl border border-indigo-500/40 flex flex-col gap-6 glow-purple-card glow-card-premium" style={{background: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.06) 100%)"}}>
                     <div className="flex items-center gap-3 mb-2">
                       <span className="text-2xl">⚡</span>
                       <div>
@@ -2790,20 +3002,24 @@ export default function App() {
 
                     <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex gap-2">
                       <span className="text-base">💡</span>
-                      <div>
+                      <div className="leading-relaxed">
                         <strong>Kako do URL-ova?</strong> Otvorite DevTools (F12) → Network tab → pokrenite video na max.com → filtrirajte po <code className="font-mono bg-white/10 px-1 rounded">.mpd</code> za Manifest, i po <code className="font-mono bg-white/10 px-1 rounded">widevine</code> ili <code className="font-mono bg-white/10 px-1 rounded">license</code> za License URL.
                       </div>
                     </div>
 
                     <div>
                       <label>📄 Manifest URL (.mpd)</label>
-                      <input
-                        type="url"
-                        placeholder="https://...cdn.max.com/.../.mpd?..."
-                        value={hboManifestUrl}
-                        onChange={(e) => setHboManifestUrl(e.target.value)}
-                        className={hboManifestUrl && !hboManifestUrl.includes('mpd') ? 'border-amber-500/50' : ''}
-                      />
+                      <div className="password-wrapper">
+                        <FileText className="absolute left-4 text-text-muted w-4 h-4" />
+                        <input
+                          type="url"
+                          placeholder="https://...cdn.max.com/.../.mpd?..."
+                          value={hboManifestUrl}
+                          onChange={(e) => setHboManifestUrl(e.target.value)}
+                          className={`input-premium pl-11 ${hboManifestUrl && !hboManifestUrl.includes('mpd') ? 'border-amber-500/50' : ''}`}
+                          style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                        />
+                      </div>
                       {hboManifestUrl && !hboManifestUrl.toLowerCase().includes('mpd') && (
                         <p className="text-[10px] text-amber-400 mt-1">⚠ URL ne izgleda kao .mpd manifest – proverite URL</p>
                       )}
@@ -2811,39 +3027,59 @@ export default function App() {
 
                     <div>
                       <label>🔑 License URL (Widevine)</label>
-                      <input
-                        type="url"
-                        placeholder="https://widevine.any-any.prd.max.com/widevine/v1/license"
-                        value={hboLicenseUrl}
-                        onChange={(e) => setHboLicenseUrl(e.target.value)}
-                      />
+                      <div className="password-wrapper">
+                        <Lock className="absolute left-4 text-text-muted w-4 h-4" />
+                        <input
+                          type="url"
+                          placeholder="https://widevine.any-any.prd.max.com/widevine/v1/license"
+                          value={hboLicenseUrl}
+                          onChange={(e) => setHboLicenseUrl(e.target.value)}
+                          className="input-premium pl-11"
+                          style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                        />
+                      </div>
                     </div>
 
                     <div>
                       <label>📝 Naslov (opciono)</label>
-                      <input
-                        type="text"
-                        placeholder="npr. Ime filma ili serije (ostavite prazno za auto)"
-                        value={hboDirectTitle}
-                        onChange={(e) => setHboDirectTitle(e.target.value)}
-                      />
+                      <div className="password-wrapper">
+                        <Info className="absolute left-4 text-text-muted w-4 h-4" />
+                        <input
+                          type="text"
+                          placeholder="npr. Ime filma ili serije (ostavite prazno za auto)"
+                          value={hboDirectTitle}
+                          onChange={(e) => setHboDirectTitle(e.target.value)}
+                          className="input-premium pl-11"
+                          style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                        />
+                      </div>
                     </div>
 
                     <div>
                       <label>Jezici za titlove (odvojeni zarezom)</label>
-                      <input
-                        type="text"
-                        placeholder="npr. sr,hr,mk,bs,sl ili 'none'"
-                        value={hboDirectSubs}
-                        onChange={(e) => setHboDirectSubs(e.target.value)}
-                      />
+                      <div className="password-wrapper">
+                        <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                        <input
+                          type="text"
+                          placeholder="npr. sr,hr,mk,bs,sl ili 'none'"
+                          value={hboDirectSubs}
+                          onChange={(e) => setHboDirectSubs(e.target.value)}
+                          className="input-premium pl-11"
+                          style={{"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"} as any}
+                        />
+                      </div>
                     </div>
 
                     <button
                       onClick={startHboDirectDownload}
                       disabled={!hboManifestUrl.trim() || !hboLicenseUrl.trim()}
-                      className="btn btn-primary w-full py-4"
-                      style={{background: "linear-gradient(135deg, #6366f1, #8b5cf6)"}}
+                      className="btn btn-premium-primary w-full py-4 text-white font-bold"
+                      style={{
+                        "--btn-grad-start": "#6366f1",
+                        "--btn-grad-end": "#8b5cf6",
+                        "--btn-glow": "rgba(99,102,241,0.25)",
+                        "--btn-glow-hover": "rgba(139,92,246,0.45)"
+                      } as any}
                     >
                       <Download className="w-5 h-5" />
                       Pokreni Bypass Preuzimanje
@@ -2854,43 +3090,59 @@ export default function App() {
 
               {/* Account / status details */}
               <div className="flex flex-col gap-6">
-                <div className="glass-panel p-6 rounded-xl border border-glass">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
-                    <User className="w-5 h-5 text-indigo-400" />
+                <div className="glass-panel p-6 rounded-xl border border-glass glow-purple-card glow-card-premium">
+                  <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
+                    <User className="w-5 h-5 text-purple-400" />
                     Autentifikacija
                   </h3>
                   
                   {status?.services.hbomax.authenticated ? (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-connected">Prijavljen ✓</span>
-                      <p className="text-xs text-text-secondary">Token je prisutan na sistemu. HBO downloads bi trebalo da rade normalno.</p>
+                      <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max" style={{animation: "pulseGlowBrighter 2s infinite", "--glow-color": "rgba(16, 185, 129, 0.2)"} as any}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span> PRIJAVLJEN PROFIL
+                      </span>
+                      <p className="text-xs text-text-secondary leading-relaxed">Token za prijavu je detektovan na sistemu. Preuzimanje će raditi automatski.</p>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      <span className="badge badge-warning">Nema tokena</span>
-                      <p className="text-xs text-text-secondary">Pokrenite proces prijave sa leve strane da kreirate HBO Max token.</p>
+                      <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NEMA TOKENA
+                      </span>
+                      <p className="text-xs text-text-secondary leading-relaxed mt-1">Pokrenite proces prijave sa leve strane da biste kreirali HBO Max token.</p>
                     </div>
                   )}
 
                   {/* Show active market */}
-                  <div className="mt-4 pt-4 border-t border-glass flex items-center gap-2">
+                  <div className="mt-4 pt-4 border-t border-white/[0.04] flex items-center gap-2">
                     <Globe className="w-4 h-4 text-text-muted" />
-                    <span className="text-xs text-text-secondary">Market: <span className="font-bold text-white uppercase">{hboMarket}</span></span>
+                    <span className="text-xs text-text-secondary">Tržište (Market): <span className="font-bold text-white uppercase">{hboMarket}</span></span>
                   </div>
                 </div>
 
                 {/* Direct mode info card */}
                 {hboDirectMode && (
-                  <div className="glass-panel p-6 rounded-xl border border-indigo-500/30">
-                    <h3 className="font-bold text-base mb-3 flex items-center gap-2">
-                      <span className="text-indigo-400">⚡</span>
+                  <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3 glow-purple-card glow-card-premium">
+                    <h3 className="font-extrabold text-base mb-3 flex items-center gap-2 text-white border-b border-white/[0.04] pb-3">
+                      <Zap className="w-5 h-5 text-purple-400 animate-pulse" />
                       Bypass Mode Info
                     </h3>
-                    <ul className="text-xs text-text-secondary space-y-2">
-                      <li>✅ <strong className="text-white">Ne treba login</strong> – direktno koristite URL-ove</li>
-                      <li>✅ Radi <strong className="text-white">bez tokena</strong> u lokalnom keju</li>
-                      <li>⚠ URL-ovi <strong className="text-amber-300">isteknu brzo</strong> – koristite odmah!</li>
-                      <li>🔑 Potreban je CDM (.wvd) za dekripciju</li>
+                    <ul className="text-xs text-text-secondary flex flex-col gap-2.5">
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span><strong className="text-white">Ne treba login</strong> – rad sa sirovim URL-ovima</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Radi <strong className="text-white">bez sesije/tokena</strong> u fajlovima</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                        <span>URL-ovi <strong className="text-amber-300">brzo isteknu</strong> – kopirajte i pokrenite odmah!</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Potreban je CDM (.wvd) za dekripciju</span>
+                      </li>
                     </ul>
                   </div>
                 )}
@@ -2903,10 +3155,10 @@ export default function App() {
         {activeTab === "settings" && (
           <div key="settings" className="tab-content">
             <div className="tab-page-header tab-header-settings mb-8">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#6366f1,#4f46e5)"}}>
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#6366f1,#4f46e5)"}}>
                 <Settings style={{width:24,height:24,color:"white"}} />
               </div>
-              <div>
+              <div style={{flex:1}}>
                 <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
                   <Settings className="w-6 h-6 text-indigo-400" /> Postavke Aplikacije
                 </h2>
@@ -2918,8 +3170,8 @@ export default function App() {
 
               {/* F3: Services Authentication Status Overview */}
               {status && (
-                <div className="glass-panel p-6 rounded-xl border border-glass">
-                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
+                <div className="glass-panel p-6 rounded-xl border border-glass glow-indigo-card glow-card-premium">
+                  <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
                     <Server className="w-4 h-4 text-indigo-400" />
                     Pregled Autentifikacije Servisa
                   </h3>
@@ -2948,7 +3200,7 @@ export default function App() {
               )}
 
               {/* Folder and Binaries Status */}
-              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium">
                 <h3 className="font-extrabold text-xl text-indigo-400 flex items-center gap-2">
                   <Settings className="w-5 h-5" />
                   Sistemska Podešavanja
@@ -2960,12 +3212,13 @@ export default function App() {
                     type="text"
                     value={outputDir}
                     onChange={(e) => setOutputDir(e.target.value)}
-                    className="input-premium"
+                    className="input-premium font-mono text-xs truncate"
+                    style={{"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"} as any}
                   />
                   <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
                 </div>
 
-                <div className="border-t border-glass pt-6">
+                <div className="border-t border-white/[0.04] pt-6">
                   <h4 className="font-bold text-sm text-white mb-4">Detektovani Eksterni Alati & CDM</h4>
                   
                   <div className="exec-monitor-grid">
@@ -2985,11 +3238,17 @@ export default function App() {
                 <button
                   onClick={handleSaveConfig}
                   disabled={saveFeedback}
-                  className={`btn self-end transition-all ${saveFeedback ? "bg-emerald-600 text-white border border-emerald-500 shadow-emerald" : "btn-primary"}`}
+                  className={`btn-premium self-end transition-all ${saveFeedback ? "bg-emerald-600 text-white border border-emerald-500 shadow-emerald" : "btn-premium-primary"}`}
+                  style={{
+                    "--btn-grad-start": "#6366f1",
+                    "--btn-grad-end": "#4f46e5",
+                    "--btn-glow": "rgba(99,102,241,0.25)",
+                    "--btn-glow-hover": "rgba(99,102,241,0.45)"
+                  } as any}
                 >
                   {saveFeedback ? (
                     <span className="flex items-center gap-2">
-                      <Check className="w-4 h-4" />
+                      <Check className="w-4 h-4 animate-bounce" />
                       Podešavanja sačuvana!
                     </span>
                   ) : (
@@ -2999,9 +3258,9 @@ export default function App() {
               </div>
 
               {/* Session / Cookie Import Panel to bypass CAPTCHA */}
-              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-amber-card glow-card-premium">
                 <h3 className="font-extrabold text-xl text-amber-400 flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-amber-400" />
+                  <ShieldAlert className="w-5 h-5 text-amber-400 animate-pulse" />
                   Uvoz Sesije / Kolačića (Bypass CAPTCHA)
                 </h3>
                 <p className="text-sm text-text-secondary leading-relaxed m-0">
@@ -3019,7 +3278,7 @@ export default function App() {
                       Najnovije verzije pretraživača (Google Chrome, Edge) imaju novu naprednu zaštitu (v20 Application-Bound Encryption) koja blokira spoljne programe da direktno čitaju njihove fajlove.
                       Zato smo napravili <strong>magičnu skriptu od jedne sekunde</strong> koja sama pronalazi i kopira Vaš token!
                     </p>
-                    <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-xs text-text-secondary m-0">
+                    <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-xs text-text-secondary m-0 leading-normal">
                       <li>Otvorite tab u pretraživaču gde gledate <strong>Max</strong> (ili hbomax.com).</li>
                       <li>Pritisnite <strong>F12</strong> (ili desni klik -&gt; <em>Ispitaj / Inspect</em>) i kliknite na karticu <strong>Console</strong> (Konzola).</li>
                       <li>Nalepite liniju koda ispod i pritisnite <strong>Enter</strong>:</li>
@@ -3063,7 +3322,13 @@ export default function App() {
                   <button
                     onClick={handleImportSession}
                     disabled={importLoading || !importSessionData.trim()}
-                    className="btn btn-primary self-end gap-2"
+                    className="btn btn-premium-primary self-end gap-2"
+                    style={{
+                      "--btn-grad-start": "#fbbf24",
+                      "--btn-grad-end": "#d97706",
+                      "--btn-glow": "rgba(251,191,36,0.25)",
+                      "--btn-glow-hover": "rgba(251,191,36,0.45)"
+                    } as any}
                   >
                     {importLoading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -3074,14 +3339,15 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
-                <h3 className="font-extrabold text-xl text-indigo-400">Upravljanje Kredencijalima</h3>
+
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium">
+                <h3 className="font-extrabold text-xl text-indigo-400 border-b border-white/[0.04] pb-3">Upravljanje Kredencijalima</h3>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   
                   {/* Voyo Login */}
-                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass">
-                    <h4 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-orange-card glow-card-premium transition-all hover:bg-white/[0.03]">
+                    <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
                       <Tv className="w-4 h-4 service-voyo" />
                       Voyo RS prijava
                     </h4>
@@ -3121,15 +3387,21 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword })}
-                      className="btn btn-secondary text-xs"
+                      className="btn btn-premium-primary text-xs w-full"
+                      style={{
+                        "--btn-grad-start": "#f97316",
+                        "--btn-grad-end": "#ea580c",
+                        "--btn-glow": "rgba(249,115,22,0.25)",
+                        "--btn-glow-hover": "rgba(249,115,22,0.45)"
+                      } as any}
                     >
                       Prijavi se na Voyo
                     </button>
                   </div>
 
                   {/* HRTi Credentials */}
-                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass">
-                    <h4 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-cyan-card glow-card-premium transition-all hover:bg-white/[0.03]">
+                    <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
                       <Film className="w-4 h-4 service-hrti" />
                       HRTi prijava
                     </h4>
@@ -3169,15 +3441,21 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => submitLogin("hrti", { email: hrtiEmail, password: hrtiPassword })}
-                      className="btn btn-secondary text-xs"
+                      className="btn btn-premium-primary text-xs w-full"
+                      style={{
+                        "--btn-grad-start": "#06b6d4",
+                        "--btn-grad-end": "#0284c7",
+                        "--btn-glow": "rgba(6,182,212,0.25)",
+                        "--btn-glow-hover": "rgba(6,182,212,0.45)"
+                      } as any}
                     >
                       Prijavi se na HRTi
                     </button>
                   </div>
 
                   {/* EON device credentials */}
-                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass lg:col-span-2">
-                    <h4 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass lg:col-span-2 glow-green-card glow-card-premium transition-all hover:bg-white/[0.03]">
+                    <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
                       <Play className="w-4 h-4 service-eon" />
                       EON TV - Uređaj i Nalog
                     </h4>
@@ -3218,16 +3496,16 @@ export default function App() {
                       </div>
                       <div>
                         <label>Device Serial (Serijski Broj)</label>
-                        <input type="text" value={eonSerial} onChange={(e) => setEonSerial(e.target.value)} placeholder="kopiraj iz payload-a" className="input-premium" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
-                        <p className="text-[10px] text-text-muted mt-1">Vrednost koju vidite kao device-serial u EON browser network payload-u.</p>
+                        <input type="text" value={eonSerial} onChange={(e) => setEonSerial(e.target.value)} placeholder="kopiraj iz payload-a" className="input-premium font-mono text-xs" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
+                        <p className="text-[10px] text-text-muted mt-1.5">Vrednost koju vidite kao device-serial u EON browser network payload-u.</p>
                       </div>
                       <div>
                         <label>Device Number (Broj Uređaja)</label>
-                        <input type="text" value={eonNumber} onChange={(e) => setEonNumber(e.target.value)} placeholder="kopiraj iz response-a" className="input-premium" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
-                        <p className="text-[10px] text-text-muted mt-1">Vrednost koju vidite kao device-number u response-u.</p>
+                        <input type="text" value={eonNumber} onChange={(e) => setEonNumber(e.target.value)} placeholder="kopiraj iz response-a" className="input-premium font-mono text-xs" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
+                        <p className="text-[10px] text-text-muted mt-1.5">Vrednost koju vidite kao device-number u response-u.</p>
                       </div>
                     </div>
-                    <div className="border-t border-glass pt-4">
+                    <div className="border-t border-white/[0.04] pt-4 mt-2">
                       <label>device.wvd putanja</label>
                       <div className="flex flex-col md:flex-row gap-3">
                         <input
@@ -3238,27 +3516,33 @@ export default function App() {
                           className="font-mono text-xs flex-1 input-premium"
                           style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                         />
-                        <button onClick={handleSaveDeviceWvdPath} className="btn btn-secondary text-xs">
-                          Sacuvaj WVD
+                        <button onClick={handleSaveDeviceWvdPath} className="btn btn-premium-secondary text-xs">
+                          Sačuvaj WVD
                         </button>
                       </div>
                       <p className="text-[10px] text-text-muted mt-1.5">
-                        Status: {deviceWvdInfo?.found ? "pronadjen" : "nije pronadjen"} {deviceWvdInfo?.path ? `(${deviceWvdInfo.path})` : ""}
+                        Status: {deviceWvdInfo?.found ? "pronađen ✓" : "nije pronađen ✗"} {deviceWvdInfo?.path ? `(${deviceWvdInfo.path})` : ""}
                       </p>
                     </div>
                     <button
                       onClick={() => submitLogin("eon", { username: eonUsername, password: eonPassword, serial: eonSerial, number: eonNumber })}
                       disabled={eonStatus?.engine_installed === false}
-                      className="btn btn-secondary text-xs mt-2 self-start"
+                      className="btn btn-premium-primary text-xs mt-2 self-start"
+                      style={{
+                        "--btn-grad-start": "#10b981",
+                        "--btn-grad-end": "#059669",
+                        "--btn-glow": "rgba(16,185,129,0.25)",
+                        "--btn-glow-hover": "rgba(16,185,129,0.45)"
+                      } as any}
                       title={eonStatus?.engine_installed === false ? "Dodajte eon_downloader.py u root aplikacije." : undefined}
                     >
-                      {eonStatus?.engine_installed === false ? "EON engine nedostaje" : "Sacuvaj EON uredjaj"}
+                      {eonStatus?.engine_installed === false ? "EON engine nedostaje" : "Sačuvaj EON uređaj"}
                     </button>
                   </div>
 
                   {/* RTS Planeta */}
-                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass">
-                    <h4 className="font-extrabold text-base text-white flex items-center gap-2">
+                  <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-rose-card glow-card-premium transition-all hover:bg-white/[0.03]">
+                    <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
                       <Radio className="w-4 h-4 service-rts" />
                       RTS Planeta prijava
                     </h4>
@@ -3298,7 +3582,13 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => submitLogin("rts", { email: rtsEmail, password: rtsPassword })}
-                      className="btn btn-secondary text-xs"
+                      className="btn btn-premium-primary text-xs w-full"
+                      style={{
+                        "--btn-grad-start": "#f43f5e",
+                        "--btn-grad-end": "#e11d48",
+                        "--btn-glow": "rgba(244,63,94,0.25)",
+                        "--btn-glow-hover": "rgba(244,63,94,0.45)"
+                      } as any}
                     >
                       Sačuvaj RTS Kredencijale
                     </button>
