@@ -33,6 +33,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Initializing background daemons...")
+    asyncio.create_task(queue_manager.scheduler_daemon_loop())
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
@@ -170,6 +175,38 @@ async def sniffer_detect(data: SnifferPayload):
         title=data.title
     )
     return {"success": True}
+
+class ScheduledRecordingRequest(BaseModel):
+    channel_name: str
+    title: str
+    start_time: str
+    duration: int
+
+@app.post("/api/scheduler/schedule")
+async def schedule_recording(req: ScheduledRecordingRequest):
+    """Schedule a new IPTV recording."""
+    task_id = await queue_manager.add_scheduled_recording(
+        channel_name=req.channel_name,
+        title=req.title,
+        start_time=req.start_time,
+        duration=req.duration
+    )
+    return {"success": True, "task_id": task_id}
+
+@app.get("/api/scheduler/list")
+def list_scheduled():
+    """List all scheduled IPTV recordings."""
+    return queue_manager.list_scheduled_recordings()
+
+class CancelScheduledRequest(BaseModel):
+    id: str
+
+@app.post("/api/scheduler/cancel")
+async def cancel_scheduled(req: CancelScheduledRequest):
+    """Cancel a pending scheduled recording."""
+    await queue_manager.cancel_scheduled_recording(req.id)
+    return {"success": True}
+
 
 
 # ── Smart Detection & Session Sync Routes ──────────────────────────────────────

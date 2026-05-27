@@ -125,6 +125,16 @@ class DownloadDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_recordings (
+                    id TEXT PRIMARY KEY,
+                    channel_name TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    duration INTEGER NOT NULL,
+                    status TEXT DEFAULT 'scheduled'
+                )
+            """)
             conn.commit()
     
     def save_download(self, item: 'DownloadItem'):
@@ -163,6 +173,42 @@ class DownloadDatabase:
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to delete download from database: {e}")
+
+    def save_scheduled(self, item: Dict[str, Any]):
+        """Save a scheduled recording to the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO scheduled_recordings 
+                    (id, channel_name, title, start_time, duration, status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    item["id"], item["channel_name"], item["title"],
+                    item["start_time"], item["duration"], item["status"]
+                ))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to save scheduled recording to database: {e}")
+
+    def load_scheduled(self) -> List[Dict[str, Any]]:
+        """Load all scheduled recordings from the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("SELECT * FROM scheduled_recordings")
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to load scheduled recordings from database: {e}")
+            return []
+
+    def delete_scheduled(self, item_id: str):
+        """Delete a scheduled recording from the database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM scheduled_recordings WHERE id = ?", (item_id,))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to delete scheduled recording from database: {e}")
  
 
 class DownloadItem:
@@ -237,6 +283,7 @@ class DownloadQueueManager:
         await websocket.accept()
         self.active_websockets.add(websocket)
         await self.broadcast_state()
+        await self.broadcast_scheduled()
 
     def unregister_websocket(self, websocket: WebSocket):
         """Unregister a WebSocket connection."""
@@ -283,6 +330,95 @@ class DownloadQueueManager:
         
         for ws in disconnected:
             self.unregister_websocket(ws)
+
+    async def broadcast_scheduled(self):
+        """Broadcast all scheduled recordings to all connected clients."""
+        if not self.active_websockets:
+            return
+        scheduled_list = self.db.load_scheduled()
+        payload = {"type": "scheduled_update", "data": scheduled_list}
+        
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
+    async def add_scheduled_recording(self, channel_name: str, title: str, start_time: str, duration: int) -> str:
+        """Add a new scheduled recording task."""
+        item_id = str(uuid.uuid4())
+        item = {
+            "id": item_id,
+            "channel_name": channel_name,
+            "title": title,
+            "start_time": start_time,
+            "duration": duration,
+            "status": "scheduled"
+        }
+        self.db.save_scheduled(item)
+        logger.info(f"Scheduled EON recording: {title} on {channel_name} at {start_time}")
+        await self.broadcast_scheduled()
+        return item_id
+
+    async def cancel_scheduled_recording(self, item_id: str):
+        """Cancel/delete a scheduled recording task."""
+        self.db.delete_scheduled(item_id)
+        logger.info(f"Cancelled EON scheduled recording: {item_id}")
+        await self.broadcast_scheduled()
+
+    def list_scheduled_recordings(self) -> List[Dict[str, Any]]:
+        """List all EON scheduled recordings."""
+        return self.db.load_scheduled()
+
+    async def scheduler_daemon_loop(self):
+        """Continuously polls the scheduled recordings and triggers tasks when start time is reached."""
+        logger.info("IPTV scheduled recording daemon started!")
+        while True:
+            try:
+                # Load all scheduled items
+                scheduled_items = self.db.load_scheduled()
+                current_time_str = datetime.now().isoformat()
+                
+                # Check for scheduled items that need to start
+                for item in scheduled_items:
+                    if item["status"] == "scheduled" and current_time_str >= item["start_time"]:
+                        logger.info(f"Triggering scheduled recording: {item['title']} on {item['channel_name']}")
+                        
+                        # 1. Update status in db
+                        item["status"] = "completed"
+                        self.db.save_scheduled(item)
+                        
+                        # 2. Build live capture command using EonAdapter
+                        from backend.services.eon_adapter import EonAdapter
+                        try:
+                            cmd = EonAdapter.make_download_cmd(
+                                mode="live",
+                                target=item["channel_name"],
+                                duration=item["duration"],
+                                play=False
+                            )
+                            # 3. Add task to active queue!
+                            await self.add_download(
+                                service="eon",
+                                title=f"DVR Snimanje: {item['title']}",
+                                cmd=cmd
+                            )
+                        except Exception as cmd_err:
+                            logger.error(f"Failed to build DVR command: {cmd_err}")
+                            item["status"] = "failed"
+                            self.db.save_scheduled(item)
+                        
+                        # Broadcast updated scheduler list to clients
+                        await self.broadcast_scheduled()
+            except Exception as loop_err:
+                logger.error(f"Error in DVR scheduler daemon: {loop_err}")
+            
+            await asyncio.sleep(10)
+
 
     async def add_download(self, service: str, title: str, cmd: List[str]) -> str:
         """Add a new download to the queue."""

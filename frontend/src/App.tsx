@@ -436,6 +436,9 @@ export default function App() {
   const [showSnifferToast, setShowSnifferToast] = useState<boolean>(false);
   const [snifferScriptCopied, setSnifferScriptCopied] = useState<boolean>(false);
 
+  // IPTV Scheduler Form State
+  const [scheduledTasks, setScheduledTasks] = useState<any[]>([]);
+
   // HRTi inline download modal (replaces native prompt)
 
   const [hrtiModal, setHrtiModal] = useState<{refId: string; title: string} | null>(null);
@@ -743,6 +746,42 @@ export default function App() {
     setShowSnifferToast(false);
   };
 
+  const fetchScheduledRecordings = async () => {
+    try {
+      const res = await fetch(`${getApiHost()}/api/scheduler/list`);
+      if (res.ok) {
+        const data = await res.json();
+        setScheduledTasks(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch scheduled recordings:", e);
+    }
+  };
+
+  const scheduleEonRecording = async (channelName: string, title: string, startTime: string, durationMinutes: number) => {
+    try {
+      const res = await fetch(`${getApiHost()}/api/scheduler/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_name: channelName,
+          title: title,
+          start_time: startTime,
+          duration: durationMinutes
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`✓ Snimanje zakazano: ${title}`, "success");
+        fetchScheduledRecordings();
+      } else {
+        showToast(data.detail || "Greška pri zakazivanju snimanja.", "error");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    }
+  };
+
   const getApiHost = () =>
     window.location.hostname === "localhost" ? "http://localhost:8000" : "";
 
@@ -767,6 +806,7 @@ export default function App() {
 
   useEffect(() => {
     fetchStatus();
+    fetchScheduledRecordings();
   }, []);
 
   useEffect(() => {
@@ -818,6 +858,8 @@ export default function App() {
             });
             setLatestSniffed({ service, type, url, headers, title });
             setShowSnifferToast(true);
+          } else if (payload.type === "scheduled_update") {
+            setScheduledTasks(payload.data);
           }
         } catch (e) {
           console.error("Failed to parse WS payload:", e);
@@ -2644,15 +2686,83 @@ export default function App() {
                     </button>
                     {eonEpgItems.length > 0 && (
                       <div className="flex flex-col gap-2">
-                        {eonEpgItems.slice(0, 5).map((item, idx) => (
-                          <div key={idx} className="p-3 rounded-lg border border-glass bg-white/[0.02]">
-                            <p className="text-sm font-bold text-white">{item.title || item.name || `Program ${idx + 1}`}</p>
-                            <p className="text-[10px] text-text-muted">{item.start || ""} {item.end ? `- ${item.end}` : ""}</p>
-                            {item.description && <p className="text-xs text-text-secondary mt-1">{item.description}</p>}
-                          </div>
-                        ))}
+                        {eonEpgItems.slice(0, 5).map((item: any, idx) => {
+                          const isFuture = item.start && new Date(item.start) > new Date();
+                          return (
+                            <div key={idx} className="p-3 rounded-lg border border-glass bg-white/[0.02] flex items-center justify-between gap-4">
+                              <div className="flex-1">
+                                <p className="text-sm font-bold text-white">{item.title || item.name || `Program ${idx + 1}`}</p>
+                                <p className="text-[10px] text-text-muted">{item.start || ""} {item.end ? `- ${item.end}` : ""}</p>
+                                {item.description && <p className="text-xs text-text-secondary mt-1">{item.description}</p>}
+                              </div>
+                              {isFuture && (
+                                <button
+                                  onClick={() => {
+                                    const durMin = item.duration_min || 60;
+                                    scheduleEonRecording(eonTarget, item.title || `EON ${eonTarget}`, item.start, durMin);
+                                  }}
+                                  className="btn btn-premium-secondary py-1 px-2.5 text-[10px] gap-1 flex-shrink-0"
+                                  style={{
+                                    "--btn-grad-start": "#10b981",
+                                    "--btn-grad-end": "#059669",
+                                    "--btn-glow": "rgba(16,185,129,0.15)",
+                                    "--btn-glow-hover": "rgba(16,185,129,0.3)"
+                                  } as any}
+                                >
+                                  <Clock className="w-3.5 h-3.5" /> Zakaži
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
+                    
+                    {/* Custom DVR Schedule Form */}
+                    <div className="border-t border-white/[0.04] pt-4 mt-2 flex flex-col gap-3">
+                      <h4 className="text-xs font-bold text-emerald-400">🕒 Ručno zakaži snimanje</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-text-muted">Početak (ISO format / Vreme)</label>
+                          <input
+                            type="datetime-local"
+                            id="dvr_start_time"
+                            className="input-premium py-1 text-xs"
+                            style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-text-muted">Trajanje (Minuti)</label>
+                          <input
+                            type="number"
+                            id="dvr_duration"
+                            placeholder="60"
+                            defaultValue="60"
+                            className="input-premium py-1 text-xs"
+                            style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const startEl = document.getElementById("dvr_start_time") as HTMLInputElement;
+                          const durEl = document.getElementById("dvr_duration") as HTMLInputElement;
+                          const startTime = startEl?.value ? new Date(startEl.value).toISOString() : new Date().toISOString();
+                          const duration = parseInt(durEl?.value || "60");
+                          scheduleEonRecording(eonTarget, `DVR Snimanje: ${eonTarget}`, startTime, duration);
+                        }}
+                        disabled={!eonTarget}
+                        className="btn btn-premium-secondary py-1.5 text-xs text-white"
+                        style={{
+                          "--btn-grad-start": "#10b981",
+                          "--btn-grad-end": "#059669",
+                          "--btn-glow": "rgba(16,185,129,0.15)",
+                          "--btn-glow-hover": "rgba(16,185,129,0.3)"
+                        } as any}
+                      >
+                        Zakaži Ručno
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -2892,6 +3002,61 @@ export default function App() {
                   <button onClick={initEonCatalogs} className="btn btn-premium-secondary text-xs w-full">
                     Napravi početne katalog fajlove
                   </button>
+                </div>
+
+                {/* EON TV IPTV DVR Scheduler Card */}
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-green-card glow-card-premium transition-all">
+                  <h3 className="font-extrabold text-base flex items-center gap-2 text-white border-b border-white/[0.04] pb-3">
+                    <Clock className="w-5 h-5 text-emerald-400" />
+                    Zakazana DVR Snimanja
+                  </h3>
+                  
+                  {scheduledTasks.length === 0 ? (
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Nema zakazanih snimanja. Koristite EPG listu iznad ili ručnu formu da zakažete snimanje live TV kanala.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2.5 max-h-64 overflow-y-auto pr-1">
+                      {scheduledTasks.map((task) => (
+                        <div key={task.id} className="p-3 rounded-lg border border-glass bg-white/[0.01] flex items-center justify-between gap-3 text-xs">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-white truncate">{task.title}</p>
+                            <p className="text-[10px] text-text-muted mt-0.5 font-mono truncate">{task.channel_name} • {task.duration} min</p>
+                            <p className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1 font-semibold">
+                              <Clock className="w-3 h-3 animate-pulse" />
+                              {new Date(task.start_time).toLocaleString("sr-RS", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit"
+                              })}
+                            </p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`${getApiHost()}/api/scheduler/cancel`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ id: task.id })
+                                });
+                                if (res.ok) {
+                                  showToast("✓ Zakazano snimanje otkazano", "info");
+                                  fetchScheduledRecordings();
+                                }
+                              } catch (err) {
+                                console.error("Failed to cancel scheduled recording:", err);
+                              }
+                            }}
+                            className="text-text-muted hover:text-red-400 p-1.5 hover:bg-red-500/10 rounded transition-all flex-shrink-0"
+                            title="Otkaži snimanje"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
