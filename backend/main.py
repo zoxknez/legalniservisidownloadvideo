@@ -472,6 +472,13 @@ async def cancel_download(req: CancelRequest):
     await queue_manager.cancel_download(req.id)
     return {"success": True}
 
+@app.post("/api/queue/retry")
+async def retry_download(req: CancelRequest):
+    success = await queue_manager.retry_download(req.id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Zadatak se ne može pokrenuti ponovo.")
+    return {"success": True}
+
 @app.post("/api/queue/clear")
 async def clear_completed():
     await queue_manager.clear_completed()

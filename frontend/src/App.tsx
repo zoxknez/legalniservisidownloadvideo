@@ -27,7 +27,10 @@ import {
   Sparkles,
   Copy,
   Check,
-  Clapperboard
+  Clapperboard,
+  Maximize2,
+  Minimize2,
+  RotateCcw
 } from "lucide-react";
 
 // Interface definitions
@@ -170,9 +173,10 @@ interface CustomSelectProps {
   formatLabel?: (val: string) => string;
   className?: string;
   placeholder?: string;
+  searchPlaceholder?: string;
 }
 
-function CustomSelect({ value, options, onChange, formatLabel, className = "", placeholder }: CustomSelectProps) {
+function CustomSelect({ value, options, onChange, formatLabel, className = "", placeholder, searchPlaceholder = "Pretraži..." }: CustomSelectProps) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties | null>(null);
   const [filter, setFilter] = useState("");
@@ -274,7 +278,7 @@ function CustomSelect({ value, options, onChange, formatLabel, className = "", p
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Pretraži kategorije..."
+            placeholder={searchPlaceholder}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="custom-select-search-input"
@@ -339,6 +343,7 @@ export default function App() {
 
   // Log modal copy state
   const [logCopied, setLogCopied] = useState<boolean>(false);
+  const [logFullscreen, setLogFullscreen] = useState<boolean>(false);
   
   // Terminal Logs Modal
   const [showLogModal, setShowLogModal] = useState<boolean>(false);
@@ -1145,6 +1150,24 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const retryDownloadTask = async (id: string) => {
+    try {
+      const res = await fetch(`${getApiHost()}/api/queue/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        showToast("Preuzimanje ponovo pokrenuto!", "success");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err?.detail || "Nije moguće pokrenuti ponovo.", "error");
+      }
+    } catch (e) {
+      showToast("Greška na serveru", "error");
+    }
+  };
+
   const clearCompletedQueue = async () => {
     try {
       await fetch(`${getApiHost()}/api/queue/clear`, { method: "POST" });
@@ -1448,12 +1471,12 @@ export default function App() {
                       {["voyo","eon"].includes(smartData.service) && (
                         <div>
                           <label>Rezolucija</label>
-                          <select value={smartResolution} onChange={e=>setSmartResolution(e.target.value)}
-                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full">
-                            <option value="1080p">1080p Full HD</option>
-                            <option value="720p">720p HD</option>
-                            <option value="480p">480p SD</option>
-                          </select>
+                          <CustomSelect
+                            value={smartResolution}
+                            options={["1080p", "720p", "480p"]}
+                            onChange={(val) => setSmartResolution(val)}
+                            formatLabel={(val) => val === "1080p" ? "1080p Full HD" : val === "720p" ? "720p HD" : "480p SD"}
+                          />
                         </div>
                       )}
                       {smartData.service === "hbomax" && (
@@ -1578,11 +1601,12 @@ export default function App() {
 
                 <div>
                   <label>Kvalitet preuzimanja (Resolution)</label>
-                  <select value={voyoRes} onChange={(e) => setVoyoRes(e.target.value)}>
-                    <option value="1080p">1080p (Full HD - podrazumevano)</option>
-                    <option value="720p">720p (HD)</option>
-                    <option value="480p">480p (SD)</option>
-                  </select>
+                  <CustomSelect
+                    value={voyoRes}
+                    options={["1080p", "720p", "480p"]}
+                    onChange={(val) => setVoyoRes(val)}
+                    formatLabel={(val) => val === "1080p" ? "1080p (Full HD - podrazumevano)" : val === "720p" ? "720p (HD)" : "480p (SD)"}
+                  />
                 </div>
 
                 {/* Series Details & Episode Checklist */}
@@ -1896,15 +1920,13 @@ export default function App() {
                 {eonMode === "live" ? (
                   <div>
                     <label>Izaberite TV Kanal</label>
-                    <select
+                    <CustomSelect
                       value={eonTarget}
-                      onChange={(e) => setEonTarget(e.target.value)}
-                    >
-                      <option value="">-- Izaberi kanal iz liste --</option>
-                      {eonChannels.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                      options={eonChannels}
+                      onChange={(val) => setEonTarget(val)}
+                      placeholder="-- Izaberi kanal iz liste --"
+                      searchPlaceholder="Pretraži kanale..."
+                    />
                     <p className="text-[10px] text-text-muted mt-1.5">Lista se čita iz eon_channels.json ako ga napravite u rootu aplikacije ili ~/.videodownload.</p>
                     <input
                       type="text"
@@ -2343,10 +2365,12 @@ export default function App() {
                       <div className="flex gap-4 items-end">
                         <div className="flex-1">
                           <label>Region / Tržište (Market)</label>
-                          <select value={hboMarket} onChange={(e) => setHboMarket(e.target.value)}>
-                            <option value="emea">EMEA (Evropa - podrazumevano)</option>
-                            <option value="us">US (Amerika)</option>
-                          </select>
+                          <CustomSelect
+                            value={hboMarket}
+                            options={["emea", "us"]}
+                            onChange={(val) => setHboMarket(val)}
+                            formatLabel={(val) => val === "emea" ? "EMEA (Evropa - podrazumevano)" : "US (Amerika)"}
+                          />
                         </div>
                         
                         <button
@@ -2649,16 +2673,19 @@ export default function App() {
                 <div className="flex flex-col gap-4">
                   <div>
                     <label>Izaberite servis</label>
-                    <select
+                    <CustomSelect
                       value={importService}
-                      onChange={(e) => setImportService(e.target.value)}
-                      className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full max-w-xs"
-                    >
-                      <option value="voyo">Voyo RS</option>
-                      <option value="hrti">HRTi</option>
-                      <option value="rtsplaneta">RTS Planeta</option>
-                      <option value="hbomax">HBO Max</option>
-                    </select>
+                      options={["voyo", "hrti", "rtsplaneta", "hbomax"]}
+                      onChange={(val) => setImportService(val)}
+                      formatLabel={(val) => {
+                        if (val === "voyo") return "Voyo RS";
+                        if (val === "hrti") return "HRTi";
+                        if (val === "rtsplaneta") return "RTS Planeta";
+                        if (val === "hbomax") return "HBO Max";
+                        return val;
+                      }}
+                      className="max-w-xs"
+                    />
                   </div>
 
                   <div>
@@ -2931,17 +2958,30 @@ export default function App() {
                       </div>
                     )}
 
-                    <button
-                      onClick={() => {
-                        setSelectedTask(task);
-                        setShowLogModal(true);
-                      }}
-                      className="queue-logs-btn"
-                    >
-                      <Terminal style={{width:11,height:11}} />
-                      Pregled Logova
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedTask(task);
+                          setShowLogModal(true);
+                        }}
+                        className="queue-logs-btn"
+                        style={{ flex: 1 }}
+                      >
+                        <Terminal style={{width:11,height:11}} />
+                        Logovi
+                      </button>
 
+                      {(task.status === "failed" || task.status === "cancelled") && (
+                        <button
+                          onClick={() => retryDownloadTask(task.id)}
+                          className="queue-retry-btn"
+                          style={{ flex: 1 }}
+                        >
+                          <RotateCcw style={{width:11,height:11}} />
+                          Ponovi
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -2952,11 +2992,11 @@ export default function App() {
 
       {/* ── TERMINAL LOGS MODAL ── */}
       {showLogModal && selectedTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-8"
-          onKeyDown={(e) => e.key === "Escape" && (setShowLogModal(false), setSelectedTask(null))}
+        <div className={`fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center ${logFullscreen ? "p-0" : "p-8"}`}
+          onKeyDown={(e) => e.key === "Escape" && (setShowLogModal(false), setSelectedTask(null), setLogFullscreen(false))}
           tabIndex={-1}
         >
-          <div className="w-full max-w-4xl h-[600px] glass-panel border border-glass rounded-xl flex flex-col justify-between overflow-hidden shadow-2xl animate-slide">
+          <div className={`glass-panel border border-glass flex flex-col justify-between overflow-hidden shadow-2xl animate-slide ${logFullscreen ? "log-modal-fullscreen" : "w-full max-w-4xl h-[600px] rounded-xl"}`}>
             
             {/* Modal Header */}
             <div className="p-5 border-b border-glass flex justify-between items-center bg-black/20">
@@ -2972,6 +3012,15 @@ export default function App() {
               </div>
               
               <div className="flex items-center gap-2">
+                {/* Fullscreen toggle button */}
+                <button
+                  className="log-copy-btn"
+                  onClick={() => setLogFullscreen(f => !f)}
+                >
+                  {logFullscreen ? <Minimize2 style={{width:12,height:12}} /> : <Maximize2 style={{width:12,height:12}} />}
+                  {logFullscreen ? "Smanji" : "Proširi"}
+                </button>
+
                 {/* Copy logs button */}
                 <button
                   className={`log-copy-btn ${logCopied ? "copied" : ""}`}
@@ -2987,7 +3036,7 @@ export default function App() {
                   {logCopied ? "Kopirano!" : "Kopiraj"}
                 </button>
                 <button
-                  onClick={() => { setShowLogModal(false); setSelectedTask(null); }}
+                  onClick={() => { setShowLogModal(false); setSelectedTask(null); setLogFullscreen(false); }}
                   className="p-2 rounded-lg hover:bg-white/[0.05] text-text-secondary hover:text-white transition"
                 >
                   <X className="w-5 h-5" />
@@ -3030,7 +3079,7 @@ export default function App() {
                 </button>
               ) : (
                 <button
-                  onClick={() => { setShowLogModal(false); setSelectedTask(null); }}
+                  onClick={() => { setShowLogModal(false); setSelectedTask(null); setLogFullscreen(false); }}
                   className="btn btn-secondary text-xs py-2 px-4"
                 >
                   Zatvori Konzolu

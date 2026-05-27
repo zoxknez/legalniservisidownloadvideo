@@ -237,6 +237,28 @@ class DownloadQueueManager:
                 self.db.save_download(item)
         await self.broadcast_state()
 
+    async def retry_download(self, item_id: str) -> bool:
+        """Retry a failed, finished, or cancelled download."""
+        async with self.lock:
+            item = self.items.get(item_id)
+            if not item:
+                return False
+            if item.status in ("failed", "cancelled", "finished"):
+                item.status = "pending"
+                item.progress = 0.0
+                item.speed = ""
+                item.eta = ""
+                item.retry_count = 0
+                item.logs.append("\n[Re-submitting task to queue by user...]")
+                self.db.save_download(item)
+            else:
+                return False
+        
+        # Re-trigger background execution
+        asyncio.create_task(self._process_download(item.id))
+        await self.broadcast_state()
+        return True
+
     async def clear_completed(self):
         """Clear finished/failed/cancelled downloads."""
         async with self.lock:
