@@ -32,10 +32,7 @@ import {
   Minimize2,
   RotateCcw,
   Clock,
-  Hash,
-  Folder,
-  Cpu,
-  Layers
+  Hash
 } from "lucide-react";
 
 // Interface definitions
@@ -547,6 +544,8 @@ export default function App() {
   const [smartResolution, setSmartResolution] = useState<string>("1080p");
   const [smartSubs, setSmartSubs] = useState<string>("sr,hr,mk,bs,sl");
   const [smartRtsVerbose, setSmartRtsVerbose] = useState<boolean>(false);
+  const [smartAudioOnly, setSmartAudioOnly] = useState<boolean>(false);
+  const [smartUseAria2, setSmartUseAria2] = useState<boolean>(false);
 
   // Session Import Form State
   const [importService, setImportService] = useState<string>("voyo");
@@ -567,6 +566,34 @@ export default function App() {
         // Auto-select all episodes by default
         if (data.episodes && data.episodes.length > 0) {
           setSmartSelectedEpisodes(data.episodes.map((ep: any) => ep.id));
+        }
+        // Auto-select highest available resolution if provided
+        if (data.available_resolutions && data.available_resolutions.length > 0) {
+          setSmartResolution(data.available_resolutions[0]);
+        } else {
+          setSmartResolution("1080p");
+        }
+        // Subtitle & Captions matching algorithm
+        if (data.service === "ytdlp") {
+          const manual = data.available_subtitles || [];
+          const auto = data.available_auto_subtitles || [];
+          
+          // Match Serbian, Croatian, Bosnian, and English
+          const priority = ["sr", "hr", "bs", "en"];
+          const matched_manual = manual.filter((l: string) => priority.includes(l.toLowerCase()));
+          const matched_auto = auto.filter((l: string) => priority.includes(l.toLowerCase()));
+          
+          if (matched_manual.length > 0) {
+            setSmartSubs(matched_manual.join(","));
+          } else if (matched_auto.length > 0) {
+            setSmartSubs(matched_auto.join(","));
+          } else if (manual.length > 0) {
+            setSmartSubs(manual.slice(0, 2).join(","));
+          } else {
+            setSmartSubs("");
+          }
+        } else {
+          setSmartSubs("sr,hr,mk,bs,sl"); // Default for Voyo/HBO/etc.
         }
         showToast("Link uspešno prepoznat i analiziran!", "success");
       } else {
@@ -677,7 +704,10 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: smartData.target_id,
-            resolution: smartResolution
+            resolution: smartResolution,
+            subs: smartSubs,
+            audio_only: smartAudioOnly,
+            use_aria2: smartUseAria2
           })
         });
       } else {
@@ -691,6 +721,8 @@ export default function App() {
         setSmartUrl("");
         setSmartData(null);
         setSmartSelectedEpisodes([]);
+        setSmartAudioOnly(false);
+        setSmartUseAria2(false);
       } else {
         showToast(data.detail || "Greška pri pokretanju preuzimanja.", "error");
       }
@@ -1573,143 +1605,63 @@ export default function App() {
           const previewTheme = smartData ? SVC_THEMES[smartData.service] ?? SVC_THEMES.voyo : null;
 
           return (
-          <div key="dashboard" className="tab-content max-w-6xl mx-auto flex flex-col gap-8">
+          <div key="dashboard" className="tab-content max-w-5xl mx-auto flex flex-col gap-5">
             {/* Tab header */}
-            <div className="tab-page-header tab-header-dash">
-              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#f59e0b,#d97706)"}}>
-                <Zap style={{width:24,height:24,color:"white"}} />
+            <div className="tab-page-header tab-header-dash" style={{ padding: "12px 18px", marginBottom: "0px", borderRadius: "14px" }}>
+              <div className="tab-page-header-icon" style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)", width: 36, height: 36, borderRadius: 8 }}>
+                <Zap style={{ width: 18, height: 18, color: "white" }} />
               </div>
-              <div style={{flex:1}}>
-                <h2 className="text-2.5xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-                  <Zap className="w-6 h-6 text-amber-400" /> Pametno Preuzimanje
+              <div style={{ flex: 1 }}>
+                <h2 className="text-lg font-extrabold text-white mb-0.5 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-400" /> Pametno Preuzimanje
                 </h2>
-                <p className="text-text-secondary text-sm">Unesite URL adresu za automatsko prepoznavanje i preuzimanje videa sa svih podržanih platformi.</p>
+                <p className="text-text-secondary text-xs">Automatsko prepoznavanje i preuzimanje videa sa svih podržanih platformi.</p>
               </div>
             </div>
 
-            {/* ── Service Status Cards Grid ── */}
-            <div className="smart-svc-grid">
+            {/* ── Sleek Compact Platform Status Row (Interactive Pills) ── */}
+            <div className="smart-svc-bar my-0.5">
               {svcKeys.map(k => {
                 const t = SVC_THEMES[k];
                 const st = getSvcStatus(k);
                 return (
                   <div
                     key={k}
-                    className="smart-svc-card group"
+                    className="smart-svc-pill group"
                     style={{ 
                       "--svc-glow": t.glow, 
                       "--svc-glow-hover": t.glow.replace("0.08", "0.25"), 
                       "--svc-color": t.color, 
-                      borderColor: st.online ? `${t.color}40` : "rgba(255,255,255,0.05)" 
+                      borderColor: st.online ? `${t.color}35` : "rgba(255,255,255,0.04)",
+                      background: st.online ? `${t.color}0c` : "rgba(255,255,255,0.015)"
                     } as any}
                     onClick={() => { setSmartUrl(t.example); handleSmartDetect(t.example); }}
+                    title={`Klikni da učitaš primer za ${t.name}`}
                   >
-                    <div className="smart-svc-card-top">
-                      <span className="smart-svc-emoji">{t.emoji}</span>
-                      <span className={`smart-svc-dot ${st.online ? "online" : "offline"}`} />
-                    </div>
-                    <div className="smart-svc-name">{t.name}</div>
-                    <div className={`smart-svc-email text-center ${st.online ? "text-emerald-400" : "text-text-muted"}`}>
-                      {st.online ? "✓ POVEZAN" : "✗ OFF"}
-                    </div>
-                    <button
-                      className="smart-svc-try-btn"
-                      style={{ "--svc-color": t.color, "--svc-glow-hover": t.glow.replace("0.08", "0.2") } as any}
-                      onClick={e => { e.stopPropagation(); setSmartUrl(t.example); handleSmartDetect(t.example); }}
-                    >
-                      ▶ Probaj primer
-                    </button>
+                    <span className="smart-svc-pill-emoji">{t.emoji}</span>
+                    <span className="smart-svc-pill-name">{t.name}</span>
+                    <span className="flex items-center gap-1.5 border-l border-white/[0.08] pl-2">
+                      <span className={`smart-svc-pill-dot ${st.online ? "online" : "offline"}`} />
+                      <span className={`smart-svc-pill-status ${st.online ? "text-emerald-400" : "text-text-muted"}`}>
+                        {st.online ? "AKTIVAN" : "OFF"}
+                      </span>
+                    </span>
                   </div>
                 );
               })}
             </div>
             
-            {/* ── System Metrics Grid (Disk, CPU, RAM) ── */}
-            {status?.system_metrics && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                
-                {/* Disk Space Gauge */}
-                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-indigo-card glow-card-premium">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Folder className="w-3.5 h-3.5" /> Memorijski Prostor
-                    </span>
-                    <span className="text-[10px] font-mono text-text-muted font-bold">
-                      {Math.round(status.system_metrics.disk.used / 1024 / 1024 / 1024)} GB / {Math.round(status.system_metrics.disk.total / 1024 / 1024 / 1024)} GB
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
-                      <div 
-                        className="h-full rounded bg-gradient-to-r from-indigo-500 to-indigo-400"
-                        style={{ width: `${status.system_metrics.disk.percent}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] font-semibold">
-                      <span className="text-text-secondary">Slobodno: {Math.round(status.system_metrics.disk.free / 1024 / 1024 / 1024)} GB</span>
-                      <span className="text-indigo-400">{status.system_metrics.disk.percent}% Popunjeno</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* CPU Gauge */}
-                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-amber-card glow-card-premium">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Cpu className="w-3.5 h-3.5" /> Opterećenje CPU-a
-                    </span>
-                    <span className="text-[10px] font-mono text-text-muted font-bold">Aktivnost</span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
-                      <div 
-                        className="h-full rounded bg-gradient-to-r from-amber-500 to-amber-400"
-                        style={{ width: `${status.system_metrics.cpu.percent}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] font-semibold">
-                      <span className="text-text-secondary">Procesorski rad</span>
-                      <span className="text-amber-400">{status.system_metrics.cpu.percent}% Aktivan</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* RAM Gauge */}
-                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-rose-card glow-card-premium">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5" /> Radna Memorija (RAM)
-                    </span>
-                    <span className="text-[10px] font-mono text-text-muted font-bold">
-                      {Math.round(status.system_metrics.ram.used / 1024 / 1024 / 100) / 10} GB / {Math.round(status.system_metrics.ram.total / 1024 / 1024 / 100) / 10} GB
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
-                      <div 
-                        className="h-full rounded bg-gradient-to-r from-rose-500 to-rose-400"
-                        style={{ width: `${status.system_metrics.ram.percent}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] font-semibold">
-                      <span className="text-text-secondary">Slobodno: {Math.round(status.system_metrics.ram.free / 1024 / 1024 / 100) / 10} GB</span>
-                      <span className="text-rose-400">{status.system_metrics.ram.percent}% Korišćeno</span>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            )}
+            {/* System Metrics Grid removed from here - relocated to the bottom */}
 
             {/* ── Smart Console Card Wrapper ── */}
             <div className="smart-console-card">
               <div className="console-scanline" />
               
-              <div className="flex items-center gap-3 mb-6 border-b border-white/[0.04] pb-4">
-                <Globe className="w-5 h-5 text-amber-500 animate-spin" style={{ animationDuration: "10s" }} />
+              <div className="flex items-center gap-2.5 mb-4 border-b border-white/[0.04] pb-3">
+                <Globe className="w-4.5 h-4.5 text-amber-500 animate-spin" style={{ animationDuration: "10s" }} />
                 <div>
-                  <h3 className="font-extrabold text-base text-white tracking-wide uppercase">Pametni Media Skener</h3>
-                  <p className="text-text-secondary text-xs">Unesite link za automatsku ekstrakciju formata, epizoda i DRM detalja</p>
+                  <h3 className="font-extrabold text-sm text-white tracking-wide uppercase">Pametni Media Skener</h3>
+                  <p className="text-text-secondary text-[11px]">Unesite link za automatsku ekstrakciju formata, epizoda i DRM detalja</p>
                 </div>
               </div>
 
@@ -1797,6 +1749,39 @@ export default function App() {
                       </div>
                       <h3 className="smart-preview-title">{smartData.title}</h3>
                       {smartData.description && <p className="smart-preview-desc">{smartData.description}</p>}
+                      {/* Extra metadata pills for yt-dlp */}
+                      {smartData.service === "ytdlp" && (smartData.duration_str || smartData.uploader || smartData.view_count != null || smartData.upload_date) && (
+                        <div style={{display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"10px"}}>
+                          {smartData.duration_str && (
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                              {smartData.duration_str}
+                            </span>
+                          )}
+                          {smartData.uploader && (
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                              {smartData.uploader}
+                            </span>
+                          )}
+                          {smartData.view_count != null && (
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                              {smartData.view_count >= 1_000_000
+                                ? `${(smartData.view_count / 1_000_000).toFixed(1)}M pregleda`
+                                : smartData.view_count >= 1_000
+                                ? `${(smartData.view_count / 1_000).toFixed(0)}K pregleda`
+                                : `${smartData.view_count} pregleda`}
+                            </span>
+                          )}
+                          {smartData.upload_date && (
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                              {smartData.upload_date}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1858,25 +1843,112 @@ export default function App() {
 
                     {/* Config row */}
                     <div className="smart-config-row">
-                      {["voyo","eon"].includes(smartData.service) && (
+                      {(["voyo","eon"].includes(smartData.service) || smartData.service === "ytdlp") && (
                         <div>
                           <label>Rezolucija</label>
                           <CustomSelect
                             value={smartResolution}
-                            options={["1080p", "720p", "480p"]}
+                            options={smartData.service === "ytdlp" && smartData.available_resolutions && smartData.available_resolutions.length > 0 
+                              ? smartData.available_resolutions 
+                              : ["1080p (Full HD)", "720p (HD)", "480p (SD)"]
+                            }
                             onChange={(val) => setSmartResolution(val)}
-                            formatLabel={(val) => val === "1080p" ? "1080p Full HD" : val === "720p" ? "720p HD" : "480p SD"}
+                            formatLabel={(val) => {
+                              // Labels are already descriptive from backend (e.g. "2160p (4K)")
+                              return val;
+                            }}
                           />
                         </div>
                       )}
-                      {smartData.service === "hbomax" && (
-                        <div>
-                          <label>Prevodi (jezici)</label>
-                          <input type="text" value={smartSubs} onChange={e=>setSmartSubs(e.target.value)}
-                            placeholder="sr,hr,mk,bs,sl"
-                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
-                        </div>
-                      )}
+                      {(smartData.service === "hbomax" || smartData.service === "ytdlp") && (() => {
+                        const activeList = smartSubs ? smartSubs.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean) : [];
+                        const toggleLang = (lang: string) => {
+                          const l = lang.toLowerCase();
+                          if (activeList.includes(l)) {
+                            setSmartSubs(activeList.filter((s: string) => s !== l).join(","));
+                          } else {
+                            setSmartSubs([...activeList, l].join(","));
+                          }
+                        };
+                        return (
+                          <div>
+                            <label>Prevodi (odaberi klikom na oznaku jezika)</label>
+                            <input type="text" value={smartSubs} onChange={e=>setSmartSubs(e.target.value)}
+                              placeholder={smartData.service === "hbomax" ? "sr,hr,mk,bs,sl" : "npr. en,sr,hr ili all (ostavi prazno za bez prevoda)"}
+                              className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
+                            
+                            {smartData.service === "ytdlp" && (
+                              <div className="mt-2.5 flex flex-col gap-2 bg-black/25 p-3 rounded-lg border border-white/[0.04]">
+                                {/* Manual Subtitles */}
+                                {smartData.available_subtitles && smartData.available_subtitles.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] text-text-muted font-bold mb-1 uppercase tracking-wider">Detektovani prevodi (izvor):</div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {smartData.available_subtitles.map((lang: string) => {
+                                        const isSel = activeList.includes(lang.toLowerCase());
+                                        return (
+                                          <button
+                                            key={lang}
+                                            onClick={() => toggleLang(lang)}
+                                            className={`px-2 py-1 rounded text-[10px] font-bold border transition-all ${
+                                              isSel 
+                                                ? "bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_8px_rgba(59,130,246,0.25)]" 
+                                                : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
+                                            }`}
+                                          >
+                                            {lang.toUpperCase()}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {/* Auto Subtitles */}
+                                {smartData.available_auto_subtitles && smartData.available_auto_subtitles.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] text-text-muted font-bold mb-1 uppercase tracking-wider">Automatski titlovi (AI generisani):</div>
+                                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                                      {smartData.available_auto_subtitles.map((lang: string) => {
+                                        const isSel = activeList.includes(lang.toLowerCase());
+                                        return (
+                                          <button
+                                            key={lang}
+                                            onClick={() => toggleLang(lang)}
+                                            className={`px-2 py-1 rounded text-[10px] font-bold border transition-all ${
+                                              isSel 
+                                                ? "bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)]" 
+                                                : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
+                                            }`}
+                                          >
+                                            {lang.toUpperCase()}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                <div className="flex gap-2.5 mt-1 border-t border-white/[0.03] pt-2">
+                                  <button
+                                    onClick={() => setSmartSubs("all")}
+                                    className="text-[9px] font-extrabold text-blue-400 hover:underline bg-none border-none cursor-pointer"
+                                  >
+                                    Uključi sve jezike ("all")
+                                  </button>
+                                  <span className="text-white/[0.08] text-[9px]">|</span>
+                                  <button
+                                    onClick={() => setSmartSubs("")}
+                                    className="text-[9px] font-extrabold text-text-muted hover:underline bg-none border-none cursor-pointer"
+                                  >
+                                    Isključi sve prevode
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {(smartData.mode === "series" && !smartData.episodes) && (
                         <div>
                           <label>Raspon epizoda (opciono)</label>
@@ -1903,6 +1975,40 @@ export default function App() {
                           </label>
                         </div>
                       )}
+                      
+                      {smartData.service === "ytdlp" && (
+                        <div className="flex gap-4 items-center flex-wrap" style={{ marginTop: 24 }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={smartAudioOnly}
+                              onChange={e => setSmartAudioOnly(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${smartAudioOnly ? "checked" : ""}`} style={smartAudioOnly ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Preuzmi samo audio (MP3)</span>
+                          </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={smartUseAria2}
+                              onChange={e => setSmartUseAria2(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${smartUseAria2 ? "checked" : ""}`} style={smartUseAria2 ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white flex items-center gap-1">
+                              Aria2 Ubrzanje <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+                            </span>
+                          </label>
+                        </div>
+                      )}
                     </div>
 
                     {/* CTA */}
@@ -1926,6 +2032,174 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ── Platform Capabilities Info Console ── */}
+            <div className="mt-2 w-full max-w-5xl mx-auto flex flex-col gap-3">
+              <div className="flex items-center gap-2 border-b border-white/[0.04] pb-2.5">
+                <Info className="w-4 h-4 text-indigo-400" />
+                <h3 className="font-extrabold text-[11px] text-white tracking-widest uppercase">Mogućnosti i Status Platformi</h3>
+              </div>
+              
+              <div className="smart-info-grid">
+                
+                {/* Voyo Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#f97316" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🟠</span> Voyo RS
+                    </div>
+                    <div className="smart-info-card-badge text-orange-400 border-orange-500/20">
+                      1080p · DRM
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Filmovi, Serije & Epizode</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Automatsko preuzimanje titlova</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Widevine L3 Auto-Dekripcija</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: Kliknite na Voyo bedž na vrhu da pokrenete primer filma.
+                  </div>
+                </div>
+
+                {/* HRTi Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#06b6d4" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🔵</span> HRTi
+                    </div>
+                    <div className="smart-info-card-badge text-cyan-400 border-cyan-500/20">
+                      720p · MULTI
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Kompletan HRTi katalog emisija</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Paralelno preuzimanje (Multi-threaded)</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Integrisan HRTi pretraživač</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: Unesite ceo URL ili UUID iz HRTi kataloga za analizu.
+                  </div>
+                </div>
+
+                {/* EON Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#10b981" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🟢</span> EON TV
+                    </div>
+                    <div className="smart-info-card-badge text-emerald-400 border-emerald-500/20">
+                      1080p · DVR
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>EON Video na Zahtev (VOD)</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Uživo IPTV snimanje & DVR</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>EPG zakazivanje iz TV vodiča</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: Zakazivanje DVR-a radi u pozadini čak i kad zatvorite aplikaciju.
+                  </div>
+                </div>
+
+                {/* RTS Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#f43f5e" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🔴</span> RTS Planeta
+                    </div>
+                    <div className="smart-info-card-badge text-rose-400 border-rose-500/20">
+                      720p · AUTO
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>TV arhiv, serije i RTS emisije</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Verbose logovi za lakše praćenje</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Automatska ekstrakcija tokena</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: RTS Planeta nalog mora biti ulogovan/aktivan za preuzimanje.
+                  </div>
+                </div>
+
+                {/* HBO Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#9333ea" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🟣</span> HBO Max
+                    </div>
+                    <div className="smart-info-card-badge text-purple-400 border-purple-500/20">
+                      1080p · BYPASS
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Višejezični prevodi (sr, hr, bs...)</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Bypass režim (Manifest + Licenca)</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Automatsko dekriptovanje & muxing</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: Koristite Bypass za direktno preuzimanje detektovanih resursa.
+                  </div>
+                </div>
+
+                {/* Universal Card */}
+                <div className="smart-info-card" style={{ "--card-brand-color": "#3b82f6" } as any}>
+                  <div className="smart-info-card-title-wrap">
+                    <div className="smart-info-card-title">
+                      <span>🌐</span> Univerzalno
+                    </div>
+                    <div className="smart-info-card-badge text-blue-400 border-blue-500/20">
+                      do 4K · yt-dlp
+                    </div>
+                  </div>
+                  <div className="smart-info-card-features">
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>YouTube, X, Facebook, Instagram</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>TikTok, Vimeo, Twitch i 1000+ sajtova</span>
+                    </div>
+                    <div className="smart-info-card-feature">
+                      <Check className="w-3.5 h-3.5" /> <span>Metadata sličice, opisi i naslovi</span>
+                    </div>
+                  </div>
+                  <div className="smart-info-card-tip">
+                    Savet: Nalepite bilo koji javni link i skener će sam prepoznati format.
+                  </div>
+                </div>
+
+              </div>
             </div>
           </div>
           );

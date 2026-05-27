@@ -882,41 +882,31 @@ textarea {
    SMART DASHBOARD V3 – Ultimate Premium Makeover
    ═══════════════════════════════════════════ */
 
-/* ── Service Status Card Grid ── */
-.smart-svc-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin: 0 auto 2.5rem;
-  max-w: 1200px;
+/* ── Sleek Compact Platform Status Row ── */
+.smart-svc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
   width: 100%;
 }
-@media (max-width: 1024px) {
-  .smart-svc-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 640px) {
-  .smart-svc-grid { grid-template-columns: repeat(2, 1fr); }
-}
 
-.smart-svc-card {
-  padding: 24px 16px 20px;
-  border-radius: var(--radius-lg);
+.smart-svc-pill {
+  padding: 8px 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.015);
   border: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
-  gap: 12px;
+  gap: 8px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  min-height: 195px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.smart-svc-card::before {
+.smart-svc-pill::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -927,115 +917,170 @@ textarea {
   z-index: 1;
 }
 
-.smart-svc-card:hover {
-  transform: translateY(-5px);
+.smart-svc-pill:hover {
+  transform: translateY(-2px);
   background: rgba(255, 255, 255, 0.035);
   border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 
-              0 0 20px var(--svc-glow-hover, rgba(99, 102, 241, 0.15));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 
+              0 0 16px var(--svc-glow-hover, rgba(99, 102, 241, 0.15));
 }
-.smart-svc-card:hover::before {
+
+.smart-svc-pill:hover::before {
   opacity: 1;
 }
 
-.smart-svc-card-top {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  margin-bottom: 4px;
-}
-
-.smart-svc-emoji {
-  font-size: 2.2rem;
+.smart-svc-pill-emoji {
+  font-size: 1.15rem;
   line-height: 1;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+  z-index: 2;
   transition: transform 0.3s ease;
 }
-.smart-svc-card:hover .smart-svc-emoji {
-  transform: scale(1.1);
+
+.smart-svc-pill:hover .smart-svc-pill-emoji {
+  transform: scale(1.15);
 }
 
-/* Status dot placement */
-.smart-svc-dot {
-  position: absolute;
-  top: -4px;
-  right: -8px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid #0a0b10;
-}
-.smart-svc-dot.online {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-  animation: svcPulse 2s infinite;
-}
-.smart-svc-dot.offline {
-  background: #ef4444;
-  box-shadow: 0 0 8px #ef4444;
-}
-
-@keyframes svcPulse {
-  0%, 100% { box-shadow: 0 0 4px #10b981; }
-  50% { box-shadow: 0 0 12px #10b981, 0 0 20px rgba(16, 185, 129, 0.4); }
-}
-
-.smart-svc-name {
-  font-size: 0.85rem;
-  font-weight: 800;
+.smart-svc-pill-name {
+  font-size: 0.72rem;
+  font-weight: 850;
   color: white;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   z-index: 2;
-  margin-top: 4px;
 }
 
-.smart-svc-email {
-  font-size: 0.65rem;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-  z-index: 2;
-  transition: all 0.2s ease;
-}
-.smart-svc-card:hover .smart-svc-email {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.4);
-}
-
-.smart-svc-try-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-  margin-top: auto;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
+.smart-svc-pill-status {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.03);
   z-index: 2;
   letter-spacing: 0.02em;
 }
-.smart-svc-try-btn:hover {
-  background: var(--svc-color, var(--primary));
+
+.smart-svc-pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  z-index: 2;
+}
+.smart-svc-pill-dot.online {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: svcPulse 2s infinite;
+}
+.smart-svc-pill-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+@keyframes svcPulse {
+  0%, 100% { box-shadow: 0 0 3px #10b981; }
+  50% { box-shadow: 0 0 8px #10b981, 0 0 14px rgba(16, 185, 129, 0.3); }
+}
+
+/* ── Platform Capabilities Info Console ── */
+.smart-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.smart-info-card {
+  position: relative;
+  background: rgba(18, 19, 27, 0.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.smart-info-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--card-brand-color, var(--primary));
+  opacity: 0.85;
+}
+
+.smart-info-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), 
+              0 0 16px rgba(255, 255, 255, 0.02);
+}
+
+.smart-info-card-title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding-bottom: 8px;
+}
+
+.smart-info-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 850;
   color: white;
-  border-color: transparent;
-  box-shadow: 0 4px 12px var(--svc-glow-hover, rgba(99, 102, 241, 0.3));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.smart-info-card-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  letter-spacing: 0.02em;
+}
+
+.smart-info-card-features {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smart-info-card-feature {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.smart-info-card-feature svg {
+  color: var(--card-brand-color, var(--primary));
+  opacity: 0.85;
+}
+
+.smart-info-card-tip {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: auto;
+  border-top: 1px dashed rgba(255, 255, 255, 0.04);
+  padding-top: 8px;
+  line-height: 1.3;
 }
 
 /* ── Smart Console Card Wrapper ── */
@@ -1046,7 +1091,7 @@ textarea {
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 20px 24px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   width: 100%;

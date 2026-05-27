@@ -212,9 +212,13 @@ async def cancel_scheduled(req: CancelScheduledRequest):
 # ── Smart Detection & Session Sync Routes ──────────────────────────────────────
 
 @app.get("/api/smart-detect")
-def smart_detect(url: str):
-    """Detect streaming service and extract metadata from URL."""
-    res = SmartParser.get_metadata(url)
+async def smart_detect(url: str):
+    """Detect streaming service and extract metadata from URL (async, non-blocking)."""
+    loop = asyncio.get_running_loop()
+    res = await asyncio.wait_for(
+        loop.run_in_executor(None, SmartParser.get_metadata, url),
+        timeout=60.0
+    )
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error"))
     return res
@@ -351,6 +355,9 @@ async def voyo_download(req: VoyoDownloadRequest):
 class YtdlpDownloadRequest(BaseModel):
     url: str
     resolution: str = "1080p"
+    subs: str = ""
+    audio_only: bool = False
+    use_aria2: bool = False
 
 @app.post("/api/ytdlp/download")
 async def ytdlp_download(req: YtdlpDownloadRequest):
@@ -358,23 +365,58 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
     from urllib.parse import urlparse
     
     url = req.url.strip()
-    res_val = req.resolution.replace("p", "")
-    if res_val.isdigit():
-        format_spec = f"bestvideo[height<={res_val}]+bestaudio/best"
-    else:
-        format_spec = "bestvideo+bestaudio/best"
-        
     output_dir = config.get_output_dir()
-    output_tmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
     
     cmd = [
         "python", "-m", "yt_dlp",
         url,
-        "-f", format_spec,
-        "-o", output_tmpl,
         "--no-playlist"
     ]
     
+    if req.audio_only:
+        output_tmpl = os.path.join(output_dir, "%(title)s.mp3")
+        cmd.extend([
+            "-x",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "-o", output_tmpl
+        ])
+    else:
+        output_tmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
+        # Parse resolution — handles plain "1080p", descriptive "2160p (4K)", "best", etc.
+        import re as _re
+        _res_match = _re.search(r"(\d+)p", req.resolution)
+        if _res_match:
+            res_val = _res_match.group(1)
+            format_spec = (
+                f"bestvideo[height<={res_val}][vcodec^=avc]+bestaudio[acodec^=mp4a]/"
+                f"bestvideo[height<={res_val}]+bestaudio/"
+                f"best[height<={res_val}]/best"
+            )
+        else:
+            format_spec = "bestvideo+bestaudio/best"
+        cmd.extend([
+            "-f", format_spec,
+            "-o", output_tmpl,
+            "--merge-output-format", "mp4"
+        ])
+        
+    if req.subs:
+        cmd.extend([
+            "--write-subs",
+            "--write-auto-subs",
+            "--sub-langs", req.subs,
+            "--embed-subs"
+        ])
+        
+    if req.use_aria2:
+        aria2_status = config.check_binaries_status().get("aria2c", {})
+        if aria2_status.get("found"):
+            cmd.extend([
+                "--external-downloader", aria2_status.get("path"),
+                "--external-downloader-args", "aria2c:-j 16 -x 16 -s 16 -k 1M"
+            ])
+            
     domain = urlparse(url).netloc.replace("www.", "")
     title = f"Univerzalni ({domain}): {url[:40]}"
     task_id = await queue_manager.add_download("ytdlp", title, cmd)

@@ -23,6 +23,19 @@ EON_VOD_RE = re.compile(r"eon\.tv/player/([a-f0-9\-]+)", re.I)
 
 HBO_URN_RE = re.compile(r"hbomax\.com/(?:video|episode|page|feature)/([^?#]+)|max\.com/show/([^?#]+)", re.I)
 
+# Standard resolution labels (sorted highest first)
+RESOLUTION_LABELS = {
+    4320: "4320p (8K)",
+    2160: "2160p (4K)",
+    1440: "1440p (2K)",
+    1080: "1080p (Full HD)",
+    720:  "720p (HD)",
+    480:  "480p (SD)",
+    360:  "360p",
+    240:  "240p",
+    144:  "144p",
+}
+
 
 class SmartParser:
     """Detects streaming platform and extracts video/series ID and metadata."""
@@ -83,6 +96,144 @@ class SmartParser:
             return {"service": "ytdlp", "mode": "video", "target_id": url}
 
         return None
+
+    @staticmethod
+    def _extract_ytdlp_metadata(target_id: str) -> Dict[str, Any]:
+        """
+        Extract full video metadata using yt-dlp including ALL available
+        resolutions (up to 8K), subtitles, auto-captions, duration, and more.
+        """
+        try:
+            import yt_dlp
+            from urllib.parse import urlparse
+
+            # Use 'all' format to get every available format stream
+            ydl_opts = {
+                'skip_download': True,
+                'quiet': True,
+                'no_warnings': True,
+                # Request all formats so we see every available resolution
+                'listformats': False,
+                # Don't limit format selection — we want the full formats list
+                'format': 'bestvideo*+bestaudio/best',
+                # Don't apply any geo-restrictions or age-gate filter
+                'age_limit': None,
+                # Include all formats in the extraction
+                'youtube_include_dash_manifest': True,
+                'youtube_include_hls_manifest': True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_id, download=False)
+
+            if not info:
+                raise ValueError("yt-dlp returned no info")
+
+            title = info.get("title") or ""
+            description = info.get("description") or ""
+            if description and len(description) > 250:
+                description = description[:250] + "..."
+            thumbnail = info.get("thumbnail") or ""
+            duration_secs = info.get("duration")
+            uploader = info.get("uploader") or info.get("channel") or ""
+            view_count = info.get("view_count")
+            like_count = info.get("like_count")
+            upload_date = info.get("upload_date")  # YYYYMMDD string
+
+            # ── Resolve ALL available resolutions ───────────────────────────
+            formats = info.get("formats") or []
+            height_set: set[int] = set()
+
+            for f in formats:
+                h = f.get("height")
+                # Skip audio-only streams (no height), and non-integer heights
+                if h and isinstance(h, int) and h > 0:
+                    # Only include actual video formats (not audio-only)
+                    vcodec = f.get("vcodec") or ""
+                    if vcodec and vcodec != "none":
+                        height_set.add(h)
+
+            # If no video-codec-tagged formats found, fall back to any with height
+            if not height_set:
+                for f in formats:
+                    h = f.get("height")
+                    if h and isinstance(h, int) and h > 0:
+                        height_set.add(h)
+
+            sorted_heights = sorted(height_set, reverse=True)
+
+            # Build resolution list — use descriptive labels for known heights
+            avail_res = []
+            for h in sorted_heights:
+                label = RESOLUTION_LABELS.get(h, f"{h}p")
+                avail_res.append(label)
+
+            # Always expose at least a basic set as fallback
+            if not avail_res:
+                avail_res = ["1080p (Full HD)", "720p (HD)", "480p (SD)", "360p"]
+
+            # ── Subtitles & Auto-Captions ────────────────────────────────────
+            subtitles = info.get("subtitles") or {}
+            auto_subs = info.get("automatic_captions") or {}
+
+            avail_subs = sorted(subtitles.keys())
+            avail_auto = sorted(auto_subs.keys())
+
+            # ── Extra metadata ───────────────────────────────────────────────
+            domain = urlparse(target_id).netloc.replace("www.", "")
+            if not title:
+                title = f"Video sa {domain}"
+
+            extra: Dict[str, Any] = {}
+            if duration_secs:
+                mins, secs = divmod(int(duration_secs), 60)
+                hours, mins = divmod(mins, 60)
+                if hours:
+                    extra["duration_str"] = f"{hours}h {mins}m {secs}s"
+                else:
+                    extra["duration_str"] = f"{mins}m {secs}s"
+                extra["duration_secs"] = duration_secs
+            if uploader:
+                extra["uploader"] = uploader
+            if view_count is not None:
+                extra["view_count"] = view_count
+            if like_count is not None:
+                extra["like_count"] = like_count
+            if upload_date:
+                try:
+                    from datetime import datetime
+                    dt = datetime.strptime(upload_date, "%Y%m%d")
+                    extra["upload_date"] = dt.strftime("%d.%m.%Y")
+                except Exception:
+                    extra["upload_date"] = upload_date
+
+            return {
+                "success": True,
+                "service": "ytdlp",
+                "mode": "video",
+                "target_id": target_id,
+                "title": title,
+                "description": description or "Preuzmite video preko univerzalnog preuzimača.",
+                "thumbnail": thumbnail,
+                "available_resolutions": avail_res,
+                "available_subtitles": avail_subs,
+                "available_auto_subtitles": avail_auto,
+                **extra
+            }
+
+        except Exception as ex:
+            logger.warning(f"yt-dlp metadata extraction failed: {ex}")
+            from urllib.parse import urlparse
+            domain = urlparse(target_id).netloc.replace("www.", "")
+            return {
+                "success": True,
+                "service": "ytdlp",
+                "mode": "video",
+                "target_id": target_id,
+                "title": f"Video sa {domain}",
+                "description": f"Započnite preuzimanje sa adrese: {target_id[:80]}",
+                "thumbnail": ""
+            }
 
     @staticmethod
     def get_metadata(url: str) -> Dict[str, Any]:
@@ -207,56 +358,7 @@ class SmartParser:
                 }
 
             elif service == "ytdlp":
-                # Extract metadata dynamically using yt-dlp asynchronously
-                try:
-                    import yt_dlp
-                    import urllib.parse
-                    
-                    ydl_opts = {
-                        'extract_flat': True,
-                        'skip_download': True,
-                        'quiet': True,
-                        'no_warnings': True,
-                    }
-                    
-                    # Call yt-dlp info extraction
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(target_id, download=False)
-                        
-                    title = info.get("title")
-                    description = info.get("description", "")
-                    if description and len(description) > 200:
-                        description = description[:200] + "..."
-                    thumbnail = info.get("thumbnail", "")
-                    
-                    from urllib.parse import urlparse
-                    domain = urlparse(target_id).netloc.replace("www.", "")
-                    
-                    if not title:
-                        title = f"Video sa {domain}"
-                        
-                    return {
-                        "success": True,
-                        "service": "ytdlp",
-                        "mode": "video",
-                        "target_id": target_id,
-                        "title": title,
-                        "description": description or "Preuzmite video preko univerzalnog preuzimača.",
-                        "thumbnail": thumbnail
-                    }
-                except Exception as ex:
-                    logger.warning(f"Fast yt-dlp metadata extraction failed: {ex}")
-                    from urllib.parse import urlparse
-                    domain = urlparse(target_id).netloc.replace("www.", "")
-                    return {
-                        "success": True,
-                        "service": "ytdlp",
-                        "mode": "video",
-                        "target_id": target_id,
-                        "title": f"Video sa {domain}",
-                        "description": f"Započnite preuzimanje sa adrese: {target_id[:60]}...",
-                        "thumbnail": ""
-                    }
+                return SmartParser._extract_ytdlp_metadata(target_id)
 
         except Exception as e:
             logger.exception(f"Error fetching metadata for {url}")
