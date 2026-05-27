@@ -48,6 +48,16 @@ interface ServiceStatus {
   engine_status?: {
     message?: string;
     download_supported?: boolean;
+    cdm_ready?: boolean;
+    api?: {
+      configured?: boolean;
+      base_url?: string;
+    };
+    token?: {
+      configured?: boolean;
+      expires_at?: string | null;
+      expired?: boolean;
+    };
   };
   email?: string;
   username?: string;
@@ -132,9 +142,6 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function isUrlLike(value: string): boolean {
-  return /^https?:\/\//i.test(value.trim());
-}
 
 // Service metadata for sidebar
 const SERVICE_META = [
@@ -401,6 +408,8 @@ export default function App() {
 
   // EON Tab Form State
   const [eonMode, setEonMode] = useState<"vod" | "series" | "live">("vod");
+  const [eonLiveInputMode, setEonLiveInputMode] = useState<"catalog" | "url">("catalog");
+  const [saveFeedback, setSaveFeedback] = useState<boolean>(false);
   const [eonTarget, setEonTarget] = useState<string>("");
   const [eonDuration, setEonDuration] = useState<number>(3600); // F5: 1h default
   const [eonEpisodesRange, setEonEpisodesRange] = useState<string>("");
@@ -727,6 +736,8 @@ export default function App() {
       });
       if (res.ok) {
         showToast("Podešavanja uspešno sačuvana!");
+        setSaveFeedback(true);
+        setTimeout(() => setSaveFeedback(false), 2500);
         fetchStatus();
       } else {
         showToast("Greška pri čuvanju podešavanja", "error");
@@ -1303,8 +1314,10 @@ export default function App() {
                 <Zap style={{width:24,height:24,color:"white"}} />
               </div>
               <div style={{flex:1}}>
-                <h2 className="text-2xl font-extrabold text-white mb-1">Pametno Preuzimanje</h2>
-                <p className="text-text-secondary text-sm">Nalepite link — automatski prepoznajemo servis, analiziramo sadržaj i pokrećemo preuzimanje.</p>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Zap className="w-6 h-6 text-amber-400" /> Pametno Preuzimanje
+                </h2>
+                <p className="text-text-secondary text-sm">Unesite URL adresu za automatsko prepoznavanje i preuzimanje videa sa podržanih servisa.</p>
               </div>
             </div>
 
@@ -1548,8 +1561,10 @@ export default function App() {
                 <Tv style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">Voyo RS</h2>
-                <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz Widevine dekripciju.</p>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Tv className="w-6 h-6 text-orange-500" /> Voyo RS
+                </h2>
+                <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz Widevine dekripciju. Podržava automatsko preuzimanje titlova i spajanje.</p>
               </div>
             </div>
 
@@ -1713,6 +1728,16 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Voyo Tech / DRM info box */}
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
+                  <h4 className="font-bold text-sm flex items-center gap-2 text-orange-400">
+                    <ShieldAlert className="w-4 h-4" />
+                    Widevine & DRM Podrška
+                  </h4>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Voyo.rs koristi AES-128 enkripciju i Widevine DRM. Naš pozadinski preuzimač automatski preuzima ključeve i vrši dekripciju bez potrebe za eksternim CDM ključevima.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1726,138 +1751,184 @@ export default function App() {
                 <Film style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">HRTi Catalog</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Film className="w-6 h-6 text-cyan-400" /> HRTi Catalog
+                </h2>
                 <p className="text-text-secondary text-sm">Pregledajte, pretražujte i preuzmite filmove i serije sa HRTi streaming servisa.</p>
               </div>
             </div>
 
-            <div className="flex flex-col gap-6">
-              
-              {/* Category selector & Search bar */}
-              <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col md:flex-row gap-4 justify-between items-center">
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                  <label className="m-0 text-xs" style={{whiteSpace:"nowrap"}}>Kategorija:</label>
-                  <CustomSelect
-                    value={selectedCat}
-                    options={hrtiCats}
-                    onChange={(val) => {
-                      setSelectedCat(val);
-                      fetchHrtiCategoryItems(val, 1);
-                    }}
-                    formatLabel={(v) => v.replace(/_/g, " ").toUpperCase()}
-                    className="md-w-64"
-                  />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* Left Column — Selector & Grid */}
+              <div className="md:col-span-2 flex flex-col gap-6">
+                
+                {/* Category selector & Search bar */}
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col md:flex-row gap-4 justify-between items-center">
+                  <div className="flex items-center gap-3 w-full md:w-auto">
+                    <label className="m-0 text-xs" style={{whiteSpace:"nowrap"}}>Kategorija:</label>
+                    <CustomSelect
+                      value={selectedCat}
+                      options={hrtiCats}
+                      onChange={(val) => {
+                        setSelectedCat(val);
+                        fetchHrtiCategoryItems(val, 1);
+                      }}
+                      formatLabel={(v) => v.replace(/_/g, " ").toUpperCase()}
+                      className="md-w-64"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 w-full md:w-96">
+                    <input
+                      type="text"
+                      placeholder="Pretraži film ili seriju..."
+                      value={hrtiSearchQuery}
+                      onChange={(e) => setHrtiSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && searchHrti()}
+                    />
+                    <button onClick={searchHrti} className="btn btn-secondary">
+                      <Search className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex gap-2 w-full md:w-96">
-                  <input
-                    type="text"
-                    placeholder="Pretraži film ili seriju..."
-                    value={hrtiSearchQuery}
-                    onChange={(e) => setHrtiSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && searchHrti()}
-                  />
-                  <button onClick={searchHrti} className="btn btn-secondary">
-                    <Search className="w-4 h-4" />
-                  </button>
+                {/* Items Grid */}
+                <div className="glass-panel p-8 rounded-xl border border-glass min-h-96 relative">
+                  {hrtiLoadingItems && (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-xl">
+                      <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+                    </div>
+                  )}
+
+                  {selectedHrtiSeries ? (
+                    <div className="flex justify-between items-center mb-6">
+                      <div className="flex items-center gap-2">
+                        <Film className="w-5 h-5 text-indigo-400" />
+                        <h3 className="font-extrabold text-xl text-white">Epizode za: {selectedHrtiSeries.title}</h3>
+                      </div>
+                      <button
+                        onClick={() => fetchHrtiCategoryItems(selectedCat, 1)}
+                        className="btn btn-secondary text-xs py-2 px-4"
+                      >
+                        Nazad na kategoriju
+                      </button>
+                    </div>
+                  ) : (
+                    <h3 className="font-extrabold text-xl mb-6 text-white">Sadržaj na HRTi</h3>
+                  )}
+
+                  {catItems.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-20 text-center">
+                      <AlertCircle className="w-12 h-12 text-text-muted mb-4" />
+                      <p className="text-text-secondary font-semibold">Nema pronađenog sadržaja.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {catItems.map((item) => (
+                        <div key={item.id} className="glass-card hrti-grid-card p-5 flex flex-col justify-between gap-3">
+                          {/* V5: Gradient thumbnail placeholder */}
+                          <div className={`hrti-thumbnail ${item.type === "movie" ? "hrti-thumbnail-movie" : "hrti-thumbnail-series"}`}>
+                            {item.type === "movie"
+                              ? <Film className="w-8 h-8 hrti-thumbnail-icon text-indigo-300" />
+                              : <Tv className="w-8 h-8 hrti-thumbnail-icon text-purple-300" />
+                            }
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-2">
+                              {item.type === "movie" ? (
+                                <span className="badge flex items-center gap-1.5 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-bold px-2 py-0.5 text-[10px]">
+                                  <Film className="w-3 h-3" /> FILM
+                                </span>
+                              ) : (
+                                <span className="badge flex items-center gap-1.5 bg-purple-500/10 border-purple-500/30 text-purple-400 font-bold px-2 py-0.5 text-[10px]">
+                                  <Tv className="w-3 h-3" /> SERIJA
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="font-bold text-white text-base leading-snug line-clamp-2">{item.title}</h4>
+                            <p className="text-[10px] text-text-muted font-mono mt-1 truncate">{item.id}</p>
+                          </div>
+
+                          <div className="flex gap-2">
+                            {item.type === "series" ? (
+                              <button
+                                onClick={() => fetchHrtiSeriesEpisodes(item.id, item.title)}
+                                className="btn btn-secondary w-full text-xs py-2"
+                              >
+                                <List className="w-3.5 h-3.5" />
+                                Prikaži Epizode
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => startHrtiDownload(item.id, item.title)}
+                                className="btn btn-primary w-full text-xs py-2"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                Preuzmi Video
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Pagination */}
+                  {!selectedHrtiSeries && catTotalPages > 1 && (
+                    <div className="flex justify-center items-center gap-4 mt-10">
+                      <button
+                        disabled={catPage <= 1}
+                        onClick={() => fetchHrtiCategoryItems(selectedCat, catPage - 1)}
+                        className="btn btn-secondary text-xs py-2"
+                      >
+                        Prethodna
+                      </button>
+                      <span className="text-sm font-bold text-text-secondary">Stranica {catPage} od {catTotalPages}</span>
+                      <button
+                        disabled={catPage >= catTotalPages}
+                        onClick={() => fetchHrtiCategoryItems(selectedCat, catPage + 1)}
+                        className="btn btn-secondary text-xs py-2"
+                      >
+                        Sledeća
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Items Grid */}
-              <div className="glass-panel p-8 rounded-xl border border-glass min-h-96 relative">
-                {hrtiLoadingItems && (
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-xl">
-                    <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
-                  </div>
-                )}
-
-                {selectedHrtiSeries ? (
-                  <div className="flex justify-between items-center mb-6">
-                    <div className="flex items-center gap-2">
-                      <Film className="w-5 h-5 text-indigo-400" />
-                      <h3 className="font-extrabold text-xl text-white">Epizode za: {selectedHrtiSeries.title}</h3>
+              {/* Right Column — Status & Details */}
+              <div className="flex flex-col gap-6">
+                <div className="glass-panel p-6 rounded-xl border border-glass">
+                  <h3 className="font-bold text-base mb-4 flex items-center gap-2">
+                    <User className="w-5 h-5 text-indigo-400" />
+                    Status Naloga
+                  </h3>
+                  
+                  {status?.services.hrti.authenticated ? (
+                    <div className="flex flex-col gap-3">
+                      <span className="badge badge-connected">Prijavljen</span>
+                      <p className="text-sm font-semibold text-white">E-mail: <span className="text-text-secondary font-normal">{status.services.hrti.email}</span></p>
                     </div>
-                    <button
-                      onClick={() => fetchHrtiCategoryItems(selectedCat, 1)}
-                      className="btn btn-secondary text-xs py-2 px-4"
-                    >
-                      Nazad na kategoriju
-                    </button>
-                  </div>
-                ) : (
-                  <h3 className="font-extrabold text-xl mb-6 text-white">Sadržaj na HRTi</h3>
-                )}
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <span className="badge badge-missing">Nije prijavljen</span>
+                      <p className="text-xs text-text-secondary">Prijavite se u "Postavkama" da biste otključali HRTi preuzimanja.</p>
+                    </div>
+                  )}
+                </div>
 
-                {catItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-20 text-center">
-                    <AlertCircle className="w-12 h-12 text-text-muted mb-4" />
-                    <p className="text-text-secondary font-semibold">Nema pronađenog sadržaja.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {catItems.map((item) => (
-                      <div key={item.id} className="glass-card p-5 flex flex-col justify-between gap-3">
-                        {/* V5: Gradient thumbnail placeholder */}
-                        <div className={`hrti-thumbnail ${item.type === "movie" ? "hrti-thumbnail-movie" : "hrti-thumbnail-series"}`}>
-                          {item.type === "movie"
-                            ? <Film className="w-8 h-8 hrti-thumbnail-icon text-indigo-300" />
-                            : <Tv className="w-8 h-8 hrti-thumbnail-icon text-purple-300" />
-                          }
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className={`badge ${item.type === "movie" ? "badge-connected" : "badge-warning"}`}>
-                              {item.type}
-                            </span>
-                          </div>
-                          <h4 className="font-bold text-white text-base leading-snug line-clamp-2">{item.title}</h4>
-                          <p className="text-[10px] text-text-muted font-mono mt-1 truncate">{item.id}</p>
-                        </div>
-
-                        <div className="flex gap-2">
-                          {item.type === "series" ? (
-                            <button
-                              onClick={() => fetchHrtiSeriesEpisodes(item.id, item.title)}
-                              className="btn btn-secondary w-full text-xs py-2"
-                            >
-                              <List className="w-3.5 h-3.5" />
-                              Prikaži Epizode
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => startHrtiDownload(item.id, item.title)}
-                              className="btn btn-primary w-full text-xs py-2"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              Preuzmi Video
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Pagination */}
-                {!selectedHrtiSeries && catTotalPages > 1 && (
-                  <div className="flex justify-center items-center gap-4 mt-10">
-                    <button
-                      disabled={catPage <= 1}
-                      onClick={() => fetchHrtiCategoryItems(selectedCat, catPage - 1)}
-                      className="btn btn-secondary text-xs py-2"
-                    >
-                      Prethodna
-                    </button>
-                    <span className="text-sm font-bold text-text-secondary">Stranica {catPage} od {catTotalPages}</span>
-                    <button
-                      disabled={catPage >= catTotalPages}
-                      onClick={() => fetchHrtiCategoryItems(selectedCat, catPage + 1)}
-                      className="btn btn-secondary text-xs py-2"
-                    >
-                      Sledeća
-                    </button>
-                  </div>
-                )}
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
+                  <h4 className="font-bold text-sm flex items-center gap-2 text-cyan-400">
+                    <Info className="w-4 h-4" />
+                    O HRTi Katalogu
+                  </h4>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    HRTi katalog učitava najnovije filmove i serije direktno sa HRT platforme.
+                  </p>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Preuzimanje serija podržava automatsko izlistavanje i selekciju pojedinačnih epizoda za preuzimanje.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1871,7 +1942,9 @@ export default function App() {
                 <Play style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">EON TV</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Play className="w-6 h-6 text-emerald-400" /> EON TV
+                </h2>
                 <p className="text-text-secondary text-sm">VOD sadržaj, serije i TV kanali uživo sa Widevine DRM dekripcijom i API katalogom.</p>
               </div>
             </div>
@@ -1916,25 +1989,52 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Bug 2 Fix: Live mode shows ONLY select, no duplicate input */}
                 {eonMode === "live" ? (
-                  <div>
-                    <label>Izaberite TV Kanal</label>
-                    <CustomSelect
-                      value={eonTarget}
-                      options={eonChannels}
-                      onChange={(val) => setEonTarget(val)}
-                      placeholder="-- Izaberi kanal iz liste --"
-                      searchPlaceholder="Pretraži kanale..."
-                    />
-                    <p className="text-[10px] text-text-muted mt-1.5">Lista se čita iz eon_channels.json ako ga napravite u rootu aplikacije ili ~/.videodownload.</p>
-                    <input
-                      type="text"
-                      className="mt-3"
-                      placeholder="ili nalepite direktan live URL (.m3u8/.mpd)"
-                      value={isUrlLike(eonTarget) ? eonTarget : ""}
-                      onChange={(e) => setEonTarget(e.target.value)}
-                    />
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <label>Mod unosa TV kanala</label>
+                      <div className="flex gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => { setEonLiveInputMode("catalog"); setEonTarget(""); }}
+                          className={`btn text-xs py-1.5 px-4 ${eonLiveInputMode === "catalog" ? "btn-primary" : "btn-secondary"}`}
+                        >
+                          Izaberi iz liste
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEonLiveInputMode("url"); setEonTarget(""); }}
+                          className={`btn text-xs py-1.5 px-4 ${eonLiveInputMode === "url" ? "btn-primary" : "btn-secondary"}`}
+                        >
+                          Direktan live URL
+                        </button>
+                      </div>
+                    </div>
+
+                    {eonLiveInputMode === "catalog" ? (
+                      <div>
+                        <label>Izaberite TV Kanal</label>
+                        <CustomSelect
+                          value={eonTarget}
+                          options={eonChannels}
+                          onChange={(val) => setEonTarget(val)}
+                          placeholder="-- Izaberi kanal iz liste --"
+                          searchPlaceholder="Pretraži kanale..."
+                        />
+                        <p className="text-[10px] text-text-muted mt-1.5">Lista se čita iz eon_channels.json ako ga napravite u rootu aplikacije ili ~/.videodownload.</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label>Direktan Live URL (.m3u8 / .mpd)</label>
+                        <input
+                          type="text"
+                          placeholder="npr. https://.../live/index.m3u8"
+                          value={eonTarget}
+                          onChange={(e) => setEonTarget(e.target.value)}
+                        />
+                        <p className="text-[10px] text-text-muted mt-1.5">Zalepite m3u8 manifest link iz browsera ili m3u8 strim.</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div>
@@ -2086,11 +2186,52 @@ export default function App() {
                       <p className="text-sm font-semibold text-white">Nalog: <span className="text-text-secondary font-normal">{eonStatus.username}</span></p>
                       <p className="text-xs text-text-muted">Serijski broj: {eonStatus.serial}</p>
                       <p className="text-xs text-text-muted">Broj uredjaja: {eonStatus.number}</p>
+                      
+                      {/* EON API status details */}
+                      <div className="border-t border-glass pt-3 mt-1 flex flex-col gap-1.5">
+                        <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">EON API & CDM status:</span>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-text-secondary">API Konekcija:</span>
+                          <span className={eonStatus.engine_status?.api?.configured ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                            {eonStatus.engine_status?.api?.configured ? "Povezana ✓" : "Nije povezana"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-text-secondary">CDM Decryption:</span>
+                          <span className={eonStatus.engine_status?.cdm_ready ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                            {eonStatus.engine_status?.cdm_ready ? "Učitan ✓" : "device.wvd nedostaje"}
+                          </span>
+                        </div>
+                        {eonStatus.engine_status?.token?.expires_at && (
+                          <div className="flex flex-col text-[10px] text-text-muted mt-1">
+                            <span>Token ističe:</span>
+                            <span className="font-mono text-white truncate">{eonStatus.engine_status.token.expires_at}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
                       <span className="badge badge-warning">Nije spreman</span>
                       <p className="text-xs text-text-secondary">{eonStatus?.error || "Registrujte EON nalog i proverite engine/dependencies."}</p>
+                      
+                      {/* EON API status details even when not fully ready */}
+                      <div className="border-t border-glass pt-3 mt-1 flex flex-col gap-1.5">
+                        <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">EON API & CDM status:</span>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-text-secondary">API Konekcija:</span>
+                          <span className={eonStatus?.engine_status?.api?.configured ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                            {eonStatus?.engine_status?.api?.configured ? "Povezana ✓" : "Nije povezana"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-text-secondary">CDM Decryption:</span>
+                          <span className={eonStatus?.engine_status?.cdm_ready ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                            {eonStatus?.engine_status?.cdm_ready ? "Učitan ✓" : "device.wvd nedostaje"}
+                          </span>
+                        </div>
+                      </div>
+
                       {eonMissing.length > 0 && (
                         <p className="text-[10px] text-text-muted font-mono break-all">Missing: {eonMissing.join(", ")}</p>
                       )}
@@ -2215,7 +2356,9 @@ export default function App() {
                 <Radio style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">RTS Planeta</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Radio className="w-6 h-6 text-rose-500" /> RTS Planeta
+                </h2>
                 <p className="text-text-secondary text-sm">Preuzmite filmove i epizode serija sa RTS Planeta platforme. Podržava Widevine L3 dekripciju.</p>
                 <p className="text-xs text-text-muted mt-1">Primeri linkova: <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">rtsplaneta.rs/sr_lat/serial/...</code> ili <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">.../film/...</code></p>
               </div>
@@ -2307,6 +2450,21 @@ export default function App() {
                     RTS Planeta koristi Widevine enkripciju. Proverite da li imate sačuvan <code className="font-mono text-indigo-400 bg-white/[0.04] px-1 py-0.5 rounded">device.wvd</code> fajl u folderu binaries ili rootu aplikacije.
                   </p>
                 </div>
+
+                {/* RTS Tutorial Box */}
+                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
+                  <h4 className="font-bold text-sm flex items-center gap-2 text-indigo-400">
+                    <Info className="w-4 h-4" />
+                    Kako preuzeti sa RTS-a:
+                  </h4>
+                  <ol className="text-xs text-text-secondary list-decimal pl-4 flex flex-col gap-2">
+                    <li>Prijavite se na sajt <a href="https://rtsplaneta.rs" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">rtsplaneta.rs</a>.</li>
+                    <li>Kopirajte URL adresu filma ili serije.</li>
+                    <li>Nalepite link u polje sa leve strane.</li>
+                    <li>Unesite raspon epizoda po potrebi.</li>
+                    <li>Kliknite "Započni Preuzimanje" za preuzimanje epizoda.</li>
+                  </ol>
+                </div>
               </div>
             </div>
           </div>
@@ -2320,7 +2478,9 @@ export default function App() {
                 <Clapperboard style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">HBO Max</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Clapperboard className="w-6 h-6 text-purple-400" /> HBO Max
+                </h2>
                 <p className="text-text-secondary text-sm">Prijava uređaja, preuzimanje po Video ID-u, ili Bypass Mode sa direktnim MPD/License URL-ovima.</p>
               </div>
             </div>
@@ -2375,7 +2535,7 @@ export default function App() {
                         
                         <button
                           onClick={startHboLogin}
-                          className="btn btn-secondary py-3 px-6 h-[46px]"
+                          className="btn btn-secondary btn-align-select px-6"
                         >
                           Pokreni Prijavu
                         </button>
@@ -2549,7 +2709,9 @@ export default function App() {
                 <Settings style={{width:24,height:24,color:"white"}} />
               </div>
               <div>
-                <h2 className="text-2xl font-extrabold text-white mb-1">Postavke Aplikacije</h2>
+                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                  <Settings className="w-6 h-6 text-indigo-400" /> Postavke Aplikacije
+                </h2>
                 <p className="text-text-secondary text-sm">Podesite kredencijale za servise, izlazni direktorijum i putanje do eksternih alata.</p>
               </div>
             </div>
@@ -2623,7 +2785,8 @@ export default function App() {
                             type="text"
                             value={binariesPaths[name] || ""}
                             onChange={(e) => setBinariesPaths({ ...binariesPaths, [name]: e.target.value })}
-                            className="py-1.5 px-3 text-xs font-mono"
+                            title={binariesPaths[name] || ""}
+                            className="py-1.5 px-3 text-xs font-mono settings-path-input"
                           />
                         </div>
                       );
@@ -2631,8 +2794,19 @@ export default function App() {
                   </div>
                 </div>
 
-"                <button onClick={handleSaveConfig} className="btn btn-primary self-end">
-                  Sačuvaj Podešavanja
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={saveFeedback}
+                  className={`btn self-end transition-all ${saveFeedback ? "bg-emerald-600 text-white border border-emerald-500 shadow-emerald" : "btn-primary"}`}
+                >
+                  {saveFeedback ? (
+                    <span className="flex items-center gap-2">
+                      <Check className="w-4 h-4" />
+                      Podešavanja sačuvana!
+                    </span>
+                  ) : (
+                    "Sačuvaj Podešavanja"
+                  )}
                 </button>
               </div>
 

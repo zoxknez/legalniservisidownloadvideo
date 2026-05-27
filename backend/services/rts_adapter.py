@@ -11,12 +11,13 @@ CWD = Path(__file__).parent.parent.parent.resolve()
 class RtsAdapter:
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
-        """Check if RTS has stored credentials in app config."""
+        """Check if RTS has stored credentials (both email AND password) in app config."""
         creds = config.get_credentials("rtsplaneta")
         email = creds.get("email", "")
-        if email:
+        password = creds.get("password", "")
+        if email and password:
             return {"authenticated": True, "email": email}
-        return {"authenticated": False, "email": "", "error": "No credentials stored"}
+        return {"authenticated": False, "email": email, "error": "No credentials stored"}
 
     @staticmethod
     def save_credentials(email: str, password: str) -> Dict[str, Any]:

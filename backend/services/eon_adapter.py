@@ -13,6 +13,11 @@ from backend.config import config
 logger = logging.getLogger(__name__)
 CWD = Path(__file__).parent.parent.parent.resolve()
 
+# Cache for EON engine health check — avoid spawning subprocess on every /api/status poll
+_eon_health_cache: Dict[str, Any] = {}
+_eon_health_cache_ts: float = 0.0
+_EON_HEALTH_TTL = 60  # seconds
+
 
 class EonAdapter:
     SCRIPT_NAME = "eon_downloader.py"
@@ -85,8 +90,17 @@ class EonAdapter:
 
     @classmethod
     def _engine_status(cls) -> Dict[str, Any]:
+        import time
+        global _eon_health_cache, _eon_health_cache_ts
+        now = time.monotonic()
+        if _eon_health_cache and (now - _eon_health_cache_ts) < _EON_HEALTH_TTL:
+            return _eon_health_cache
+
         if not all((CWD / script_file).exists() for script_file in cls.SCRIPT_FILES):
-            return {"available": False, "download_supported": False, "message": "EON engine files are missing."}
+            result = {"available": False, "download_supported": False, "message": "EON engine files are missing."}
+            _eon_health_cache = result
+            _eon_health_cache_ts = now
+            return result
 
         try:
             res = subprocess.run(
@@ -99,28 +113,32 @@ class EonAdapter:
                 timeout=10,
             )
             if res.returncode != 0:
-                return {
+                result = {
                     "available": True,
                     "download_supported": False,
                     "message": cls._redact_text(res.stderr or res.stdout or "EON engine health check failed."),
                 }
-            payload = json.loads(res.stdout or "{}")
-            return {
-                "available": True,
-                "download_supported": bool(payload.get("download_supported")),
-                "message": payload.get("message", ""),
-                "capabilities": payload.get("capabilities", {}),
-                "api": payload.get("api", {}),
-                "catalog": payload.get("catalog", {}),
-                "device": payload.get("device", {}),
-                "token": payload.get("token", {}),
-            }
+            else:
+                payload = json.loads(res.stdout or "{}")
+                result = {
+                    "available": True,
+                    "download_supported": bool(payload.get("download_supported")),
+                    "message": payload.get("message", ""),
+                    "capabilities": payload.get("capabilities", {}),
+                    "api": payload.get("api", {}),
+                    "catalog": payload.get("catalog", {}),
+                    "device": payload.get("device", {}),
+                    "token": payload.get("token", {}),
+                }
         except Exception as exc:
-            return {
+            result = {
                 "available": True,
                 "download_supported": False,
                 "message": cls._redact_text(str(exc)),
             }
+        _eon_health_cache = result
+        _eon_health_cache_ts = now
+        return result
 
     @classmethod
     def get_health(cls) -> Dict[str, Any]:

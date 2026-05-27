@@ -52,19 +52,37 @@ async def websocket_endpoint(websocket: WebSocket):
 # ── General Routes ────────────────────────────────────────────────────────────
 
 @app.get("/api/status")
-def get_system_status():
-    """Returns credential status for all downloaders and paths status for tools."""
+async def get_system_status():
+    """Returns credential status for all downloaders and paths status for tools (parallel)."""
     binaries = config.check_binaries_status()
-    
+
+    # Run all service auth checks in parallel using executor to not block the event loop
+    loop = asyncio.get_running_loop()
+    voyo_task   = loop.run_in_executor(None, VoyoAdapter.get_auth_status)
+    hrti_task   = loop.run_in_executor(None, HrtiAdapter.get_auth_status)
+    eon_task    = loop.run_in_executor(None, EonAdapter.get_auth_status)
+    rts_task    = loop.run_in_executor(None, RtsAdapter.get_auth_status)
+    hbomax_task = loop.run_in_executor(None, HboAdapter.get_auth_status)
+
+    voyo, hrti, eon, rts, hbomax = await asyncio.gather(
+        voyo_task, hrti_task, eon_task, rts_task, hbomax_task,
+        return_exceptions=True
+    )
+
+    def safe(r):
+        if isinstance(r, Exception):
+            return {"authenticated": False, "error": str(r)}
+        return r
+
     return {
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
         "services": {
-            "voyo": VoyoAdapter.get_auth_status(),
-            "hrti": HrtiAdapter.get_auth_status(),
-            "eon": EonAdapter.get_auth_status(),
-            "rtsplaneta": RtsAdapter.get_auth_status(),
-            "hbomax": HboAdapter.get_auth_status()
+            "voyo":       safe(voyo),
+            "hrti":       safe(hrti),
+            "eon":        safe(eon),
+            "rtsplaneta": safe(rts),
+            "hbomax":     safe(hbomax)
         }
     }
 

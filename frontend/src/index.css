@@ -1205,13 +1205,33 @@ textarea {
   display: flex;
   align-items: flex-start;
   gap: 18px;
-  padding: 2rem;
+  padding: 2.25rem 2rem;
   margin-bottom: 2rem;
   border-radius: 18px;
-  background: rgba(99,102,241,0.05);
-  border: 1px solid rgba(99,102,241,0.12);
+  background: rgba(99, 102, 241, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+
+.tab-page-header::after {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: -60px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(99, 102, 241, 0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tab-page-header > * {
+  position: relative;
+  z-index: 1;
 }
 
 .tab-page-header-icon {
@@ -1223,7 +1243,9 @@ textarea {
   justify-content: center;
   font-size: 1.5rem;
   flex-shrink: 0;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 2;
 }
 
 /* ══════════════════════════════════════════
@@ -1569,5 +1591,63 @@ textarea {
   border-color: #10b981;
   box-shadow: 0 2px 12px rgba(16,185,129,0.3);
 }
+
+/* Service specific header glow pseudo orbs */
+.tab-header-voyo::after {
+  background: radial-gradient(circle, rgba(249, 115, 22, 0.16) 0%, rgba(249, 115, 22, 0) 70%) !important;
+}
+.tab-header-hrti::after {
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.16) 0%, rgba(6, 182, 212, 0) 70%) !important;
+}
+.tab-header-eon::after {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.16) 0%, rgba(16, 185, 129, 0) 70%) !important;
+}
+.tab-header-rts::after {
+  background: radial-gradient(circle, rgba(244, 63, 94, 0.16) 0%, rgba(244, 63, 94, 0) 70%) !important;
+}
+.tab-header-hbo::after {
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.18) 0%, rgba(147, 51, 234, 0) 70%) !important;
+}
+.tab-header-dash::after {
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.16) 0%, rgba(251, 191, 36, 0) 70%) !important;
+}
+.tab-header-settings::after {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.16) 0%, rgba(99, 102, 241, 0) 70%) !important;
+}
+
+/* HRTi Catalog Premium Card Hover Glow */
+.hrti-grid-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+.hrti-grid-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(6, 182, 212, 0.25) !important;
+  box-shadow: 0 8px 24px rgba(6, 182, 212, 0.15) !important;
+}
+
+/* Explicit size limits to guarantee CustomSelect trigger and action buttons align perfectly */
+.custom-select-trigger {
+  height: 42px !important;
+  box-sizing: border-box !important;
+}
+.btn-align-select {
+  height: 42px !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Settings binary inputs displaying the end of paths first */
+.settings-path-input {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+}
+.settings-path-input:focus {
+  direction: ltr; /* switch back to standard left-to-right editing experience when focused */
+}
+
 
 

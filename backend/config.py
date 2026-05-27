@@ -42,13 +42,15 @@ class AppConfig:
         self.data = self._load()
 
     def _merge_defaults(self, loaded: Dict[str, Any]) -> Dict[str, Any]:
+        def deep_merge(dict1: dict, dict2: dict) -> dict:
+            for key, value in dict2.items():
+                if isinstance(value, dict) and key in dict1 and isinstance(dict1[key], dict):
+                    deep_merge(dict1[key], value)
+                else:
+                    dict1[key] = json.loads(json.dumps(value))
+            return dict1
         merged = json.loads(json.dumps(DEFAULT_CONFIG))
-        for k, v in loaded.items():
-            if isinstance(v, dict) and k in merged:
-                merged[k].update(v)
-            else:
-                merged[k] = v
-        return merged
+        return deep_merge(merged, loaded)
 
     def _load(self) -> Dict[str, Any]:
         for path in (self.config_file, FALLBACK_CONFIG_FILE):

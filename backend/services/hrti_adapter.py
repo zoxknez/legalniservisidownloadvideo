@@ -14,14 +14,10 @@ CWD = Path(__file__).parent.parent.parent.resolve()
 class HrtiAdapter:
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
-        """Check if HRTi has credentials saved."""
+        """Check if HRTi has credentials saved (no network calls, no subprocess)."""
         cfg_path = Path.home() / ".hrti" / "config.json"
-        
-        # Sync credentials from app config to HRTi if they aren't saved
-        app_creds = config.get_credentials("hrti")
-        email = app_creds.get("email", "")
-        password = app_creds.get("password", "")
 
+        # Check native HRTi config file first
         if cfg_path.exists():
             try:
                 with open(cfg_path, "r", encoding="utf-8") as f:
@@ -31,19 +27,14 @@ class HrtiAdapter:
                         return {"authenticated": True, "email": h_email}
             except Exception:
                 pass
-                
+
+        # Fall back to checking app config credentials (no network call)
+        app_creds = config.get_credentials("hrti")
+        email = app_creds.get("email", "")
+        password = app_creds.get("password", "")
+
         if email and password:
-            # Let's save credentials to hrti via command line
-            try:
-                subprocess.run(
-                    ["python", "hrti_downloader.py", "--save-credentials", "-u", email, "-p", password],
-                    cwd=str(CWD.resolve()),
-                    capture_output=True,
-                    text=True
-                )
-                return {"authenticated": True, "email": email}
-            except Exception as e:
-                logger.error(f"Failed to auto-save HRTi credentials: {e}")
+            return {"authenticated": True, "email": email}
 
         return {"authenticated": False, "email": "", "error": "No credentials stored"}
 
@@ -51,18 +42,21 @@ class HrtiAdapter:
     def save_credentials(email: str, password: str) -> Dict[str, Any]:
         """Save HRTi credentials."""
         try:
-            # Save via subprocess
+            # Save via subprocess with timeout to prevent event loop blocking
             res = subprocess.run(
                 ["python", "hrti_downloader.py", "--save-credentials", "-u", email, "-p", password],
                 cwd=str(CWD.resolve()),
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=30
             )
             if res.returncode == 0:
                 # Sync in app config too
                 config.update_credentials("hrti", {"email": email, "password": password})
                 return {"success": True}
             return {"success": False, "error": res.stderr or res.stdout}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Timeout — HRTi skripta nije odgovorila u roku od 30s"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -75,9 +69,13 @@ class HrtiAdapter:
                 cwd=str(CWD.resolve()),
                 capture_output=True,
                 text=True,
-                encoding="utf-8"
+                encoding="utf-8",
+                timeout=60
             )
             return res.stdout
+        except subprocess.TimeoutExpired:
+            logger.error(f"hrti_browser.py timeout with args {args}")
+            return ""
         except Exception as e:
             logger.error(f"Error running hrti_browser with args {args}: {e}")
             return ""

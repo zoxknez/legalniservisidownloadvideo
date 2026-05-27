@@ -390,7 +390,10 @@ class RTSPlanetaConfig:
         with open(self.config_path, 'w') as f:
             json.dump(self.config, f, indent=2)
         # Set restrictive permissions
-        self.config_path.chmod(0o600)
+        try:
+            self.config_path.chmod(0o600)
+        except Exception:
+            pass
     
     def set_credentials(self, username: str, password: str):
         """Store credentials"""

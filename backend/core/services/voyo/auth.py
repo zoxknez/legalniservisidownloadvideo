@@ -411,7 +411,10 @@ class VoyoConfig:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.config_path, 'w') as f:
             json.dump(self._cfg, f, indent=2)
-        self.config_path.chmod(0o600)
+        try:
+            self.config_path.chmod(0o600)
+        except Exception:
+            pass
 
     def set_credentials(self, email: str, password: str, device_id: str = ''):
         self._cfg.update({

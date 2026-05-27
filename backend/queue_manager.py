@@ -60,6 +60,7 @@ class DownloadDatabase:
     def _init_db(self):
         """Initialize database schema."""
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS downloads (
                     id TEXT PRIMARY KEY,
@@ -154,12 +155,18 @@ class DownloadQueueManager:
     def __init__(self):
         self.items: Dict[str, DownloadItem] = {}
         self.active_websockets: Set[WebSocket] = set()
-        self.lock = asyncio.Lock()
+        self._lock = None
         self.running_count = 0
         self.db = DownloadDatabase()
         
         # Load persisted downloads on startup
         self._load_persisted_downloads()
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
     
     def _load_persisted_downloads(self):
         """Load previous downloads from database."""
