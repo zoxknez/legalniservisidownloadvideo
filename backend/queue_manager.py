@@ -2,6 +2,7 @@ import asyncio
 import re
 import uuid
 import time
+import sys
 import logging
 import sqlite3
 import json
@@ -45,6 +46,53 @@ def redact_command(cmd: List[str]) -> str:
         redacted.append(part)
 
     return " ".join(redacted)
+
+
+def redact_log_line(line: str) -> str:
+    """Scrub sensitive information such as JWTs, emails, and query-string tokens from logs."""
+    if not line:
+        return line
+
+    # 1. Redact JWT tokens (e.g. eyJhbGciOi...)
+    line = re.sub(r'\bey[a-zA-Z0-9_-]+\.ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b', '[JWT_TOKEN_REDACTED]', line)
+
+    # 2. Redact Email addresses
+    line = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', line)
+
+    # 3. Redact query parameters or config assignments (e.g., token=xxx, pass=xxx)
+    line = re.sub(r'(?i)(token|password|pass|access_token|secure_streaming_token|s)=[^&\s\)]+', r'\1=***', line)
+
+    return line
+
+
+def clean_temp_files(title: str, output_dir: str):
+    """Purge orphaned temporary files (.part, .ytdl, etc.) for a given title."""
+    if not title or len(title) < 3:
+        return
+
+    # Sanitize title to match filename pattern
+    sanitized_title = re.sub(r'[\\/:*?"<>|]', '_', title).strip(' .')
+    
+    path = Path(output_dir)
+    if not path.exists() or not path.is_dir():
+        return
+
+    # Common temporary extensions used by yt-dlp, aria2, and ffmpeg
+    temp_extensions = [".part", ".ytdl", ".temp", ".tmp", ".aria2", ".aria2__temp"]
+    
+    try:
+        for f in path.iterdir():
+            if f.is_file():
+                # Check if filename contains the sanitized title and has a temporary extension
+                if sanitized_title in f.name:
+                    if any(f.name.endswith(ext) for ext in temp_extensions) or f.suffix == ".part":
+                        try:
+                            f.unlink()
+                            logger.info(f"Cleaned up temporary file: {f.name}")
+                        except OSError as e:
+                            logger.warning(f"Could not delete temp file {f.name}: {e}")
+    except Exception as e:
+        logger.error(f"Error while cleaning temp files for title '{title}': {e}")
 
 
 class DownloadDatabase:
@@ -115,7 +163,7 @@ class DownloadDatabase:
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to delete download from database: {e}")
-
+ 
 
 class DownloadItem:
     """Represents a single download task."""
@@ -241,6 +289,21 @@ class DownloadQueueManager:
                             item.process.kill()
                     except Exception as e:
                         logger.error(f"Error terminating process: {e}")
+                
+                # Retrieve output folder for cleanup
+                output_dir = None
+                try:
+                    for idx, part in enumerate(item.cmd):
+                        if part == "-o" and idx + 1 < len(item.cmd):
+                            output_dir = item.cmd[idx + 1]
+                            break
+                except Exception:
+                    pass
+                if not output_dir:
+                    output_dir = config.get_output_dir()
+                
+                # Perform cleanup of temporary fragments
+                clean_temp_files(item.title, output_dir)
                 self.db.save_download(item)
         await self.broadcast_state()
 
@@ -344,6 +407,20 @@ class DownloadQueueManager:
                 else:
                     item.status = "failed"
                     item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
+                    
+                    # Clean up partial leftovers on final failure
+                    output_dir = None
+                    try:
+                        for idx, part in enumerate(item.cmd):
+                            if part == "-o" and idx + 1 < len(item.cmd):
+                                output_dir = item.cmd[idx + 1]
+                                break
+                    except Exception:
+                        pass
+                    if not output_dir:
+                        output_dir = config.get_output_dir()
+                    clean_temp_files(item.title, output_dir)
+                    
             self.db.save_download(item)
 
         await self.broadcast_state()
@@ -351,8 +428,14 @@ class DownloadQueueManager:
     async def _run_download_process(self, item: DownloadItem) -> bool:
         """Execute the download command and return success status."""
         try:
+            # Dynamically replace 'python' command with the current active python interpreter (sys.executable)
+            # This is extremely robust for systems with custom virtualenvs, conda, or multiple path listings.
+            cmd = list(item.cmd)
+            if cmd and cmd[0] == "python":
+                cmd[0] = sys.executable
+
             item.process = await asyncio.create_subprocess_exec(
-                *item.cmd,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(PROJECT_ROOT)
@@ -369,8 +452,12 @@ class DownloadQueueManager:
                         if not line_bytes:
                             break
                         line = line_bytes.decode("utf-8", errors="ignore").rstrip()
-                        item.logs.append(line)
-                        self._parse_progress(line, item)
+                        
+                        # Apply regex log scrub filter before saving or sending logs to database/client
+                        scrubbed_line = redact_log_line(line)
+                        item.logs.append(scrubbed_line)
+                        
+                        self._parse_progress(scrubbed_line, item)
                         
                         now = time.monotonic()
                         if now - last_broadcast >= BROADCAST_INTERVAL:

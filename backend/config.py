@@ -148,8 +148,19 @@ class AppConfig:
                     found = True
                     resolved_path = str(p.resolve())
                 else:
-                    # check in root and binaries folder
-                    for check_dir in [PROJECT_ROOT, PROJECT_ROOT / "binaries"]:
+                    # check in common search directories (root, binaries, rtsplaneta, cdm, home dirs)
+                    search_dirs = [
+                        PROJECT_ROOT,
+                        PROJECT_ROOT / "binaries",
+                        PROJECT_ROOT / "rtsplaneta",
+                        PROJECT_ROOT / "cdm",
+                        PROJECT_ROOT / "hrti",
+                        PROJECT_ROOT / "eon",
+                        Path.home() / ".wvd",
+                        Path.home() / ".videodownload",
+                        Path.home() / ".hrti"
+                    ]
+                    for check_dir in search_dirs:
                         check_path = check_dir / "device.wvd"
                         if check_path.exists():
                             found = True

@@ -53,7 +53,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/api/status")
 async def get_system_status():
-    """Returns credential status for all downloaders and paths status for tools (parallel)."""
+    """Returns credential status for all downloaders and paths status for tools (parallel with timeouts)."""
     binaries = config.check_binaries_status()
 
     # Run all service auth checks in parallel using executor to not block the event loop
@@ -64,25 +64,35 @@ async def get_system_status():
     rts_task    = loop.run_in_executor(None, RtsAdapter.get_auth_status)
     hbomax_task = loop.run_in_executor(None, HboAdapter.get_auth_status)
 
-    voyo, hrti, eon, rts, hbomax = await asyncio.gather(
-        voyo_task, hrti_task, eon_task, rts_task, hbomax_task,
-        return_exceptions=True
-    )
+    async def safe_check(task, name):
+        try:
+            res = await asyncio.wait_for(task, timeout=7.0)
+            if isinstance(res, Exception):
+                return {"authenticated": False, "error": str(res)}
+            return res
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout checking status for service: {name}")
+            return {"authenticated": False, "error": "Servis trenutno ne odgovara (timeout)"}
+        except Exception as e:
+            return {"authenticated": False, "error": str(e)}
 
-    def safe(r):
-        if isinstance(r, Exception):
-            return {"authenticated": False, "error": str(r)}
-        return r
+    voyo, hrti, eon, rts, hbomax = await asyncio.gather(
+        safe_check(voyo_task, "Voyo"),
+        safe_check(hrti_task, "HRTi"),
+        safe_check(eon_task, "EON"),
+        safe_check(rts_task, "RTS Planeta"),
+        safe_check(hbomax_task, "HBO Max")
+    )
 
     return {
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
         "services": {
-            "voyo":       safe(voyo),
-            "hrti":       safe(hrti),
-            "eon":        safe(eon),
-            "rtsplaneta": safe(rts),
-            "hbomax":     safe(hbomax)
+            "voyo":       voyo,
+            "hrti":       hrti,
+            "eon":        eon,
+            "rtsplaneta": rts,
+            "hbomax":     hbomax
         }
     }
 
@@ -504,7 +514,7 @@ async def clear_completed():
 
 # ── Static File Serving ────────────────────────────────────────────────────────
 
-static_dir = Path("d:/ProjektiApp/videodownloadservisi/backend/static")
+static_dir = PROJECT_ROOT / "backend" / "static"
 
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

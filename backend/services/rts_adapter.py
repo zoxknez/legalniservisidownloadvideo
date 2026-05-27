@@ -24,12 +24,12 @@ class RtsAdapter:
         """Runs the --save-credentials command for RTS Planeta."""
         try:
             config.update_credentials("rtsplaneta", {"email": email, "password": password})
-            script_path = CWD / "rtsplaneta_downloader.py"
+            script_path = CWD / "rtsplaneta" / "rtsplaneta_downloader.py"
             if not script_path.exists():
                 return {"success": True}
 
             cmd = [
-                "python", "rtsplaneta_downloader.py",
+                "python", "rtsplaneta/rtsplaneta_downloader.py",
                 "--save-credentials",
                 "-u", email,
                 "-p", password
@@ -44,7 +44,7 @@ class RtsAdapter:
     @staticmethod
     def make_download_cmd(target_url: str, start_ep: int = None, end_ep: int = None, verbose: bool = False) -> List[str]:
         """Build command to run rtsplaneta_downloader.py."""
-        cmd = ["python", "rtsplaneta_downloader.py", "-i", target_url]
+        cmd = ["python", "rtsplaneta/rtsplaneta_downloader.py", "-i", target_url]
         
         if start_ep is not None:
             cmd += ["--start", str(start_ep)]

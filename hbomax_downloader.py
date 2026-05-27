@@ -146,8 +146,10 @@ class WidevineCDM:
 
 # ── Binary discovery ───────────────────────────────────────────────────────────
 
-def _find_binary(name: str) -> Optional[str]:
+def _find_binary(name: str, custom_path: Optional[str] = None) -> Optional[str]:
     """Find an executable in PATH or a local binaries/ subfolder."""
+    if custom_path and Path(custom_path).exists():
+        return str(Path(custom_path).resolve())
     # Local binaries folder
     local = Path(__file__).parent / "binaries" / (name + (".exe" if platform.system() == "Windows" else ""))
     if local.exists():
@@ -155,10 +157,10 @@ def _find_binary(name: str) -> Optional[str]:
     return shutil.which(name)
 
 
-def _require_binaries() -> Dict[str, str]:
+def _require_binaries(mp4decrypt_path: Optional[str] = None, mkvmerge_path: Optional[str] = None) -> Dict[str, str]:
     needed = {
-        "mp4decrypt": _find_binary("mp4decrypt"),
-        "mkvmerge":   _find_binary("mkvmerge"),
+        "mp4decrypt": _find_binary("mp4decrypt", mp4decrypt_path),
+        "mkvmerge":   _find_binary("mkvmerge", mkvmerge_path),
     }
     missing = [k for k, v in needed.items() if not v]
     if missing:
@@ -615,6 +617,8 @@ class HBOMaxDownloader:
         self.api         = MaxAPI(self.auth)
         self.cdm         = WidevineCDM(device_path=device_path)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.mp4decrypt_path = None
+        self.mkvmerge_path = None
 
         if _HAS_CURL_CFFI:
             from curl_cffi import requests as cffi_requests
@@ -727,7 +731,7 @@ class HBOMaxDownloader:
             _download_segments(aud_urls, enc_audio, "Audio", self.workers)
 
             # ── 6. Decrypt ────────────────────────────────────────────────────
-            bins = _require_binaries()
+            bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
 
             if keys:
                 logger.info("Dekripcija …")
@@ -762,6 +766,105 @@ class HBOMaxDownloader:
             _shutil.rmtree(tmp, ignore_errors=True)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def download_direct(self, manifest_url: str, license_url: str, title: str, wanted_subs: List[str]) -> None:
+        """Full download pipeline using direct manifest URL and license URL (Bypass Mode)."""
+        logger.info("Započinjem direktno preuzimanje preko manifesta i licence...")
+        if not title or not title.strip():
+            title = f"Max_Direct_{int(time.time())}"
+        safe_title = re.sub(r'[<>:"/\\|?*]', "_", title)
+        logger.info(f"Naslov: {title}")
+
+        # ── 1. Parse manifest ─────────────────────────────────────────────────
+        logger.info("Parsiranje MPD manifesta …")
+        mpd_text = self.api.get_manifest(manifest_url)
+        parsed   = _parse_mpd(mpd_text, max_height=L3_MAX_HEIGHT)
+
+        if not parsed["video"]:
+            raise RuntimeError(f"Nije pronađena video reprezentacija ≤{L3_MAX_HEIGHT}p u MPD.")
+        if not parsed["audio"]:
+            raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
+
+        vh = parsed["video"].get("@height", "?")
+        vbw = int(parsed["video"].get("@bandwidth", 0)) // 1000
+        logger.info(f"Video: {vh}p @ {vbw} kbps")
+        logger.info(f"Subtitlovi u manifestu: {[t['lang'] for t in parsed['subtitles']]}")
+
+        # ── 2. Widevine keys ──────────────────────────────────────────────────
+        pssh = parsed.get("pssh")
+        keys: List[Dict] = []
+        if pssh:
+            logger.info("Dobavljam Widevine ključeve …")
+            # In direct mode, we don't have playback info, so we build basic headers
+            lic_headers = {
+                "Content-Type": "application/octet-stream",
+            }
+            if self.auth.get_access_token():
+                lic_headers["Authorization"] = f"Bearer {self.auth.get_access_token()}"
+            try:
+                keys = self.cdm.get_keys(pssh, license_url, lic_headers)
+                logger.info(f"Dobijeno {len(keys)} ključ(eva)")
+                for k in keys:
+                    logger.debug(f"  KID={k['kid']} KEY={k['key']}")
+            except Exception as e:
+                raise RuntimeError(f"Widevine licenca nije uspela: {e}")
+        else:
+            logger.warning("PSSH nije pronađen — sadržaj možda nije zaštićen ili je manifest nestandardan.")
+
+        # ── 3. Download segments ──────────────────────────────────────────────
+        tmp = Path(tempfile.mkdtemp(prefix="hbomax_"))
+        try:
+            enc_video = tmp / "video.mp4"
+            enc_audio = tmp / "audio.mp4"
+            dec_video = tmp / "video_dec.mp4"
+            dec_audio = tmp / "audio_dec.mp4"
+
+            logger.info("Preuzimam video segmente …")
+            vid_urls = _extract_segment_urls(parsed["video"], manifest_url)
+            if not vid_urls:
+                raise RuntimeError("Nije pronađen nijedan video segment URL.")
+            _download_segments(vid_urls, enc_video, "Video", self.workers)
+
+            logger.info("Preuzimam audio segmente …")
+            aud_urls = _extract_segment_urls(parsed["audio"], manifest_url)
+            if not aud_urls:
+                raise RuntimeError("Nije pronađen nijedan audio segment URL.")
+            _download_segments(aud_urls, enc_audio, "Audio", self.workers)
+
+            # ── 4. Decrypt ────────────────────────────────────────────────────
+            bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
+
+            if keys:
+                logger.info("Dekripcija …")
+                _decrypt_file(enc_video, dec_video, keys, bins["mp4decrypt"])
+                _decrypt_file(enc_audio, dec_audio, keys, bins["mp4decrypt"])
+            else:
+                # No encryption — rename
+                enc_video.rename(dec_video)
+                enc_audio.rename(dec_audio)
+
+            # ── 5. Subtitles ───────────────────────────────────────────────────
+            subs: List[Dict] = []
+            if wanted_subs and wanted_subs != ["none"]:
+                logger.info(f"Preuzimam titlove: {', '.join(wanted_subs)} …")
+                subs = _download_subtitles(
+                    parsed["subtitles"],
+                    wanted_subs,
+                    tmp,
+                    manifest_url,
+                    self._sess,
+                )
+
+            # ── 6. Mux to MKV ─────────────────────────────────────────────────
+            out_path = self.output_dir / f"{safe_title}.mkv"
+            logger.info(f"Muxing → {out_path} …")
+            _mux_mkv(dec_video, dec_audio, out_path, subs or None, bins["mkvmerge"])
+            logger.info(f"✓ Završeno: {out_path}")
+
+        finally:
+            # Clean up temp files
+            import shutil as _shutil
+            _shutil.rmtree(tmp, ignore_errors=True)
 
     @staticmethod
     def _extract_title(content: Dict, video_id: str) -> str:
@@ -878,6 +981,15 @@ Primeri:
     parser.add_argument("--subs",       default=_DEFAULT_SUBS,
                         help=f"Jezici titlova odvojeni zarezom, ili 'none' (default: {_DEFAULT_SUBS})")
 
+    # Direct Download (Bypass Mode)
+    parser.add_argument("--manifest",      default=None,       help="Direktni DASH (.mpd) manifest URL")
+    parser.add_argument("--license",       default=None,       help="Direktni Widevine licencni URL")
+    parser.add_argument("--title",         default=None,       help="Naslov za direktno preuzimanje")
+
+    # Custom binary paths
+    parser.add_argument("--mp4decrypt",    default=None,       help="Putanja do mp4decrypt izvršnog fajla")
+    parser.add_argument("--mkvmerge",      default=None,       help="Putanja do mkvmerge izvršnog fajla")
+
     # Output / tuning
     parser.add_argument("-o", "--output",  default="output",  help="Izlazni folder (default: output)")
     parser.add_argument("-d", "--device",  default=None,       help="Putanja do .wvd CDM fajla")
@@ -902,8 +1014,8 @@ def main() -> int:
         return 0
 
     # ── Download mode ─────────────────────────────────────────────────────────
-    if not args.video_id:
-        print("Greška: navedite -i <video_id> ili --login")
+    if not args.video_id and not (args.manifest and args.license):
+        print("Greška: navedite -i <video_id> ili --manifest i --license, ili --login")
         return 1
 
     # Parse subtitle languages
@@ -926,8 +1038,13 @@ def main() -> int:
         device_path=args.device,
         workers=args.workers,
     )
+    dl.mp4decrypt_path = args.mp4decrypt
+    dl.mkvmerge_path = args.mkvmerge
     try:
-        dl.download(args.video_id, wanted_subs)
+        if args.manifest and args.license:
+            dl.download_direct(args.manifest, args.license, args.title, wanted_subs)
+        else:
+            dl.download(args.video_id, wanted_subs)
         return 0
     except KeyboardInterrupt:
         print("\nPrekid od strane korisnika.")

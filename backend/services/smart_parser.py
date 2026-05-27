@@ -55,9 +55,17 @@ class SmartParser:
             return {"service": "hrti", "mode": "video", "target_id": m.group(1)}
 
         # 3. RTS Planeta
-        m = RTS_VIDEO_RE.search(url)
-        if m:
-            return {"service": "rts", "mode": "video", "target_id": m.group(1)}
+        if "rtsplaneta.rs" in url.lower():
+            ep_match = re.search(r"/episode/(\d+)", url)
+            if ep_match:
+                return {"service": "rts", "mode": "video", "target_id": ep_match.group(1)}
+            show_match = re.search(r"/(?:video|show)/show/(\d+)|/video/(\d+)", url)
+            if show_match:
+                vid_id = show_match.group(1) or show_match.group(2)
+                return {"service": "rts", "mode": "video", "target_id": vid_id}
+            serial_match = re.search(r"/serial/(\d+)", url)
+            if serial_match:
+                return {"service": "rts", "mode": "video", "target_id": serial_match.group(1)}
 
         # 4. EON TV
         m = EON_VOD_RE.search(url)
@@ -164,6 +172,17 @@ class SmartParser:
                     }
 
             elif service == "rts":
+                info = RtsAdapter.get_video_info(target_id)
+                if info.get("success"):
+                    return {
+                        "success": True,
+                        "service": "rts",
+                        "mode": "video",
+                        "target_id": target_id,
+                        "title": info.get("title"),
+                        "description": info.get("description") or "Započnite preuzimanje emisije ili serije sa RTS Planeta.",
+                        "thumbnail": info.get("thumbnail", "")
+                    }
                 return {
                     "success": True,
                     "service": "rts",

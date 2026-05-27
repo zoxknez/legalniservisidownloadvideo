@@ -2230,6 +2230,17 @@ textarea {
   font-weight: 600 !important;
 }
 
+/* ── 12. Absolute Spacing Utility Classes for Buttons in Inputs ── */
+.right-1\.5 {
+  right: 6px !important;
+}
+.top-1\.5 {
+  top: 6px !important;
+}
+.bottom-1\.5 {
+  bottom: 6px !important;
+}
+
 
 
 
