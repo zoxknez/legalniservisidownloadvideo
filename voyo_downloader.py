@@ -175,11 +175,193 @@ def detect_resolution(m3u8_url: str, auth: VoyoAuth) -> str:
         return '1080p'
 
 
+import urllib.parse
+from Crypto.Cipher import AES
+
+def resolve_variant_url(master_content: str, master_url: str) -> str:
+    """Parse HLS master playlist and return the best quality variant URL."""
+    lines = master_content.splitlines()
+    variants = []
+    current_bandwidth = 0
+    current_url = ""
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith("#EXT-X-STREAM-INF"):
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            current_bandwidth = int(m.group(1)) if m else 0
+        elif line and not line.startswith("#"):
+            current_url = urllib.parse.urljoin(master_url, line)
+            variants.append((current_bandwidth, current_url))
+            
+    if variants:
+        variants.sort(key=lambda x: x[0], reverse=True)
+        return variants[0][1]
+        
+    return master_url
+
+def parse_m3u8(playlist_content: str, playlist_url: str) -> Tuple[List[str], Optional[Dict[str, Any]]]:
+    """Parse HLS m3u8 playlist and extract segment URLs and decryption key info."""
+    lines = playlist_content.splitlines()
+    segment_urls = []
+    key_info = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        if line.startswith("#EXT-X-KEY"):
+            parts = line.split(":", 1)[1]
+            key_attrs = {}
+            for part in re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', parts):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    key_attrs[k.strip()] = v.strip().replace('"', '')
+            
+            if key_attrs.get("METHOD") == "AES-128":
+                key_info = {
+                    "uri": urllib.parse.urljoin(playlist_url, key_attrs["URI"]),
+                    "iv": key_attrs.get("IV")
+                }
+        elif not line.startswith("#"):
+            segment_urls.append(urllib.parse.urljoin(playlist_url, line))
+            
+    return segment_urls, key_info
+
+def decrypt_segment(encrypted_data: bytes, key: bytes, sequence_number: int, key_iv: str = None) -> bytes:
+    """Decrypt HLS segment using AES-128."""
+    if key_iv:
+        iv_hex = key_iv.replace("0x", "").strip()
+        iv = bytes.fromhex(iv_hex)
+    else:
+        iv = sequence_number.to_bytes(16, byteorder="big")
+        
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    return cipher.decrypt(encrypted_data)
+
+async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, title: str = 'video') -> Optional[str]:
+    """Download HLS natively using asynchronous connection pool and parallel workers."""
+    from backend.core.services.async_engine import AsyncDownloadEngine
+    import aiohttp
+    
+    logger.info(f"Using high-performance native HLS async engine for: {title}")
+    
+    headers = dict(auth.session.headers)
+    headers.pop('Content-Type', None)
+    headers['device-id'] = auth.state.device_id
+    
+    connector = aiohttp.TCPConnector(limit=16, force_close=False, enable_cleanup_closed=True)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        # 1. Fetch playlist content
+        async with session.get(m3u8_url, headers=headers) as resp:
+            if resp.status != 200:
+                logger.error(f"Failed to fetch master playlist: HTTP {resp.status}")
+                return None
+            content = await resp.text()
+            
+        # 2. Handle master playlist variants
+        if "#EXT-X-STREAM-INF" in content:
+            variant_url = resolve_variant_url(content, m3u8_url)
+            logger.info(f"Resolved master playlist to variant: {variant_url}")
+            async with session.get(variant_url, headers=headers) as resp:
+                if resp.status != 200:
+                    logger.error(f"Failed to fetch variant playlist: HTTP {resp.status}")
+                    return None
+                content = await resp.text()
+                m3u8_url = variant_url
+                
+        # 3. Parse segments and keys
+        segments, key_info = parse_m3u8(content, m3u8_url)
+        if not segments:
+            logger.error("No HLS segments found in playlist.")
+            return None
+            
+        logger.info(f"HLS Variant parsed: {len(segments)} segments detected.")
+        
+        # 4. Fetch AES key
+        key_bytes = None
+        if key_info:
+            logger.info(f"Stream is AES-128 encrypted. Fetching key from: {key_info['uri']}")
+            async with session.get(key_info["uri"], headers=headers) as resp:
+                if resp.status == 200:
+                    key_bytes = await resp.read()
+                else:
+                    logger.error(f"Failed to fetch AES-128 decryption key: HTTP {resp.status}")
+                    return None
+                    
+        # 5. Prepare temp segments folder
+        temp_dir = Path(temp_stem).parent / f"hls_temp_{int(time.time())}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        dest_paths = [temp_dir / f"seg_{i:05d}.ts" for i in range(len(segments))]
+        
+        # 6. Initialize AsyncDownloadEngine
+        engine = AsyncDownloadEngine(max_workers=16)
+        
+        # Real-time progress tracker with speed/ETA in yt-dlp format
+        start_time = time.monotonic()
+        total_estimated_bytes = len(segments) * 1.5 * 1024 * 1024  # estimate 1.5MB per segment
+        
+        def progress_callback(downloaded_bytes, total_bytes):
+            pct = (downloaded_bytes / total_bytes) * 100 if total_bytes > 0 else 0
+            if pct > 100: pct = 100.0
+            elapsed = time.monotonic() - start_time
+            speed_bps = downloaded_bytes / elapsed if elapsed > 0 else 0
+            speed_str = f"{speed_bps / (1024*1024):.2f}MiB/s"
+            eta_sec = (total_bytes - downloaded_bytes) / speed_bps if speed_bps > 0 else 0
+            eta_str = f"{int(eta_sec)}s" if eta_sec < 3600 else f"{int(eta_sec/3600)}h{int((eta_sec%3600)/60)}m"
+            print(f"\r  {pct:.1f}%  speed={speed_str}  eta={eta_str}  ", end="", flush=True)
+
+        logger.info(f"Downloading {len(segments)} segments concurrently...")
+        success = await engine.download_segments(
+            urls=segments,
+            dest_paths=dest_paths,
+            headers=headers,
+            progress_callback=progress_callback
+        )
+        print()  # newline after progress bar
+        
+        if not success:
+            logger.error("HLS segment download failed.")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+            
+        # 7. Decrypt & assemble sequential file block
+        output_ts = temp_stem + ".ts"
+        logger.info("Assembling and decrypting sequential TS file...")
+        
+        with open(output_ts, "wb") as out_f:
+            for i, path in enumerate(dest_paths):
+                if not path.exists():
+                    logger.error(f"Decryption failed: segment {i} file missing!")
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+                    
+                with open(path, "rb") as seg_f:
+                    data = seg_f.read()
+                    
+                if key_bytes:
+                    decrypted_data = decrypt_segment(data, key_bytes, i, key_info.get("iv"))
+                    out_f.write(decrypted_data)
+                else:
+                    out_f.write(data)
+                    
+        # Cleanup segments
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return output_ts
+
 def download_with_ytdlp(m3u8_url: str, temp_stem: str,
                          auth: VoyoAuth, title: str = 'video') -> Optional[str]:
     """
-    Download HLS via yt-dlp to temp_stem.<ext>. Returns actual output path.
+    Download HLS using native parallel async engine, falling back to yt-dlp if needed.
     """
+    import asyncio
+    try:
+        return asyncio.run(download_native_async(m3u8_url, temp_stem, auth, title))
+    except Exception as e:
+        logger.error(f"Native async engine failed: {e}. Falling back to standard yt-dlp...")
+
     try:
         import yt_dlp
     except ImportError:
@@ -214,7 +396,6 @@ def download_with_ytdlp(m3u8_url: str, temp_stem: str,
                 return None
             filename = ydl.prepare_filename(info)
 
-        # Find the file yt-dlp actually wrote
         for ext in ['mp4', 'ts', 'mkv', 'm4a', 'webm', '']:
             candidate = temp_stem + (f'.{ext}' if ext else '')
             if Path(candidate).exists():
