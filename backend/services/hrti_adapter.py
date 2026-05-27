@@ -80,9 +80,20 @@ class HrtiAdapter:
             logger.error(f"Error running hrti_browser with args {args}: {e}")
             return ""
 
+    _cats_cached_val = None
+    _cats_cached_time = 0.0
+    _items_cached_dict = {}
+    _search_cached_dict = {}
+    _series_cached_dict = {}
+
     @classmethod
     def list_categories(cls) -> List[str]:
         """Parse hrti_browser.py --list and return category names."""
+        import time
+        now = time.time()
+        if cls._cats_cached_val and (now - cls._cats_cached_time) < 1800.0:
+            return cls._cats_cached_val
+
         script_path = CWD / "hrti_browser.py"
         if not script_path.exists():
             return [
@@ -113,11 +124,22 @@ class HrtiAdapter:
         
         # Deduplicate and sort, keeping some common ones first
         unique_cats = sorted(list(set(categories)))
+        cls._cats_cached_val = unique_cats
+        cls._cats_cached_time = now
         return unique_cats
 
     @classmethod
     def get_category_items(cls, category: str, page: int = 1) -> Dict[str, Any]:
         """Parse hrti_browser.py --cat <cat> --page <page>."""
+        import time
+        now = time.time()
+        cache_key = (category, page)
+        
+        if cache_key in cls._items_cached_dict:
+            ts, cached_res = cls._items_cached_dict[cache_key]
+            if (now - ts) < 1800.0:
+                return cached_res
+
         script_path = CWD / "hrti_browser.py"
         if not script_path.exists():
             mock_data = {
@@ -166,11 +188,21 @@ class HrtiAdapter:
             }
 
         output = cls._run_browser(["--cat", category, "--page", str(page)])
-        return cls._parse_browser_items(output)
+        parsed_res = cls._parse_browser_items(output)
+        cls._items_cached_dict[cache_key] = (now, parsed_res)
+        return parsed_res
 
     @classmethod
     def search_items(cls, query: str) -> Dict[str, Any]:
         """Parse hrti_browser.py --search <query>."""
+        import time
+        now = time.time()
+        
+        if query in cls._search_cached_dict:
+            ts, cached_res = cls._search_cached_dict[query]
+            if (now - ts) < 1800.0:
+                return cached_res
+
         script_path = CWD / "hrti_browser.py"
         if not script_path.exists():
             all_items = []
@@ -194,11 +226,21 @@ class HrtiAdapter:
             }
 
         output = cls._run_browser(["--search", query])
-        return cls._parse_browser_items(output)
+        parsed_res = cls._parse_browser_items(output)
+        cls._search_cached_dict[query] = (now, parsed_res)
+        return parsed_res
 
     @classmethod
     def get_series_episodes(cls, series_uuid: str) -> Dict[str, Any]:
         """Parse hrti_browser.py --series <uuid>."""
+        import time
+        now = time.time()
+        
+        if series_uuid in cls._series_cached_dict:
+            ts, cached_res = cls._series_cached_dict[series_uuid]
+            if (now - ts) < 3600.0: # Episode list cached for 1 hour
+                return cached_res
+
         script_path = CWD / "hrti_browser.py"
         if not script_path.exists():
             series_name = "Serija"
@@ -226,7 +268,9 @@ class HrtiAdapter:
             }
 
         output = cls._run_browser(["--series", series_uuid])
-        return cls._parse_browser_items(output)
+        parsed_res = cls._parse_browser_items(output)
+        cls._series_cached_dict[series_uuid] = (now, parsed_res)
+        return parsed_res
 
     @staticmethod
     def _parse_browser_items(output: str) -> Dict[str, Any]:
