@@ -78,6 +78,10 @@ class SmartParser:
             video_id = m.group(1) or m.group(2)
             return {"service": "hbomax", "mode": "video", "target_id": video_id}
 
+        # 6. Generic URLs (Universal Downloader - yt-dlp supported sites)
+        if url.lower().startswith("http://") or url.lower().startswith("https://"):
+            return {"service": "ytdlp", "mode": "video", "target_id": url}
+
         return None
 
     @staticmethod
@@ -201,6 +205,58 @@ class SmartParser:
                     "title": f"HBO Max Video (ID: {target_id})",
                     "description": "Započnite preuzimanje videa sa HBO Max."
                 }
+
+            elif service == "ytdlp":
+                # Extract metadata dynamically using yt-dlp asynchronously
+                try:
+                    import yt_dlp
+                    import urllib.parse
+                    
+                    ydl_opts = {
+                        'extract_flat': True,
+                        'skip_download': True,
+                        'quiet': True,
+                        'no_warnings': True,
+                    }
+                    
+                    # Call yt-dlp info extraction
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(target_id, download=False)
+                        
+                    title = info.get("title")
+                    description = info.get("description", "")
+                    if description and len(description) > 200:
+                        description = description[:200] + "..."
+                    thumbnail = info.get("thumbnail", "")
+                    
+                    from urllib.parse import urlparse
+                    domain = urlparse(target_id).netloc.replace("www.", "")
+                    
+                    if not title:
+                        title = f"Video sa {domain}"
+                        
+                    return {
+                        "success": True,
+                        "service": "ytdlp",
+                        "mode": "video",
+                        "target_id": target_id,
+                        "title": title,
+                        "description": description or "Preuzmite video preko univerzalnog preuzimača.",
+                        "thumbnail": thumbnail
+                    }
+                except Exception as ex:
+                    logger.warning(f"Fast yt-dlp metadata extraction failed: {ex}")
+                    from urllib.parse import urlparse
+                    domain = urlparse(target_id).netloc.replace("www.", "")
+                    return {
+                        "success": True,
+                        "service": "ytdlp",
+                        "mode": "video",
+                        "target_id": target_id,
+                        "title": f"Video sa {domain}",
+                        "description": f"Započnite preuzimanje sa adrese: {target_id[:60]}...",
+                        "thumbnail": ""
+                    }
 
         except Exception as e:
             logger.exception(f"Error fetching metadata for {url}")

@@ -348,6 +348,38 @@ async def voyo_download(req: VoyoDownloadRequest):
     task_id = await queue_manager.add_download("voyo", title, cmd)
     return {"success": True, "task_id": task_id}
 
+class YtdlpDownloadRequest(BaseModel):
+    url: str
+    resolution: str = "1080p"
+
+@app.post("/api/ytdlp/download")
+async def ytdlp_download(req: YtdlpDownloadRequest):
+    import os
+    from urllib.parse import urlparse
+    
+    url = req.url.strip()
+    res_val = req.resolution.replace("p", "")
+    if res_val.isdigit():
+        format_spec = f"bestvideo[height<={res_val}]+bestaudio/best"
+    else:
+        format_spec = "bestvideo+bestaudio/best"
+        
+    output_dir = config.get_output_dir()
+    output_tmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
+    
+    cmd = [
+        "python", "-m", "yt_dlp",
+        url,
+        "-f", format_spec,
+        "-o", output_tmpl,
+        "--no-playlist"
+    ]
+    
+    domain = urlparse(url).netloc.replace("www.", "")
+    title = f"Univerzalni ({domain}): {url[:40]}"
+    task_id = await queue_manager.add_download("ytdlp", title, cmd)
+    return {"success": True, "task_id": task_id}
+
 # ── HRTi Routes ───────────────────────────────────────────────────────────────
 
 @app.post("/api/hrti/login")

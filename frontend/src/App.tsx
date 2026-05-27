@@ -671,6 +671,15 @@ export default function App() {
             subs: smartSubs
           })
         });
+      } else if (smartData.service === "ytdlp") {
+        res = await fetch(`${getApiHost()}/api/ytdlp/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: smartData.target_id,
+            resolution: smartResolution
+          })
+        });
       } else {
         showToast("Nepoznat servis za pametno preuzimanje.", "error");
         return;
@@ -1546,10 +1555,12 @@ export default function App() {
             eon:     { emoji:"🟢", name:"EON TV",      color:"#10b981", glow:"rgba(16,185,129,0.08)",   example:"https://eon.tv/player/vod-abc123", exampleLabel:"VOD naslov" },
             rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
             hbomax:  { emoji:"🟣", name:"HBO Max",     color:"#9333ea", glow:"rgba(147,51,234,0.08)",   example:"https://www.max.com/show/urn:hbo:episode:xyz123", exampleLabel:"Epizoda/film" },
+            ytdlp:   { emoji:"🌐", name:"Univerzalno",  color:"#3b82f6", glow:"rgba(59,130,246,0.08)",   example:"https://www.youtube.com/watch?v=dQw4w9WgXcQ", exampleLabel:"YouTube, X, TikTok, FB..." },
           };
           const svcKeys = Object.keys(SVC_THEMES);
           // Service auth sub-text (from status if available)
           const getSvcStatus = (k: string) => {
+            if (k === "ytdlp") return { online: true, label: "Uvek aktivno" };
             const s = status?.services;
             if (!s) return { online: false, label: "Nije podešeno" };
             const svc = s[k === "rts" ? "rtsplaneta" : k];
@@ -1753,6 +1764,7 @@ export default function App() {
                   <span className="smart-platform-pill">EON VOD & Uživo</span>
                   <span className="smart-platform-pill">RTS Planeta</span>
                   <span className="smart-platform-pill">HBO Max</span>
+                  <span className="smart-platform-pill text-blue-400 border border-blue-500/20" style={{background:"rgba(59,130,246,0.08)"}}>YouTube / X / FB / TikTok / Vimeo / ostali...</span>
                 </div>
               </div>
             </div>
