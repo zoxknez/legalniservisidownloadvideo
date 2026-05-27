@@ -51,6 +51,46 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # ── General Routes ────────────────────────────────────────────────────────────
 
+def get_system_metrics():
+    import psutil
+    import shutil
+    try:
+        # Disk Space
+        output_dir = config.get_output_dir()
+        total_b, used_b, free_b = shutil.disk_usage(output_dir)
+        disk_pct = round((used_b / total_b) * 100, 1) if total_b > 0 else 0
+        
+        # CPU
+        cpu_pct = psutil.cpu_percent(interval=None)
+        
+        # RAM
+        virtual_mem = psutil.virtual_memory()
+        ram_total = virtual_mem.total
+        ram_used = virtual_mem.used
+        ram_free = virtual_mem.available
+        ram_pct = virtual_mem.percent
+        
+        return {
+            "disk": {
+                "total": total_b,
+                "used": used_b,
+                "free": free_b,
+                "percent": disk_pct
+            },
+            "cpu": {
+                "percent": cpu_pct
+            },
+            "ram": {
+                "total": ram_total,
+                "used": ram_used,
+                "free": ram_free,
+                "percent": ram_pct
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching system metrics: {e}")
+        return None
+
 @app.get("/api/status")
 async def get_system_status():
     """Returns credential status for all downloaders and paths status for tools (parallel with timeouts)."""
@@ -84,6 +124,8 @@ async def get_system_status():
         safe_check(hbomax_task, "HBO Max")
     )
 
+    metrics = get_system_metrics()
+
     return {
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
@@ -93,7 +135,8 @@ async def get_system_status():
             "eon":        eon,
             "rtsplaneta": rts,
             "hbomax":     hbomax
-        }
+        },
+        "system_metrics": metrics
     }
 
 class ConfigUpdate(BaseModel):

@@ -32,7 +32,10 @@ import {
   Minimize2,
   RotateCcw,
   Clock,
-  Hash
+  Hash,
+  Folder,
+  Cpu,
+  Layers
 } from "lucide-react";
 
 // Interface definitions
@@ -77,6 +80,11 @@ interface AppStatus {
   binaries: Record<string, BinaryStatus>;
   output_dir: string;
   services: Record<string, ServiceStatus>;
+  system_metrics?: {
+    disk: { total: number; used: number; free: number; percent: number };
+    cpu: { percent: number };
+    ram: { total: number; used: number; free: number; percent: number };
+  } | null;
 }
 
 interface DownloadTask {
@@ -1437,6 +1445,83 @@ export default function App() {
                 );
               })}
             </div>
+            
+            {/* ── System Metrics Grid (Disk, CPU, RAM) ── */}
+            {status?.system_metrics && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Disk Space Gauge */}
+                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-indigo-card glow-card-premium">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Folder className="w-3.5 h-3.5" /> Memorijski Prostor
+                    </span>
+                    <span className="text-[10px] font-mono text-text-muted font-bold">
+                      {Math.round(status.system_metrics.disk.used / 1024 / 1024 / 1024)} GB / {Math.round(status.system_metrics.disk.total / 1024 / 1024 / 1024)} GB
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
+                      <div 
+                        className="h-full rounded bg-gradient-to-r from-indigo-500 to-indigo-400"
+                        style={{ width: `${status.system_metrics.disk.percent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] font-semibold">
+                      <span className="text-text-secondary">Slobodno: {Math.round(status.system_metrics.disk.free / 1024 / 1024 / 1024)} GB</span>
+                      <span className="text-indigo-400">{status.system_metrics.disk.percent}% Popunjeno</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CPU Gauge */}
+                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-amber-card glow-card-premium">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5" /> Opterećenje CPU-a
+                    </span>
+                    <span className="text-[10px] font-mono text-text-muted font-bold">Aktivnost</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
+                      <div 
+                        className="h-full rounded bg-gradient-to-r from-amber-500 to-amber-400"
+                        style={{ width: `${status.system_metrics.cpu.percent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] font-semibold">
+                      <span className="text-text-secondary">Procesorski rad</span>
+                      <span className="text-amber-400">{status.system_metrics.cpu.percent}% Aktivan</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RAM Gauge */}
+                <div className="glass-panel p-5 rounded-xl border border-glass flex flex-col gap-3 glow-rose-card glow-card-premium">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-black text-rose-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5" /> Radna Memorija (RAM)
+                    </span>
+                    <span className="text-[10px] font-mono text-text-muted font-bold">
+                      {Math.round(status.system_metrics.ram.used / 1024 / 1024 / 100) / 10} GB / {Math.round(status.system_metrics.ram.total / 1024 / 1024 / 100) / 10} GB
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="h-2 rounded bg-white/[0.04] overflow-hidden border border-white/[0.02]">
+                      <div 
+                        className="h-full rounded bg-gradient-to-r from-rose-500 to-rose-400"
+                        style={{ width: `${status.system_metrics.ram.percent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] font-semibold">
+                      <span className="text-text-secondary">Slobodno: {Math.round(status.system_metrics.ram.free / 1024 / 1024 / 100) / 10} GB</span>
+                      <span className="text-rose-400">{status.system_metrics.ram.percent}% Korišćeno</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
 
             {/* ── Smart Console Card Wrapper ── */}
             <div className="smart-console-card">
