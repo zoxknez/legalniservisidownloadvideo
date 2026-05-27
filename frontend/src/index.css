@@ -1853,6 +1853,7 @@ textarea {
   outline: none;
   transition: all var(--transition-normal);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+  text-align: center;
 }
 .input-premium:focus {
   background: rgba(255, 255, 255, 0.03);
@@ -1864,6 +1865,7 @@ textarea {
 .input-premium::placeholder {
   color: var(--text-muted);
   opacity: 0.8;
+  text-align: center;
 }
 
 /* ── 4. Micro-Animated Buttons ── */
@@ -2106,6 +2108,15 @@ textarea {
   align-items: center;
   width: 100%;
 }
+.password-wrapper svg.absolute {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: all var(--transition-fast);
+  z-index: 2;
+}
 .password-eye-btn {
   position: absolute;
   right: 14px;
@@ -2120,6 +2131,7 @@ textarea {
   outline: none;
   padding: 4px;
   border-radius: 4px;
+  z-index: 3;
 }
 .password-eye-btn:hover {
   color: var(--text-primary);
