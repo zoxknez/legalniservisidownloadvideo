@@ -410,6 +410,7 @@ function BinaryPathCard({ name, found, pathValue, onChange, showToast }: BinaryP
   );
 }
 
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
@@ -418,7 +419,25 @@ export default function App() {
   const [toast, setToast] = useState<{message: string; type: "success" | "error" | "info"} | null>(null);
   const [toastKey, setToastKey] = useState<number>(0);
 
+  // Sniffer State variables
+  const [sniffedItems, setSniffedItems] = useState<Record<string, {
+    manifestUrl?: string;
+    licenseUrl?: string;
+    title?: string;
+    headers?: Record<string, string>;
+  }>>({});
+  const [latestSniffed, setLatestSniffed] = useState<{
+    service: string;
+    type: 'manifest' | 'license';
+    url: string;
+    headers?: Record<string, string>;
+    title?: string;
+  } | null>(null);
+  const [showSnifferToast, setShowSnifferToast] = useState<boolean>(false);
+  const [snifferScriptCopied, setSnifferScriptCopied] = useState<boolean>(false);
+
   // HRTi inline download modal (replaces native prompt)
+
   const [hrtiModal, setHrtiModal] = useState<{refId: string; title: string} | null>(null);
   const [hrtiModalTitle, setHrtiModalTitle] = useState<string>("");
 
@@ -707,6 +726,23 @@ export default function App() {
     setTimeout(() => setToast(null), 5000);
   };
 
+  const applySniffedResource = (service: string) => {
+    const item = sniffedItems[service];
+    if (!item) return;
+
+    if (service === "hbomax" || service === "hbo") {
+      setHboDirectMode(true);
+      if (item.manifestUrl) setHboManifestUrl(item.manifestUrl);
+      if (item.licenseUrl) setHboLicenseUrl(item.licenseUrl);
+      if (item.title) setHboDirectTitle(item.title);
+      setActiveTab("hbo");
+      showToast("⚡ HBO Max Bypass polja popunjena!", "success");
+    } else if (service === "voyo") {
+      showToast("✓ Voyo resursi detektovani!", "info");
+    }
+    setShowSnifferToast(false);
+  };
+
   const getApiHost = () =>
     window.location.hostname === "localhost" ? "http://localhost:8000" : "";
 
@@ -766,6 +802,22 @@ export default function App() {
                 setSelectedTask(updated);
               }
             }
+          } else if (payload.type === "sniffer_update") {
+            const { service, type, url, headers, title } = payload.data;
+            setSniffedItems(prev => {
+              const current = prev[service] || {};
+              const updated = { ...current };
+              if (type === "manifest") {
+                updated.manifestUrl = url;
+                if (title) updated.title = title;
+              } else if (type === "license") {
+                updated.licenseUrl = url;
+                if (headers) updated.headers = headers;
+              }
+              return { ...prev, [service]: updated };
+            });
+            setLatestSniffed({ service, type, url, headers, title });
+            setShowSnifferToast(true);
           }
         } catch (e) {
           console.error("Failed to parse WS payload:", e);
@@ -1295,6 +1347,79 @@ export default function App() {
           <span className="text-sm font-medium">{toast.message}</span>
           {/* Progress bar — auto-dismiss indicator */}
           <div key={toastKey} className={`toast-progress toast-progress-${toast.type}`} />
+        </div>
+      )}
+
+      {/* Sniffer Toast Notification */}
+      {showSnifferToast && latestSniffed && (
+        <div className={`fixed bottom-6 right-6 z-50 flex flex-col gap-3.5 p-5 rounded-xl glass-panel animate-slide max-w-sm w-96 border border-glass shadow-2xl ${
+          latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "glow-purple-card border-purple-500/30" :
+          latestSniffed.service === "voyo" ? "glow-orange-card border-orange-500/30" :
+          latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "glow-rose-card border-rose-500/30" :
+          latestSniffed.service === "eon" ? "glow-green-card border-green-500/30" :
+          latestSniffed.service === "hrti" ? "glow-cyan-card border-cyan-500/30" : "glow-indigo"
+        }`} style={{ background: "rgba(10, 11, 16, 0.95)", backdropFilter: "blur(16px)" }}>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center animate-pulse ${
+                latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "bg-purple-600/20 text-purple-400" :
+                latestSniffed.service === "voyo" ? "bg-orange-600/20 text-orange-400" :
+                latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "bg-rose-600/20 text-rose-400" :
+                latestSniffed.service === "eon" ? "bg-emerald-600/20 text-emerald-400" :
+                latestSniffed.service === "hrti" ? "bg-cyan-600/20 text-cyan-400" : "bg-indigo-600/20 text-indigo-400"
+              }`}>
+                <Zap className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-black tracking-widest text-text-muted">
+                  Sniffer Aktivan
+                </span>
+                <h4 className="text-sm font-extrabold text-white">
+                  Presretnut {latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "HBO Max" :
+                              latestSniffed.service === "voyo" ? "Voyo RS" :
+                              latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "RTS Planeta" :
+                              latestSniffed.service === "eon" ? "EON TV" :
+                              latestSniffed.service === "hrti" ? "HRTi" : latestSniffed.service} resurs
+                </h4>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowSnifferToast(false)}
+              className="text-text-muted hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="text-xs bg-white/[0.03] border border-white/[0.06] rounded-lg p-3 flex flex-col gap-1.5 font-mono break-all text-text-secondary">
+            <div>
+              <span className="text-text-muted">Tip:</span> <span className="text-white font-bold">{latestSniffed.type === "manifest" ? "📄 Manifest (.mpd/.m3u8)" : "🔑 Widevine License"}</span>
+            </div>
+            <div className="line-clamp-2 max-h-12 overflow-hidden text-[11px]">
+              <span className="text-text-muted">URL:</span> {latestSniffed.url}
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => applySniffedResource(latestSniffed.service)}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-all shadow-lg hover:shadow-xl ${
+                latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20" :
+                latestSniffed.service === "voyo" ? "bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 shadow-orange-500/20" :
+                latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 shadow-rose-500/20" :
+                latestSniffed.service === "eon" ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20" :
+                latestSniffed.service === "hrti" ? "bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 shadow-cyan-500/20" : "bg-indigo-600"
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" /> Popuni Bypass Polja
+            </button>
+            <button
+              onClick={() => setShowSnifferToast(false)}
+              className="py-2 px-3 rounded-lg text-xs font-bold bg-white/[0.05] border border-white/[0.08] hover:bg-white/[0.1] text-white transition-colors"
+            >
+              Ignoriši
+            </button>
+          </div>
         </div>
       )}
 
@@ -3422,6 +3547,68 @@ export default function App() {
                     )}
                     Uvezi Sesiju
                   </button>
+                </div>
+              </div>
+
+              {/* DevTools WebSocket Sniffer Proxy Panel */}
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-cyan-card glow-card-premium">
+                <h3 className="font-extrabold text-xl text-cyan-400 flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-cyan-400 animate-pulse" />
+                  Automatski DevTools Sniffer Proxy
+                </h3>
+                <p className="text-sm text-text-secondary leading-relaxed m-0">
+                  Otklonite potrebu za ručnim otvaranjem F12 konzole i kopiranjem linkova! Instalirajte našu <strong>Tampermonkey skriptu</strong> koja automatski detektuje <strong>MPEG-DASH (.mpd)</strong> i <strong>Widevine License</strong> linkove tokom normalne reprodukcije videa u brauzeru, i bezbedno ih šalje direktno u aplikaciju u realnom vremenu.
+                </p>
+
+                <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-6 flex flex-col gap-3">
+                  <div className="font-extrabold text-cyan-400 flex items-center gap-2 text-sm">
+                    <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    Uputstvo za instalaciju (Svega 30 sekundi):
+                  </div>
+                  <ol className="list-decimal pl-5 flex flex-col gap-2 text-xs text-text-secondary m-0 leading-relaxed">
+                    <li>Instalirajte brauzer ekstenziju <strong>Tampermonkey</strong> ili <strong>Violentmonkey</strong> iz Chrome Web Prodavnice.</li>
+                    <li>Kliknite na ikonicu ekstenzije i odaberite <strong>"Create a new script"</strong> (Kreiraj novu skriptu).</li>
+                    <li>Obrišite sav podrazumevani kod, kopirajte skriptu ispod i sačuvajte je (<strong>Ctrl + S</strong>).</li>
+                    <li>Otvorite platformu u novom tabu (npr. <code className="font-mono bg-white/10 px-1 rounded">max.com</code>, <code className="font-mono bg-white/10 px-1 rounded">voyo.rs</code>, itd.) i pustite bilo koji video. Resursi će se odmah pojaviti na vašem ekranu u obliku obaveštenja!</li>
+                  </ol>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">Tampermonkey User-Script Kod:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const scriptText = `// ==UserScript==\\n// @name         o0o0o0o-downloader DevTools Sniffer Proxy\\n// @namespace    http://tampermonkey.net/\\n// @version      1.0\\n// @description  Automated Widevine and HLS stream URL sniffer for Voyo, EON, HRTi, RTS and HBO Max.\\n// @author       Antigravity\\n// @match        *://*.max.com/*\\n// @match        *://*.voyo.rs/*\\n// @match        *://*.voyo.si/*\\n// @match        *://*.rtsplaneta.rs/*\\n// @match        *://*.hrt.hr/*\\n// @match        *://*.eon.tv/*\\n// @match        *://*.hbomax.com/*\\n// @grant        GM_xmlhttpRequest\\n// @connect      localhost\\n// @run-at       document-start\\n// ==/UserScript==\\n\\n(function() {\\n    'use strict';\\n    console.log("🚀 o0o0o0o-downloader Sniffer Proxy active!");\\n    const BACKEND_URL = "http://localhost:8000/api/sniffer/detect";\\n\\n    function getService() {\\n        const host = window.location.hostname;\\n        if (host.includes("max.com") || host.includes("hbomax.com")) return "hbomax";\\n        if (host.includes("voyo.rs") || host.includes("voyo.si")) return "voyo";\\n        if (host.includes("rtsplaneta")) return "rtsplaneta";\\n        if (host.includes("hrt.hr")) return "hrti";\\n        if (host.includes("eon.tv")) return "eon";\\n        return "unknown";\\n    }\\n\\n    function sendToBackend(type, url, headers = {}) {\\n        const service = getService();\\n        console.log(\\\`[Sniffer] Intercepted \\\${service} \\\${type}:\\\`, url);\\n        const cleanHeaders = {};\\n        const keepHeaders = ['authorization', 'x-dt-custom-data', 'x-ax-drm-message', 'drm-token'];\\n        for (const [key, value] of Object.entries(headers)) {\\n            if (keepHeaders.includes(key.toLowerCase())) {\\n                cleanHeaders[key] = value;\\n            }\\n        }\\n\\n        GM_xmlhttpRequest({\\n            method: "POST",\\n            url: BACKEND_URL,\\n            headers: {\\n                "Content-Type": "application/json"\\n            },\\n            data: JSON.stringify({\\n                service: service,\\n                type: type,\\n                url: url,\\n                headers: cleanHeaders,\\n                title: document.title || ""\\n            }),\\n            onload: function(response) {\\n                console.log("[Sniffer] Relayed successfully:", response.responseText);\\n            },\\n            onerror: function(err) {\\n                console.error("[Sniffer] Relay failed:", err);\\n            }\\n        });\\n    }\\n\\n    const originalFetch = window.fetch;\\n    window.fetch = async function(...args) {\\n        const url = typeof args[0] === 'string' ? args[0] : (args[0] instanceof URL ? args[0].href : (args[0] ? args[0].url : ''));\\n        const options = args[1] || {};\\n        if (url) {\\n            const lowUrl = url.toLowerCase();\\n            if (lowUrl.includes(".mpd") || lowUrl.includes(".m3u8") || lowUrl.includes("/manifest")) {\\n                sendToBackend("manifest", url);\\n            } else if (lowUrl.includes("widevine") || lowUrl.includes("license") || lowUrl.includes("/drm") || lowUrl.includes("challenge")) {\\n                const headers = options.headers || {};\\n                sendToBackend("license", url, headers);\\n            }\\n        }\\n        return originalFetch.apply(this, args);\\n    };\\n\\n    const originalOpen = XMLHttpRequest.prototype.open;\\n    const originalSend = XMLHttpRequest.prototype.send;\\n    const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\\n\\n    XMLHttpRequest.prototype.open = function(method, url, ...rest) {\\n        this._url = url;\\n        this._headers = {};\\n        return originalOpen.apply(this, [method, url, ...rest]);\\n    };\\n\\n    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {\\n        this._headers[header] = value;\\n        return originalSetRequestHeader.apply(this, [header, value]);\\n    };\\n\\n    XMLHttpRequest.prototype.send = function(body) {\\n        const url = this._url;\\n        if (url) {\\n            const lowUrl = url.toLowerCase();\\n            if (lowUrl.includes(".mpd") || lowUrl.includes(".m3u8") || lowUrl.includes("/manifest")) {\\n                sendToBackend("manifest", url);\\n            } else if (lowUrl.includes("widevine") || lowUrl.includes("license") || lowUrl.includes("/drm") || lowUrl.includes("challenge")) {\\n                sendToBackend("license", url, this._headers);\\n            }\\n        }\\n        return originalSend.apply(this, [body]);\\n    };\\n})();`;
+                        navigator.clipboard.writeText(scriptText);
+                        setSnifferScriptCopied(true);
+                        setTimeout(() => setSnifferScriptCopied(false), 2000);
+                      }}
+                      className="btn btn-premium-secondary gap-1.5 py-1 px-3 text-xs"
+                      style={{
+                        "--btn-grad-start": "#06b6d4",
+                        "--btn-grad-end": "#0d9488",
+                        "--btn-glow": "rgba(6,182,212,0.15)",
+                        "--btn-glow-hover": "rgba(6,182,212,0.3)"
+                      } as any}
+                    >
+                      {snifferScriptCopied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" /> Kopirano!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Kopiraj Skriptu
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <textarea
+                    readOnly
+                    value={`// ==UserScript==\\n// @name         o0o0o0o-downloader DevTools Sniffer Proxy\\n// @namespace    http://tampermonkey.net/\\n// @version      1.0\\n// @match        *://*.max.com/*\\n// @match        *://*.voyo.rs/*\\n// @match        *://*.voyo.si/*\\n// @match        *://*.rtsplaneta.rs/*\\n// @match        *://*.hrt.hr/*\\n// @match        *://*.eon.tv/*\\n// @match        *://*.hbomax.com/*\\n// @grant        GM_xmlhttpRequest\\n// @connect      localhost\\n// @run-at       document-start\\n// ==/UserScript==\\n\\n(function() {\\n    'use strict';\\n    // ... (ostatak koda je spreman za kopiranje preko dugmeta iznad)\\n})();`}
+                    className="input-premium font-mono text-[10px] bg-[#0d0e12]/80 h-28 resize-none"
+                    style={{ border: "1px solid rgba(6,182,212,0.2)" }}
+                  />
                 </div>
               </div>
 

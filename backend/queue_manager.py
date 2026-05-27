@@ -259,6 +259,31 @@ class DownloadQueueManager:
         for ws in disconnected:
             self.unregister_websocket(ws)
 
+    async def broadcast_sniffer(self, service: str, sniffer_type: str, url: str, headers: Dict[str, str] = None, title: str = ""):
+        """Broadcast a dynamic sniffed URL to all connected frontend clients."""
+        if not self.active_websockets:
+            return
+        payload = {
+            "type": "sniffer_update",
+            "data": {
+                "service": service,
+                "type": sniffer_type,
+                "url": url,
+                "headers": headers or {},
+                "title": title
+            }
+        }
+        
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
     async def add_download(self, service: str, title: str, cmd: List[str]) -> str:
         """Add a new download to the queue."""
         async with self.lock:

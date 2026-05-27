@@ -152,6 +152,26 @@ def update_config(data: ConfigUpdate):
             config.update_binary_path(name, path)
     return {"success": True, "output_dir": config.get_output_dir(), "binaries": config.data["binaries"]}
 
+class SnifferPayload(BaseModel):
+    service: str
+    type: str  # 'manifest' or 'license'
+    url: str
+    headers: Dict[str, str] = None
+    title: str = ""
+
+@app.post("/api/sniffer/detect")
+async def sniffer_detect(data: SnifferPayload):
+    """Receive browser-sniffed resources and broadcast to React clients."""
+    await queue_manager.broadcast_sniffer(
+        service=data.service,
+        sniffer_type=data.type,
+        url=data.url,
+        headers=data.headers,
+        title=data.title
+    )
+    return {"success": True}
+
+
 # ── Smart Detection & Session Sync Routes ──────────────────────────────────────
 
 @app.get("/api/smart-detect")
