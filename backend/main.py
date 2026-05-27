@@ -1,8 +1,9 @@
 import os
+import json
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Optional, Any, List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ from backend.services.hrti_adapter import HrtiAdapter
 from backend.services.eon_adapter import EonAdapter
 from backend.services.rts_adapter import RtsAdapter
 from backend.services.hbo_adapter import HboAdapter
+from backend.services.smart_parser import SmartParser
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -78,6 +80,108 @@ def update_config(data: ConfigUpdate):
         for name, path in data.binaries.items():
             config.update_binary_path(name, path)
     return {"success": True, "output_dir": config.get_output_dir(), "binaries": config.data["binaries"]}
+
+# ── Smart Detection & Session Sync Routes ──────────────────────────────────────
+
+@app.get("/api/smart-detect")
+def smart_detect(url: str):
+    """Detect streaming service and extract metadata from URL."""
+    res = SmartParser.get_metadata(url)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error"))
+    return res
+
+class SessionImportRequest(BaseModel):
+    service: str
+    session_data: str
+
+@app.post("/api/config/import-session")
+def import_session(req: SessionImportRequest):
+    """Import active browser session / token to bypass CAPTCHAs."""
+    service = req.service.strip().lower()
+    data = req.session_data.strip()
+
+    if not data:
+        raise HTTPException(status_code=400, detail="Podaci o sesiji ne smeju biti prazni.")
+
+    try:
+        if service == "voyo":
+            from backend.core.services.voyo.auth import VoyoConfig
+            vcfg = VoyoConfig()
+            token = data
+            if data.startswith("{"):
+                try:
+                    js = json.loads(data)
+                    token = js.get("token") or js.get("secure_streaming_token") or data
+                except:
+                    pass
+            vcfg._cfg["token"] = token
+            vcfg.save()
+            
+            # Sync in-memory cache
+            from backend.services.voyo_adapter import _VOYO_CACHE
+            import time
+            _VOYO_CACHE["token"] = token
+            _VOYO_CACHE["last_check"] = time.time()
+            return {"success": True, "message": "Voyo token uspešno uvezen!"}
+
+        elif service == "hrti":
+            cfg_path = Path.home() / ".hrti" / "config.json"
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            token = data
+            if data.startswith("{"):
+                try:
+                    js = json.loads(data)
+                    token = js.get("token") or js.get("secure_streaming_token") or data
+                except:
+                    pass
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({"token": token}, f, indent=2)
+            return {"success": True, "message": "HRTi token uspešno uvezen!"}
+
+        elif service == "rtsplaneta" or service == "rts":
+            from backend.core.services.rtsplaneta.auth import RtsConfig
+            rcfg = RtsConfig()
+            token = data
+            if data.startswith("{"):
+                try:
+                    js = json.loads(data)
+                    token = js.get("token") or js.get("secure_streaming_token") or data
+                except:
+                    pass
+            rcfg.config["token"] = token
+            rcfg.config["secure_streaming_token"] = token
+            rcfg.save()
+            return {"success": True, "message": "RTS Planeta token uspešno uvezen!"}
+
+        elif service == "hbomax":
+            token_path = Path.home() / ".hbomax" / "token.json"
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            if data.startswith("{"):
+                try:
+                    js = json.loads(data)
+                    if "access_token" not in js and "token" in js:
+                        js["access_token"] = js["token"]
+                    if "access_token" in js and isinstance(js["access_token"], str):
+                        js["access_token"] = js["access_token"].replace("Bearer ", "").strip()
+                    with open(token_path, "w", encoding="utf-8") as f:
+                        json.dump(js, f, indent=2)
+                except:
+                    clean_data = data.replace("Bearer ", "").strip()
+                    with open(token_path, "w", encoding="utf-8") as f:
+                        json.dump({"access_token": clean_data}, f, indent=2)
+            else:
+                clean_data = data.replace("Bearer ", "").strip()
+                with open(token_path, "w", encoding="utf-8") as f:
+                    json.dump({"access_token": clean_data}, f, indent=2)
+            config.update_credentials("hbomax", {"token": data})
+            return {"success": True, "message": "HBO Max token uspešno uvezen!"}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Uvoz sesije nije podržan za servis: {service}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Greška tokom uvoza sesije: {e}")
 
 # ── Voyo RS Routes ────────────────────────────────────────────────────────────
 
@@ -340,6 +444,22 @@ async def hbo_download(req: HboDownloadRequest):
     cmd = HboAdapter.make_download_cmd(req.video_id, req.subs)
     title = f"HBO Max: {req.video_id}"
     task_id = await queue_manager.add_download("hbomax", title, cmd)
+    return {"success": True, "task_id": task_id}
+
+class HboDirectDownloadRequest(BaseModel):
+    manifest_url: str
+    license_url: str
+    title: str = ""
+    subs: str = "sr,hr,mk,bs,sl"
+
+@app.post("/api/hbo/download-direct")
+async def hbo_download_direct(req: HboDirectDownloadRequest):
+    """Bypass Mode: Download using directly pasted Manifest + License URLs."""
+    cmd = HboAdapter.make_download_direct_cmd(
+        req.manifest_url, req.license_url, req.title, req.subs
+    )
+    display_title = req.title.strip() if req.title.strip() else f"HBO Max Direct: {req.manifest_url[:40]}…"
+    task_id = await queue_manager.add_download("hbomax", display_title, cmd)
     return {"success": True, "task_id": task_id}
 
 # ── Download Queue Operations ───────────────────────────────────────────────

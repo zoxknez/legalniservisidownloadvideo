@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.videodownload/
+output/
+temp/
+scratch/
+scratch_*.py
+scratch_*.txt
+scratch_*.json
+temp_user_msg.txt
+extracted_*.txt
+*.db
+*.log

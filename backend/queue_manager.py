@@ -240,7 +240,7 @@ class DownloadQueueManager:
     async def clear_completed(self):
         """Clear finished/failed/cancelled downloads."""
         async with self.lock:
-            to_remove = [k for k, v in self.items.items() if v.status in ("finished", "cancelled")]
+            to_remove = [k for k, v in self.items.items() if v.status in ("finished", "failed", "cancelled")]
             for k in to_remove:
                 self.db.delete_download(k)
                 del self.items[k]
@@ -277,27 +277,31 @@ class DownloadQueueManager:
         # Wait for a free slot
         await self._wait_for_slot()
 
-        while item.retry_count < MAX_RETRIES:
-            async with self.lock:
-                self.running_count += 1
-                item.status = "downloading"
-                item.logs.append(f"\n[Attempt {item.retry_count + 1}/{MAX_RETRIES}]")
-                item.logs.append(f"[Command]: {redact_command(item.cmd)}\n")
-                await self.broadcast_state()
+        async with self.lock:
+            self.running_count += 1
 
-            try:
-                success = await self._run_download_process(item)
-                if success:
-                    break
-                else:
+        success = False
+        try:
+            while item.retry_count < MAX_RETRIES:
+                async with self.lock:
+                    item.status = "downloading"
+                    item.logs.append(f"\n[Attempt {item.retry_count + 1}/{MAX_RETRIES}]")
+                    item.logs.append(f"[Command]: {redact_command(item.cmd)}\n")
+                    await self.broadcast_state()
+
+                try:
+                    success = await self._run_download_process(item)
+                    if success:
+                        break
+                    else:
+                        item.retry_count += 1
+                        if item.retry_count < MAX_RETRIES:
+                            item.logs.append(f"\n[Retrying... (attempt {item.retry_count + 1}/{MAX_RETRIES})]")
+                            await asyncio.sleep(2)
+                except Exception as e:
+                    logger.error(f"Download process error: {e}")
                     item.retry_count += 1
-                    if item.retry_count < MAX_RETRIES:
-                        item.logs.append(f"\n[Retrying... (attempt {item.retry_count + 1}/{MAX_RETRIES})]")
-                        await asyncio.sleep(2)
-            except Exception as e:
-                logger.error(f"Download process error: {e}")
-                item.retry_count += 1
-
+        finally:
             async with self.lock:
                 self.running_count -= 1
 

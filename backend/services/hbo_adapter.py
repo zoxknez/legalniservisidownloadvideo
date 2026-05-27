@@ -53,3 +53,24 @@ class HboAdapter:
             cmd += ["--subs", subs.strip()]
             
         return cmd
+
+    @staticmethod
+    def make_download_direct_cmd(
+        manifest_url: str,
+        license_url: str,
+        title: str = "",
+        subs: str = "sr,hr,mk,bs,sl",
+    ) -> List[str]:
+        """Build command for Direct/Bypass download (manifest + license URL mode)."""
+        cmd = [
+            "python", "hbomax_downloader.py",
+            "--manifest", manifest_url,
+            "--license",  license_url,
+        ]
+        if title and title.strip():
+            cmd += ["--title", title.strip()]
+        if not subs or subs.strip().lower() == "none":
+            cmd += ["--subs", "none"]
+        else:
+            cmd += ["--subs", subs.strip()]
+        return cmd

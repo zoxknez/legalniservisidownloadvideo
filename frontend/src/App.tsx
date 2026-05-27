@@ -20,11 +20,14 @@ import {
   Server,
   User,
   ShieldAlert,
-  RefreshCw,
   Inbox,
   Radio,
   Zap,
-  Globe
+  Globe,
+  Sparkles,
+  Copy,
+  Check,
+  Clapperboard
 } from "lucide-react";
 
 // Interface definitions
@@ -122,19 +125,40 @@ function getLogLineClass(line: string): string {
   return "log-line-default";
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function isUrlLike(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
 // Service metadata for sidebar
 const SERVICE_META = [
-  { id: "voyo",     label: "Voyo RS",      icon: Tv,       colorClass: "service-voyo" },
-  { id: "hrti",     label: "HRTi Catalog", icon: Film,     colorClass: "service-hrti" },
-  { id: "eon",      label: "EON TV",       icon: Play,     colorClass: "service-eon"  },
-  { id: "rts",      label: "RTS Planeta",  icon: Radio,    colorClass: "service-rts"  },
-  { id: "hbo",      label: "HBO Max",      icon: Zap,      colorClass: "service-hbo"  },
-  { id: "settings", label: "Postavke",     icon: Settings, colorClass: "text-text-muted" },
+  { id: "dashboard", label: "Pametno Preuzimanje", icon: Zap,         colorClass: "text-amber-400",   activeBg: "bg-amber-500",  activeGlow: "rgba(251,191,36,0.3)"  },
+  { id: "voyo",     label: "Voyo RS",              icon: Tv,           colorClass: "service-voyo",     activeBg: "bg-orange-600", activeGlow: "rgba(249,115,22,0.3)"  },
+  { id: "hrti",     label: "HRTi Catalog",         icon: Film,         colorClass: "service-hrti",     activeBg: "bg-cyan-600",   activeGlow: "rgba(6,182,212,0.3)"   },
+  { id: "eon",      label: "EON TV",               icon: Play,         colorClass: "service-eon",      activeBg: "bg-emerald-600",activeGlow: "rgba(16,185,129,0.3)"  },
+  { id: "rts",      label: "RTS Planeta",          icon: Radio,        colorClass: "service-rts",      activeBg: "bg-rose-600",   activeGlow: "rgba(244,63,94,0.3)"   },
+  { id: "hbo",      label: "HBO Max",              icon: Clapperboard, colorClass: "service-hbo",      activeBg: "bg-purple-600", activeGlow: "rgba(147,51,234,0.3)"  },
+  { id: "settings", label: "Postavke",             icon: Settings,     colorClass: "text-text-muted",  activeBg: "bg-indigo-600", activeGlow: "rgba(99,102,241,0.3)"  },
 ];
+
+// Queue service helpers
+const QUEUE_SERVICE_PILL_CLASS: Record<string, string> = {
+  voyo:    "queue-pill-voyo",
+  hrti:    "queue-pill-hrti",
+  eon:     "queue-pill-eon",
+  rts:     "queue-pill-rts",
+  hbomax:  "queue-pill-hbomax",
+};
+const QUEUE_CARD_BORDER_CLASS: Record<string, string> = {
+  voyo:   "queue-card-voyo",
+  hrti:   "queue-card-hrti",
+  eon:    "queue-card-eon",
+  rts:    "queue-card-rts",
+  hbomax: "queue-card-hbomax",
+};
 
 // ── Custom Dropdown Select Component (Portal-based) ──────────────────────────
 // Uses React Portal to render dropdown in document.body, escaping any
@@ -302,10 +326,19 @@ function CustomSelect({ value, options, onChange, formatLabel, className = "", p
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<string>("voyo");
+  const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
   const [connected, setConnected] = useState<boolean>(false);
   const [status, setStatus] = useState<AppStatus | null>(null);
+  const [toast, setToast] = useState<{message: string; type: "success" | "error" | "info"} | null>(null);
+  const [toastKey, setToastKey] = useState<number>(0);
+
+  // HRTi inline download modal (replaces native prompt)
+  const [hrtiModal, setHrtiModal] = useState<{refId: string; title: string} | null>(null);
+  const [hrtiModalTitle, setHrtiModalTitle] = useState<string>("");
+
+  // Log modal copy state
+  const [logCopied, setLogCopied] = useState<boolean>(false);
   
   // Terminal Logs Modal
   const [showLogModal, setShowLogModal] = useState<boolean>(false);
@@ -382,14 +415,167 @@ export default function App() {
   // HBO Max Tab Form State
   const [hboTarget, setHboTarget] = useState<string>("");
   const [hboSubs, setHboSubs] = useState<string>("sr,hr,mk,bs,sl");
+  const [hboDirectMode, setHboDirectMode] = useState<boolean>(false);
+  const [hboManifestUrl, setHboManifestUrl] = useState<string>("");
+  const [hboLicenseUrl, setHboLicenseUrl] = useState<string>("");
+  const [hboDirectTitle, setHboDirectTitle] = useState<string>("");
+  const [hboDirectSubs, setHboDirectSubs] = useState<string>("sr,hr,mk,bs,sl");
 
-  // Notifications / Messages
-  const [toast, setToast] = useState<{message: string; type: "success" | "error" | "info"} | null>(null);
+
+  // Smart Dashboard Form State
+  const [smartUrl, setSmartUrl] = useState<string>("");
+  const [smartLoading, setSmartLoading] = useState<boolean>(false);
+  const [smartData, setSmartData] = useState<any | null>(null);
+  // const [smartSelectedEpisodes, setSmartSelectedEpisodes] = useState<number[]>([]);
+  const [smartEpisodesRange, setSmartEpisodesRange] = useState<string>("");
+  const [smartResolution, setSmartResolution] = useState<string>("1080p");
+  const [smartSubs, setSmartSubs] = useState<string>("sr,hr,mk,bs,sl");
+  // const [smartEonMode] = useState<string>("vod");
+  // const [smartEonDuration] = useState<number>(3600);
+  const [smartRtsVerbose, setSmartRtsVerbose] = useState<boolean>(false);
+
+  // Session Import Form State
+  const [importService, setImportService] = useState<string>("voyo");
+  const [importSessionData, setImportSessionData] = useState<string>("");
+  const [importLoading, setImportLoading] = useState<boolean>(false);
+
+  const handleSmartDetect = async (urlStr: string) => {
+    const val = urlStr.trim();
+    if (!val) return;
+    setSmartLoading(true);
+    setSmartData(null);
+    try {
+      const res = await fetch(`${getApiHost()}/api/smart-detect?url=${encodeURIComponent(val)}`);
+      const data = await res.json();
+      if (res.ok) {
+        setSmartData(data);
+        // if (data.episodes) {
+        //   setSmartSelectedEpisodes(data.episodes.map((ep: any) => ep.id));
+        // }
+        showToast("Link uspešno prepoznat i analiziran!", "success");
+      } else {
+        showToast(data.detail || "URL nije prepoznat.", "error");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setSmartLoading(false);
+    }
+  };
+
+  const startSmartDownload = async () => {
+    if (!smartData) return;
+    try {
+      showToast("Pokretanje pametnog preuzimanja...", "info");
+      let res: Response;
+      
+      if (smartData.service === "voyo") {
+        res = await fetch(`${getApiHost()}/api/voyo/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: smartData.target_id,
+            mode: smartData.mode,
+            episodes: smartEpisodesRange,
+            resolution: smartResolution
+          })
+        });
+      } else if (smartData.service === "hrti") {
+        res = await fetch(`${getApiHost()}/api/hrti/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ref_id: smartData.target_id,
+            title: smartData.title,
+            workers: 16
+          })
+        });
+      } else if (smartData.service === "eon") {
+        res = await fetch(`${getApiHost()}/api/eon/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: smartData.mode,
+            target: smartData.target_id,
+            episodes: smartEpisodesRange
+          })
+        });
+      } else if (smartData.service === "rts" || smartData.service === "rtsplaneta") {
+        const start = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[0]) : undefined;
+        const end = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[1]) : undefined;
+        res = await fetch(`${getApiHost()}/api/rts/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_url: smartUrl,
+            start_ep: start,
+            end_ep: end,
+            verbose: smartRtsVerbose
+          })
+        });
+        if (false) setSmartRtsVerbose(false);
+      } else if (smartData.service === "hbomax") {
+        res = await fetch(`${getApiHost()}/api/hbo/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            video_id: smartData.target_id,
+            subs: smartSubs
+          })
+        });
+      } else {
+        showToast("Nepoznat servis za pametno preuzimanje.", "error");
+        return;
+      }
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast("Preuzimanje uspešno dodato u red!", "success");
+        setSmartUrl("");
+        setSmartData(null);
+      } else {
+        showToast(data.detail || "Greška pri pokretanju preuzimanja.", "error");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    }
+  };
+
+  const handleImportSession = async () => {
+    if (!importSessionData.trim()) {
+      showToast("Nalepite podatke sesije pre uvoza.", "error");
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const res = await fetch(`${getApiHost()}/api/config/import-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service: importService,
+          session_data: importSessionData
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Sesija uspešno uvezena!", "success");
+        setImportSessionData("");
+        fetchStatus();
+      } else {
+        showToast(data.detail || "Greška pri uvozu sesije.", "error");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setImportLoading(false);
+    }
+  };
 
   // F1: Confirm clear queue
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToastKey(k => k + 1);
     setToast({ message, type });
     setTimeout(() => setToast(null), 5000);
   };
@@ -669,14 +855,19 @@ export default function App() {
     finally { setHrtiLoadingItems(false); }
   };
 
-  const startHrtiDownload = async (refId: string, itemTitle: string) => {
+  const startHrtiDownload = (refId: string, itemTitle: string) => {
+    // Open inline modal instead of native prompt()
+    setHrtiModalTitle(itemTitle);
+    setHrtiModal({ refId, title: itemTitle });
+  };
+
+  const confirmHrtiDownload = async () => {
+    if (!hrtiModal) return;
     try {
-      const customTitle = prompt(`Unesite naziv fajla za "${itemTitle}" (ostavite prazno za podrazumevano):`, itemTitle);
-      if (customTitle === null) return;
       const res = await fetch(`${getApiHost()}/api/hrti/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref_id: refId, title: customTitle, workers: hrtiDownloadWorkers })
+        body: JSON.stringify({ ref_id: hrtiModal.refId, title: hrtiModalTitle || hrtiModal.title, workers: hrtiDownloadWorkers })
       });
       if (res.ok) {
         showToast("HRTi preuzimanje pokrenuto!");
@@ -685,6 +876,9 @@ export default function App() {
       }
     } catch (e: any) {
       showToast(e.message || "Greška na serveru", "error");
+    } finally {
+      setHrtiModal(null);
+      setHrtiModalTitle("");
     }
   };
 
@@ -876,6 +1070,36 @@ export default function App() {
     }
   };
 
+  const startHboDirectDownload = async () => {
+    if (!hboManifestUrl.trim() || !hboLicenseUrl.trim()) {
+      showToast("Unesite i Manifest URL i License URL", "error");
+      return;
+    }
+    try {
+      const res = await fetch(`${getApiHost()}/api/hbo/download-direct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          manifest_url: hboManifestUrl.trim(),
+          license_url: hboLicenseUrl.trim(),
+          title: hboDirectTitle.trim(),
+          subs: hboDirectSubs,
+        })
+      });
+      if (res.ok) {
+        showToast("HBO Max Direct preuzimanje pokrenuto! ✓");
+        setHboManifestUrl("");
+        setHboLicenseUrl("");
+        setHboDirectTitle("");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err?.detail || "Greška pri slanju zadatka", "error");
+      }
+    } catch (e: any) {
+      showToast(e.message || "Greška na serveru", "error");
+    }
+  };
+
   // Queue actions
   const cancelDownloadTask = async (id: string) => {
     try {
@@ -886,14 +1110,6 @@ export default function App() {
       });
       showToast("Slanje zahteva za otkazivanje...", "info");
     } catch (e) { console.error(e); }
-  };
-
-  // F2: Retry failed task — re-add same title as new download
-  const retryDownloadTask = async (task: DownloadTask) => {
-    showToast(`Pokušaj ponovnog pokretanja: ${task.title}`, "info");
-    // We can only re-queue from frontend if we knew the original cmd;
-    // best UX: show info that user should re-submit from the tab
-    showToast("Ponovo pošaljite isti zahtev iz odgovarajućeg taba.", "info");
   };
 
   const clearCompletedQueue = async () => {
@@ -921,15 +1137,17 @@ export default function App() {
   return (
     <div className="flex w-full min-h-screen">
       
-      {/* V4: Toast — type-based glow color */}
+      {/* Toast — type-based glow + progress bar */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-4 rounded-lg glass-panel animate-slide ${
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-4 rounded-lg glass-panel animate-slide overflow-hidden ${
           toast.type === "error" ? "glow-red" : toast.type === "success" ? "glow-emerald" : "glow-indigo"
-        }`}>
+        }`} style={{paddingBottom: "1.25rem"}}>
           {toast.type === "success" && <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />}
           {toast.type === "error" && <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />}
           {toast.type === "info" && <Info className="w-5 h-5 text-indigo-400 flex-shrink-0" />}
           <span className="text-sm font-medium">{toast.message}</span>
+          {/* Progress bar — auto-dismiss indicator */}
+          <div key={toastKey} className={`toast-progress toast-progress-${toast.type}`} />
         </div>
       )}
 
@@ -942,31 +1160,32 @@ export default function App() {
               <Download className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-extrabold text-md tracking-wider text-white">M-DOWNLOADER</h1>
-              <p className="text-[10px] text-indigo-400 font-bold tracking-widest">SUITE v1.0</p>
+              <h1 className="font-extrabold text-md tracking-wider text-white">o0o0o0o-downloader</h1>
+              <p className="text-[10px] text-indigo-400 font-bold tracking-widest">by o0o0o0o</p>
             </div>
           </div>
 
-          {/* V2: Navigation with service-specific colors + V6: download count badge */}
+          {/* Navigation with per-service active colors + download count badge */}
           <nav className="flex flex-col gap-2">
             {SERVICE_META.map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
-              // Count active downloads per service
+              // Fix: hbo tab counts hbomax service downloads
+              const svcFilter = tab.id === "hbo" ? "hbomax" : tab.id;
               const svcCount = tab.id !== "settings"
-                ? downloads.filter(d => d.service === tab.id && (d.status === "downloading" || d.status === "pending")).length
+                ? downloads.filter(d => d.service === svcFilter && (d.status === "downloading" || d.status === "pending")).length
                 : 0;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
+                  style={active ? {boxShadow: `0 4px 14px ${tab.activeGlow}`} : {}}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
                     active
-                      ? "bg-indigo-600 text-white glow-indigo"
+                      ? `${tab.activeBg} text-white`
                       : "text-text-secondary hover:bg-white/[0.03] hover:text-white"
                   }`}
                 >
-                  {/* V2: service-specific color on icon when inactive */}
                   <Icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-white" : tab.colorClass}`} />
                   <span className="flex-1 text-left">{tab.label}</span>
                   {/* V6: download count badge */}
@@ -996,11 +1215,153 @@ export default function App() {
       {/* V8: key on main wrapper forces re-animation on tab change */}
       <main className="flex-1 p-10 overflow-y-auto max-h-screen">
         
-        {/* VOYO TAB */}
+        {/* PAMETNO PREUZIMANJE DASHBOARD */}
+        {activeTab === "dashboard" && (
+          <div key="dashboard" className="tab-content">
+            {/* Tab page header */}
+            <div className="tab-page-header tab-header-dash mb-8">
+              <div className="tab-page-header-icon" style={{background: "linear-gradient(135deg, #f59e0b, #d97706)"}}>
+                <Zap style={{width:24, height:24, color:"white"}} />
+              </div>
+              <div style={{flex:1}}>
+                <h2 className="text-2xl font-extrabold text-white mb-1">Pametno Preuzimanje</h2>
+                <p className="text-text-secondary text-sm">Nalepite link sa bilo kog servisa — automatski prepoznajemo, analiziramo i pokrećemo preuzimanje.</p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {[{emoji:"🟠",label:"Voyo RS"},{emoji:"🔵",label:"HRTi"},{emoji:"🟢",label:"EON TV"},{emoji:"🔴",label:"RTS Planeta"},{emoji:"🟣",label:"HBO Max"}].map(s => (
+                    <span key={s.label} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:999,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)"}}>{s.emoji} {s.label}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-8 max-w-4xl">
+              {/* URL paste input bar */}
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-4">
+                <label className="text-white font-semibold">Zalepite link za video, epizodu ili seriju</label>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="npr. https://voyo.rs/uspeh-1_50584.html, HRTi link, RTS Planeta link, EON ili HBO Max..."
+                    value={smartUrl}
+                    onChange={(e) => {
+                      setSmartUrl(e.target.value);
+                      if (e.target.value.trim().startsWith("http")) {
+                        handleSmartDetect(e.target.value);
+                      }
+                    }}
+                    className="flex-1 py-3.5 px-4 text-base bg-black/40 border border-glass rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-text-muted"
+                  />
+                  <button
+                    onClick={() => handleSmartDetect(smartUrl)}
+                    disabled={smartLoading || !smartUrl}
+                    className="btn btn-primary px-6"
+                  >
+                    {smartLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Search className="w-5 h-5" />
+                    )}
+                    Analiziraj
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview & Download Panel */}
+              {smartData && (
+                <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 animate-slide">
+                  <div className="flex flex-col md:flex-row gap-6">
+                    <div className="w-full md:w-48 h-28 bg-indigo-950/40 rounded-lg flex items-center justify-center border border-glass overflow-hidden flex-shrink-0">
+                      {smartData.thumbnail ? (
+                        <img src={smartData.thumbnail} alt={smartData.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <Tv className="w-12 h-12 text-indigo-400/50" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="badge badge-connected">
+                          {smartData.service.toUpperCase()}
+                        </span>
+                        <span className="text-xs text-text-muted font-mono">{smartData.mode.toUpperCase()}</span>
+                      </div>
+                      <h3 className="text-2xl font-extrabold text-white">{smartData.title}</h3>
+                      <p className="text-sm text-text-secondary leading-relaxed">{smartData.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-glass pt-6 flex flex-col gap-4">
+                    <h4 className="text-md font-bold text-white uppercase tracking-wider">Konfiguracija preuzimanja</h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {["voyo", "hrti", "eon"].includes(smartData.service) && (
+                        <div>
+                          <label>Rezolucija</label>
+                          <select
+                            value={smartResolution}
+                            onChange={(e) => setSmartResolution(e.target.value)}
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
+                          >
+                            <option value="1080p">1080p Full HD</option>
+                            <option value="720p">720p HD</option>
+                            <option value="480p">480p SD</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {smartData.service === "hbomax" && (
+                        <div>
+                          <label>Prevodi (jezici)</label>
+                          <input
+                            type="text"
+                            value={smartSubs}
+                            onChange={(e) => setSmartSubs(e.target.value)}
+                            placeholder="sr,hr,mk,bs,sl"
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
+                          />
+                        </div>
+                      )}
+
+                      {smartData.mode === "series" && (
+                        <div>
+                          <label>Raspon epizoda (opciono)</label>
+                          <input
+                            type="text"
+                            value={smartEpisodesRange}
+                            onChange={(e) => setSmartEpisodesRange(e.target.value)}
+                            placeholder="npr. 1-3 ili 2-"
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
+                          />
+                          <p className="text-[10px] text-text-muted mt-1">Ostavite prazno da preuzmete sve dostupne epizode.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={startSmartDownload}
+                      className="btn btn-primary py-3.5 font-extrabold text-sm gap-2 self-start mt-4"
+                      style={{ minWidth: "220px" }}
+                    >
+                      <Download className="w-4 h-4" />
+                      Pokreni Preuzimanje
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {activeTab === "voyo" && (
           <div key="voyo" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">Voyo RS</h2>
-            <p className="text-text-secondary mb-8">Preuzmite video sadržaj i serije sa Voyo.rs platforme.</p>
+            <div className="tab-page-header tab-header-voyo mb-8">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#f97316,#ea580c)"}}>
+                <Tv style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">Voyo RS</h2>
+                <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz Widevine dekripciju.</p>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               
@@ -1086,27 +1447,26 @@ export default function App() {
                       </div>
 
                       <div className="max-h-60 overflow-y-auto border border-glass rounded-lg bg-black/20 p-2 flex flex-col gap-1">
-                        {voyoSeriesData.episodes.map((ep) => (
-                          <label key={ep.id} className="flex items-center gap-3 p-2 rounded hover:bg-white/[0.02] cursor-pointer text-sm m-0 normal-case tracking-normal">
-                            <input
-                              type="checkbox"
-                              className="w-4 h-4 cursor-pointer"
-                              checked={selectedVoyoEpisodes.includes(ep.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedVoyoEpisodes([...selectedVoyoEpisodes, ep.id]);
-                                } else {
-                                  setSelectedVoyoEpisodes(selectedVoyoEpisodes.filter(id => id !== ep.id));
-                                }
-                              }}
-                            />
-                            <span className="font-bold text-indigo-300 min-w-16">S{ep.season.toString().padStart(2, "0")}E{ep.episode.toString().padStart(2, "0")}</span>
-                            <span className="flex-1 truncate text-white">{ep.title}</span>
-                            <span className="text-xs text-text-muted">{ep.length_mins}m</span>
-                            {ep.drm && <span title="DRM Zaštićeno"><Lock className="w-3.5 h-3.5 text-amber-500" /></span>}
-                            {ep.has_subs && <span title="Titlovi dostupni"><FileText className="w-3.5 h-3.5 text-indigo-400" /></span>}
-                          </label>
-                        ))}
+                        {voyoSeriesData.episodes.map((ep) => {
+                          const checked = selectedVoyoEpisodes.includes(ep.id);
+                          return (
+                            <label key={ep.id} className="custom-checkbox-wrap" style={{borderRadius:8,padding:"8px 10px"}} onClick={() => {
+                              if (checked) setSelectedVoyoEpisodes(selectedVoyoEpisodes.filter(id => id !== ep.id));
+                              else setSelectedVoyoEpisodes([...selectedVoyoEpisodes, ep.id]);
+                            }}>
+                              <div className={`custom-checkbox-box ${checked ? "checked" : ""}`}>
+                                <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                  <polyline points="1.5 5 4 7.5 8.5 2" />
+                                </svg>
+                              </div>
+                              <span className="font-bold text-indigo-300 min-w-16">S{ep.season.toString().padStart(2, "0")}E{ep.episode.toString().padStart(2, "0")}</span>
+                              <span className="flex-1 truncate text-white text-sm">{ep.title}</span>
+                              <span className="text-xs text-text-muted">{ep.length_mins}m</span>
+                              {ep.drm && <span title="DRM Zaštićeno"><Lock className="w-3.5 h-3.5 text-amber-500" /></span>}
+                              {ep.has_subs && <span title="Titlovi dostupni"><FileText className="w-3.5 h-3.5 text-indigo-400" /></span>}
+                            </label>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -1170,8 +1530,15 @@ export default function App() {
         {/* HRTi TAB */}
         {activeTab === "hrti" && (
           <div key="hrti" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">HRTi Catalog</h2>
-            <p className="text-text-secondary mb-8">Pregledajte i pretražujte filmove i serije na HRTi servisu.</p>
+            <div className="tab-page-header tab-header-hrti mb-8">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#06b6d4,#0284c7)"}}>
+                <Film style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">HRTi Catalog</h2>
+                <p className="text-text-secondary text-sm">Pregledajte, pretražujte i preuzmite filmove i serije sa HRTi streaming servisa.</p>
+              </div>
+            </div>
 
             <div className="flex flex-col gap-6">
               
@@ -1308,8 +1675,15 @@ export default function App() {
         {/* EON TAB */}
         {activeTab === "eon" && (
           <div key="eon" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">EON TV</h2>
-            <p className="text-text-secondary mb-8">EON integracija za preuzimanje VOD sadržaja, serija i TV kanala uživo sa Widevine DRM dekripcijom i API katalogom.</p>
+            <div className="tab-page-header tab-header-eon mb-8">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#10b981,#059669)"}}>
+                <Play style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">EON TV</h2>
+                <p className="text-text-secondary text-sm">VOD sadržaj, serije i TV kanali uživo sa Widevine DRM dekripcijom i API katalogom.</p>
+              </div>
+            </div>
 
             {eonStatus && !eonReady && (
               <div className="mb-6 p-4 rounded-lg border border-amber-500/20 bg-amber-500/10 flex flex-col gap-2">
@@ -1647,8 +2021,16 @@ export default function App() {
         {/* RTS PLANETA TAB */}
         {activeTab === "rts" && (
           <div key="rts" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">RTS Planeta</h2>
-            <p className="text-text-secondary mb-8">Preuzimanje filmova i epizoda serija sa RTS Planeta platforme.</p>
+            <div className="tab-page-header tab-header-rts mb-8">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#f43f5e,#e11d48)"}}>
+                <Radio style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">RTS Planeta</h2>
+                <p className="text-text-secondary text-sm">Preuzmite filmove i epizode serija sa RTS Planeta platforme. Podržava Widevine L3 dekripciju.</p>
+                <p className="text-xs text-text-muted mt-1">Primeri linkova: <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">rtsplaneta.rs/sr_lat/serial/...</code> ili <code className="font-mono text-rose-400 bg-white/[0.04] px-1 rounded">.../film/...</code></p>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               
@@ -1744,74 +2126,181 @@ export default function App() {
         {/* HBO MAX TAB */}
         {activeTab === "hbo" && (
           <div key="hbo" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">HBO Max</h2>
-            <p className="text-text-secondary mb-8">Prijava na HBO Max i preuzimanje videa po ID-u.</p>
+            <div className="tab-page-header tab-header-hbo mb-6">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#9333ea,#7e22ce)"}}>
+                <Clapperboard style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">HBO Max</h2>
+                <p className="text-text-secondary text-sm">Prijava uređaja, preuzimanje po Video ID-u, ili Bypass Mode sa direktnim MPD/License URL-ovima.</p>
+              </div>
+            </div>
+
+            {/* Mode Toggle */}
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setHboDirectMode(false)}
+                className={`btn py-2 px-5 text-sm font-semibold transition-all ${
+                  !hboDirectMode
+                    ? "btn-primary"
+                    : "btn-secondary opacity-60 hover:opacity-100"
+                }`}
+              >
+                Standardno (Login + ID)
+              </button>
+              <button
+                onClick={() => setHboDirectMode(true)}
+                className={`btn py-2 px-5 text-sm font-semibold transition-all ${
+                  hboDirectMode
+                    ? "btn-primary"
+                    : "btn-secondary opacity-60 hover:opacity-100"
+                }`}
+              >
+                ⚡ Bypass Mode (Direct URL)
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               
               <div className="md:col-span-2 flex flex-col gap-6">
-                
-                {/* Login trigger card */}
-                <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
-                  <h3 className="font-extrabold text-lg text-white">Prijava (Login)</h3>
-                  <p className="text-xs text-text-secondary">
-                    HBO koristi autentifikaciju preko koda. Klikom na dugme pokrećete sesiju u pozadini koja će izgenerisati kod za prijavu. Detaljan kod i link ćete videti otvaranjem <strong>Logs</strong> dugmeta na kartici prijave u redu preuzimanja!
-                  </p>
-                  
-                  <div className="flex gap-4 items-end">
-                    <div className="flex-1">
-                      <label>Region / Tržište (Market)</label>
-                      <select value={hboMarket} onChange={(e) => setHboMarket(e.target.value)}>
-                        <option value="emea">EMEA (Evropa - podrazumevano)</option>
-                        <option value="us">US (Amerika)</option>
-                      </select>
+
+                {!hboDirectMode ? (
+                  <>
+                    {/* Login trigger card */}
+                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+                      <h3 className="font-extrabold text-lg text-white">Prijava (Login)</h3>
+                      <p className="text-xs text-text-secondary">
+                        HBO koristi autentifikaciju preko koda. Klikom na dugme pokrećete sesiju u pozadini koja će izgenerisati kod za prijavu. Detaljan kod i link ćete videti otvaranjem <strong>Logs</strong> dugmeta na kartici prijave u redu preuzimanja!
+                      </p>
+                      
+                      <div className="flex gap-4 items-end">
+                        <div className="flex-1">
+                          <label>Region / Tržište (Market)</label>
+                          <select value={hboMarket} onChange={(e) => setHboMarket(e.target.value)}>
+                            <option value="emea">EMEA (Evropa - podrazumevano)</option>
+                            <option value="us">US (Amerika)</option>
+                          </select>
+                        </div>
+                        
+                        <button
+                          onClick={startHboLogin}
+                          className="btn btn-secondary py-3 px-6 h-[46px]"
+                        >
+                          Pokreni Prijavu
+                        </button>
+                      </div>
                     </div>
-                    
+
+                    {/* Standard Downloader Form */}
+                    <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+                      <h3 className="font-extrabold text-lg text-white">Preuzimanje Videa (po ID-u)</h3>
+                      
+                      <div>
+                        <label>Video ID (Zadnji deo URL-a)</label>
+                        <input
+                          type="text"
+                          placeholder="npr. de4c9160-1b67-4c1e-8cad-e7b0e42c5fdf"
+                          value={hboTarget}
+                          onChange={(e) => setHboTarget(e.target.value)}
+                        />
+                        <p className="text-[10px] text-text-muted mt-1.5">
+                          URL na HBO Max izgleda ovako: <code className="font-mono bg-white/[0.04] px-1 py-0.5 rounded text-indigo-400">.../watch/&lt;id1&gt;/&lt;id2&gt;</code>. Kopirajte samo <code className="font-mono text-indigo-400 font-bold">&lt;id2&gt;</code> (zadnji UUID).
+                        </p>
+                      </div>
+
+                      <div>
+                        <label>Jezici za titlove (odvojeni zarezom)</label>
+                        <input
+                          type="text"
+                          placeholder="npr. sr,hr,mk,bs,sl ili 'none' za bez titlova"
+                          value={hboSubs}
+                          onChange={(e) => setHboSubs(e.target.value)}
+                        />
+                      </div>
+
+                      <button
+                        onClick={startHboDownload}
+                        disabled={!hboTarget}
+                        className="btn btn-primary w-full py-4"
+                      >
+                        <Download className="w-5 h-5" />
+                        Započni Preuzimanje
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* ─── BYPASS / DIRECT MODE ─── */
+                  <div className="glass-panel p-8 rounded-xl border border-indigo-500/40 flex flex-col gap-6" style={{background: "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.06) 100%)"}}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="text-2xl">⚡</span>
+                      <div>
+                        <h3 className="font-extrabold text-lg text-white">Bypass Mode — Direktni URL-ovi</h3>
+                        <p className="text-xs text-indigo-300 mt-0.5">Zaobiđite login! Zalepite MPD Manifest i Widevine License URL iz DevTools-a ili browser-a.</p>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex gap-2">
+                      <span className="text-base">💡</span>
+                      <div>
+                        <strong>Kako do URL-ova?</strong> Otvorite DevTools (F12) → Network tab → pokrenite video na max.com → filtrirajte po <code className="font-mono bg-white/10 px-1 rounded">.mpd</code> za Manifest, i po <code className="font-mono bg-white/10 px-1 rounded">widevine</code> ili <code className="font-mono bg-white/10 px-1 rounded">license</code> za License URL.
+                      </div>
+                    </div>
+
+                    <div>
+                      <label>📄 Manifest URL (.mpd)</label>
+                      <input
+                        type="url"
+                        placeholder="https://...cdn.max.com/.../.mpd?..."
+                        value={hboManifestUrl}
+                        onChange={(e) => setHboManifestUrl(e.target.value)}
+                        className={hboManifestUrl && !hboManifestUrl.includes('mpd') ? 'border-amber-500/50' : ''}
+                      />
+                      {hboManifestUrl && !hboManifestUrl.toLowerCase().includes('mpd') && (
+                        <p className="text-[10px] text-amber-400 mt-1">⚠ URL ne izgleda kao .mpd manifest – proverite URL</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label>🔑 License URL (Widevine)</label>
+                      <input
+                        type="url"
+                        placeholder="https://widevine.any-any.prd.max.com/widevine/v1/license"
+                        value={hboLicenseUrl}
+                        onChange={(e) => setHboLicenseUrl(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label>📝 Naslov (opciono)</label>
+                      <input
+                        type="text"
+                        placeholder="npr. Ime filma ili serije (ostavite prazno za auto)"
+                        value={hboDirectTitle}
+                        onChange={(e) => setHboDirectTitle(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label>Jezici za titlove (odvojeni zarezom)</label>
+                      <input
+                        type="text"
+                        placeholder="npr. sr,hr,mk,bs,sl ili 'none'"
+                        value={hboDirectSubs}
+                        onChange={(e) => setHboDirectSubs(e.target.value)}
+                      />
+                    </div>
+
                     <button
-                      onClick={startHboLogin}
-                      className="btn btn-secondary py-3 px-6 h-[46px]"
+                      onClick={startHboDirectDownload}
+                      disabled={!hboManifestUrl.trim() || !hboLicenseUrl.trim()}
+                      className="btn btn-primary w-full py-4"
+                      style={{background: "linear-gradient(135deg, #6366f1, #8b5cf6)"}}
                     >
-                      Pokreni Prijavu
+                      <Download className="w-5 h-5" />
+                      Pokreni Bypass Preuzimanje
                     </button>
                   </div>
-                </div>
-
-                {/* Downloader Form */}
-                <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
-                  <h3 className="font-extrabold text-lg text-white">Preuzimanje Videa</h3>
-                  
-                  <div>
-                    <label>Video ID (Zadnji deo URL-a)</label>
-                    <input
-                      type="text"
-                      placeholder="npr. de4c9160-1b67-4c1e-8cad-e7b0e42c5fdf"
-                      value={hboTarget}
-                      onChange={(e) => setHboTarget(e.target.value)}
-                    />
-                    <p className="text-[10px] text-text-muted mt-1.5">
-                      URL na HBO Max izgleda ovako: <code className="font-mono bg-white/[0.04] px-1 py-0.5 rounded text-indigo-400">.../watch/&lt;id1&gt;/&lt;id2&gt;</code>. Kopirajte samo <code className="font-mono text-indigo-400 font-bold">&lt;id2&gt;</code> (zadnji UUID).
-                    </p>
-                  </div>
-
-                  <div>
-                    <label>Jezici za titlove (odvojeni zarezom)</label>
-                    <input
-                      type="text"
-                      placeholder="npr. sr,hr,mk,bs,sl ili 'none' za bez titlova"
-                      value={hboSubs}
-                      onChange={(e) => setHboSubs(e.target.value)}
-                    />
-                  </div>
-
-                  <button
-                    onClick={startHboDownload}
-                    disabled={!hboTarget}
-                    className="btn btn-primary w-full py-4"
-                  >
-                    <Download className="w-5 h-5" />
-                    Započni Preuzimanje
-                  </button>
-                </div>
+                )}
               </div>
 
               {/* Account / status details */}
@@ -1834,12 +2323,28 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* F6: Show active market */}
+                  {/* Show active market */}
                   <div className="mt-4 pt-4 border-t border-glass flex items-center gap-2">
                     <Globe className="w-4 h-4 text-text-muted" />
                     <span className="text-xs text-text-secondary">Market: <span className="font-bold text-white uppercase">{hboMarket}</span></span>
                   </div>
                 </div>
+
+                {/* Direct mode info card */}
+                {hboDirectMode && (
+                  <div className="glass-panel p-6 rounded-xl border border-indigo-500/30">
+                    <h3 className="font-bold text-base mb-3 flex items-center gap-2">
+                      <span className="text-indigo-400">⚡</span>
+                      Bypass Mode Info
+                    </h3>
+                    <ul className="text-xs text-text-secondary space-y-2">
+                      <li>✅ <strong className="text-white">Ne treba login</strong> – direktno koristite URL-ove</li>
+                      <li>✅ Radi <strong className="text-white">bez tokena</strong> u lokalnom keju</li>
+                      <li>⚠ URL-ovi <strong className="text-amber-300">isteknu brzo</strong> – koristite odmah!</li>
+                      <li>🔑 Potreban je CDM (.wvd) za dekripciju</li>
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1848,8 +2353,15 @@ export default function App() {
         {/* SETTINGS TAB */}
         {activeTab === "settings" && (
           <div key="settings" className="tab-content">
-            <h2 className="text-3xl font-extrabold mb-2 text-white">Postavke Aplikacije</h2>
-            <p className="text-text-secondary mb-8">Podesite kredencijale, izlazni direktorijum i putanje do alata.</p>
+            <div className="tab-page-header tab-header-settings mb-8">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#6366f1,#4f46e5)"}}>
+                <Settings style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-white mb-1">Postavke Aplikacije</h2>
+                <p className="text-text-secondary text-sm">Podesite kredencijale za servise, izlazni direktorijum i putanje do eksternih alata.</p>
+              </div>
+            </div>
 
             <div className="flex flex-col gap-8">
 
@@ -1928,12 +2440,84 @@ export default function App() {
                   </div>
                 </div>
 
-                <button onClick={handleSaveConfig} className="btn btn-primary self-end">
+"                <button onClick={handleSaveConfig} className="btn btn-primary self-end">
                   Sačuvaj Podešavanja
                 </button>
               </div>
 
-              {/* Service Credentials Manager */}
+              {/* Session / Cookie Import Panel to bypass CAPTCHA */}
+              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
+                <h3 className="font-extrabold text-xl text-amber-400 flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-amber-400" />
+                  Uvoz Sesije / Kolačića (Bypass CAPTCHA)
+                </h3>
+                <p className="text-sm text-text-secondary leading-relaxed m-0">
+                  Ukoliko neki od servisa (RTS, Voyo, HRTi, HBO) zahteva CAPTCHA zaštitu ili verifikaciju na formi za logovanje,
+                  možete se ulogovati normalno u vašem brauzeru, kopirati token ili sesiju (npr. preko EditThisCookie ekstenzije) i uvesti ga ovde.
+                </p>
+
+                {importService === "hbomax" && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-6 flex flex-col gap-3">
+                    <div className="font-extrabold text-amber-400 flex items-center gap-2 text-sm">
+                      <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                      Najbrži način za HBO Max (Magično kopiranje u 1 sekundi)
+                    </div>
+                    <p className="text-xs text-text-secondary leading-relaxed m-0">
+                      Najnovije verzije pretraživača (Google Chrome, Edge) imaju novu naprednu zaštitu (v20 Application-Bound Encryption) koja blokira spoljne programe da direktno čitaju njihove fajlove.
+                      Zato smo napravili <strong>magičnu skriptu od jedne sekunde</strong> koja sama pronalazi i kopira Vaš token!
+                    </p>
+                    <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-xs text-text-secondary m-0">
+                      <li>Otvorite tab u pretraživaču gde gledate <strong>Max</strong> (ili hbomax.com).</li>
+                      <li>Pritisnite <strong>F12</strong> (ili desni klik -&gt; <em>Ispitaj / Inspect</em>) i kliknite na karticu <strong>Console</strong> (Konzola).</li>
+                      <li>Nalepite liniju koda ispod i pritisnite <strong>Enter</strong>:</li>
+                    </ol>
+                    <div className="relative">
+                      <pre className="p-3.5 bg-black/60 rounded border border-glass font-mono text-[10px] text-amber-300 overflow-x-auto select-all cursor-pointer m-0">
+                        {`copy(JSON.stringify(JSON.parse(localStorage.getItem('token') || '{}'), null, 2)); console.log('Uspelo! HBO Max podaci su kopirani u clipboard!');`}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <label>Izaberite servis</label>
+                    <select
+                      value={importService}
+                      onChange={(e) => setImportService(e.target.value)}
+                      className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full max-w-xs"
+                    >
+                      <option value="voyo">Voyo RS</option>
+                      <option value="hrti">HRTi</option>
+                      <option value="rtsplaneta">RTS Planeta</option>
+                      <option value="hbomax">HBO Max</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label>Podaci o sesiji (Token / Cookie JSON string)</label>
+                    <textarea
+                      placeholder="Nalepite kopirani token ili sesijski JSON ovde..."
+                      onChange={(e) => setImportSessionData(e.target.value)}
+                      rows={5}
+                      className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full font-mono text-xs"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleImportSession}
+                    disabled={importLoading || !importSessionData.trim()}
+                    className="btn btn-primary self-end gap-2"
+                  >
+                    {importLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Download className="w-5 h-5" />
+                    )}
+                    Uvezi Sesiju
+                  </button>
+                </div>
+              </div>
               <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
                 <h3 className="font-extrabold text-xl text-indigo-400">Upravljanje Kredencijalima</h3>
 
@@ -2108,41 +2692,45 @@ export default function App() {
             )}
           </div>
 
-          {/* V1: Better empty state */}
+          {/* Premium empty state */}
           {downloads.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-12 border border-dashed border-glass rounded-lg text-center">
-              <Inbox className="w-10 h-10 text-text-muted mb-3" />
-              <p className="text-xs text-text-secondary font-semibold">Nema aktivnih preuzimanja.</p>
-              <p className="text-[10px] text-text-muted mt-1">Sadržaj koji pokrenete pojaviće se ovde.</p>
+            <div className="queue-empty-state">
+              <div className="queue-empty-icon">
+                <Inbox style={{width:24,height:24,color:"var(--text-muted)"}} />
+              </div>
+              <p className="text-sm font-bold text-text-secondary">Red je prazan</p>
+              <p className="text-xs text-text-muted mt-1" style={{maxWidth:180}}>Pokrenite preuzimanje iz bilo kog servisa i pojaviće se ovde.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {downloads.map((task) => {
-                const colorMap = {
-                  pending:     "border-indigo-500/20 text-indigo-400",
-                  downloading: "border-indigo-500 text-white",
-                  finished:    "border-emerald-500/20 text-emerald-400",
-                  failed:      "border-red-500/20 text-red-400",
-                  cancelled:   "border-text-muted/20 text-text-secondary"
+                const svcKey = task.service in QUEUE_CARD_BORDER_CLASS ? task.service : "unknown";
+                const pillClass = QUEUE_SERVICE_PILL_CLASS[task.service] || "queue-pill-unknown";
+                const borderClass = QUEUE_CARD_BORDER_CLASS[svcKey] || "queue-card-unknown";
+                const statusColorMap = {
+                  pending:     "text-indigo-400",
+                  downloading: "text-white",
+                  finished:    "text-emerald-400",
+                  failed:      "text-red-400",
+                  cancelled:   "text-text-secondary"
                 };
-                
                 return (
-                  <div key={task.id} className={`p-4 rounded-xl border bg-white/[0.01] flex flex-col gap-3 ${colorMap[task.status]}`}>
+                  <div key={task.id} className={`p-4 rounded-xl border border-glass bg-white/[0.01] flex flex-col gap-3 ${borderClass}`}
+                    style={{transition: "background 0.15s"}}>
                     
                     <div className="flex justify-between items-start gap-2">
-                      <div>
+                      <div style={{flex:1, minWidth:0}}>
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/[0.04] text-indigo-300 border border-glass uppercase">
+                          <span className={`queue-service-pill ${pillClass}`}>
                             {task.service}
                           </span>
-                          <span className="text-[10px] font-bold uppercase tracking-wider">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${statusColorMap[task.status]}`}>
                             {task.status}
                           </span>
                         </div>
                         <h4 className="font-bold text-xs leading-snug line-clamp-2 text-white">{task.title}</h4>
                       </div>
 
-                      {/* Cancel task button */}
                       {(task.status === "downloading" || task.status === "pending") && (
                         <button
                           onClick={() => cancelDownloadTask(task.id)}
@@ -2154,7 +2742,6 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* V3: Progress bar with shimmer animation */}
                     {task.status === "downloading" && (
                       <div className="flex flex-col gap-1.5">
                         <div className="w-full h-1.5 rounded-full bg-white/[0.04] overflow-hidden">
@@ -2171,26 +2758,20 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* F2: Retry button for failed tasks */}
                     {task.status === "failed" && (
-                      <button
-                        onClick={() => retryDownloadTask(task)}
-                        className="flex items-center justify-center gap-1.5 py-1.5 w-full rounded bg-red-500/10 border border-red-500/20 text-[10px] font-bold text-red-400 hover:bg-red-500/20 transition duration-200"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Ponovi iz taba
-                      </button>
+                      <div className="text-[10px] text-text-muted font-semibold px-1">
+                        ⚠ Preuzimanje nije uspelo — pokrenite ponovo iz odgovarajućeg taba.
+                      </div>
                     )}
 
-                    {/* Show logs button */}
                     <button
                       onClick={() => {
                         setSelectedTask(task);
                         setShowLogModal(true);
                       }}
-                      className="flex items-center justify-center gap-1.5 py-1.5 w-full rounded bg-white/[0.02] border border-glass text-[10px] font-bold text-indigo-400 hover:bg-indigo-600 hover:text-white transition duration-200"
+                      className="queue-logs-btn"
                     >
-                      <Terminal className="w-3 h-3" />
+                      <Terminal style={{width:11,height:11}} />
                       Pregled Logova
                     </button>
 
@@ -2204,28 +2785,50 @@ export default function App() {
 
       {/* ── TERMINAL LOGS MODAL ── */}
       {showLogModal && selectedTask && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-8">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-8"
+          onKeyDown={(e) => e.key === "Escape" && (setShowLogModal(false), setSelectedTask(null))}
+          tabIndex={-1}
+        >
           <div className="w-full max-w-4xl h-[600px] glass-panel border border-glass rounded-xl flex flex-col justify-between overflow-hidden shadow-2xl animate-slide">
             
             {/* Modal Header */}
-            <div className="p-6 border-b border-glass flex justify-between items-center bg-black/20">
-              <div>
+            <div className="p-5 border-b border-glass flex justify-between items-center bg-black/20">
+              <div style={{flex:1, minWidth:0}}>
                 <div className="flex items-center gap-2">
                   <Terminal className="w-5 h-5 text-indigo-400" />
-                  <h3 className="font-extrabold text-base text-white">Konzola Logova u Realnom Vremenu</h3>
+                  <h3 className="font-extrabold text-base text-white">Konzola Logova</h3>
+                  <span className={`queue-service-pill ${QUEUE_SERVICE_PILL_CLASS[selectedTask.service] || "queue-pill-unknown"}`}>
+                    {selectedTask.service}
+                  </span>
                 </div>
-                <p className="text-[10px] text-text-muted mt-1 truncate max-w-md font-mono">{selectedTask.title} (ID: {selectedTask.id})</p>
+                <p className="text-[10px] text-text-muted mt-1 truncate max-w-lg font-mono">{selectedTask.title}</p>
               </div>
               
-              <button
-                onClick={() => { setShowLogModal(false); setSelectedTask(null); }}
-                className="p-2 rounded-lg hover:bg-white/[0.05] text-text-secondary hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Copy logs button */}
+                <button
+                  className={`log-copy-btn ${logCopied ? "copied" : ""}`}
+                  onClick={() => {
+                    const text = selectedTask.logs.join("\n");
+                    navigator.clipboard.writeText(text).then(() => {
+                      setLogCopied(true);
+                      setTimeout(() => setLogCopied(false), 2000);
+                    });
+                  }}
+                >
+                  {logCopied ? <Check style={{width:12,height:12}} /> : <Copy style={{width:12,height:12}} />}
+                  {logCopied ? "Kopirano!" : "Kopiraj"}
+                </button>
+                <button
+                  onClick={() => { setShowLogModal(false); setSelectedTask(null); }}
+                  className="p-2 rounded-lg hover:bg-white/[0.05] text-text-secondary hover:text-white transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
-            {/* V7: Modal Body / Log Area with color-coded lines */}
+            {/* Log Area with color-coded lines */}
             <div className="flex-1 p-6 overflow-y-auto bg-[#07080c] font-mono text-xs leading-relaxed flex flex-col gap-1 border-b border-glass">
               {selectedTask.logs.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-text-muted font-sans font-semibold">
@@ -2233,10 +2836,7 @@ export default function App() {
                 </div>
               ) : (
                 selectedTask.logs.map((line, idx) => (
-                  <div
-                    key={idx}
-                    className={`whitespace-pre-wrap select-text ${getLogLineClass(line)}`}
-                  >
+                  <div key={idx} className={`whitespace-pre-wrap select-text ${getLogLineClass(line)}`}>
                     {line}
                   </div>
                 ))
@@ -2271,6 +2871,50 @@ export default function App() {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── HRTi INLINE DOWNLOAD MODAL (replaces native prompt) ── */}
+      {hrtiModal && (
+        <div className="inline-modal-overlay" onClick={(e) => e.target === e.currentTarget && setHrtiModal(null)}>
+          <div className="inline-modal">
+            <div className="flex items-center gap-3 mb-5">
+              <div style={{width:40,height:40,borderRadius:10,background:"linear-gradient(135deg,#06b6d4,#0284c7)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <Download style={{width:18,height:18,color:"white"}} />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Preuzimanje HRTi sadržaja</h3>
+                <p className="text-text-muted text-xs mt-0.5">Možete promeniti naziv fajla pre preuzimanja</p>
+              </div>
+            </div>
+            <div className="mb-4">
+              <label>Naziv fajla (opciono)</label>
+              <input
+                type="text"
+                value={hrtiModalTitle}
+                onChange={(e) => setHrtiModalTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && confirmHrtiDownload()}
+                placeholder={hrtiModal.title}
+                autoFocus
+              />
+              <p className="text-[10px] text-text-muted mt-1.5">Ostavite prazno za automatski naziv: <span className="text-indigo-400 font-mono">{hrtiModal.title}</span></p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setHrtiModal(null); setHrtiModalTitle(""); }}
+                className="btn btn-secondary text-sm py-2 px-5"
+              >
+                Otkaži
+              </button>
+              <button
+                onClick={confirmHrtiDownload}
+                className="btn btn-primary text-sm py-2 px-5"
+              >
+                <Download style={{width:14,height:14}} />
+                Preuzmi
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,9 +1,10 @@
 import json
-import os
+import logging
 import shutil
 import platform
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
+import keyring
 
 # Bug 4 Fix: Dynamic project root instead of hardcoded absolute paths
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -112,7 +113,27 @@ class AppConfig:
         self.data["output_dir"] = path
         self.save()
 
-    def check_binaries_status(self) -> Dict[str, Dict[str, Any]]:
+    def set_credential(self, service: str, key: str, value: str):
+        """Store a single credential securely using keyring and update JSON cache."""
+        try:
+            keyring.set_password(f"{service}_{key}", "videodownloadservisi", value)
+            # also keep a copy in the json config for fallback/display
+            self.update_credentials(service, {key: value})
+        except Exception as e:
+            logger.error(f"Failed to store credential for {service}:{key}: {e}")
+
+    def get_credential(self, service: str, key: str) -> str:
+        """Retrieve a credential from keyring; fallback to JSON if missing."""
+        try:
+            val = keyring.get_password(f"{service}_{key}", "videodownloadservisi")
+            if val:
+                return val
+        except Exception as e:
+            logger.error(f"Failed to get credential for {service}:{key}: {e}")
+        # fallback to JSON config cache
+        return self.data.get("credentials", {}).get(service, {}).get(key, "")
+
+    def check_binaries_status(self) -> Dict[str, Any]:
         status = {}
         for name, path in self.data["binaries"].items():
             found = False

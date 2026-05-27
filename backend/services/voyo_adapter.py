@@ -7,10 +7,13 @@ from backend.config import config
 
 logger = logging.getLogger(__name__)
 
+_VOYO_CACHE = {}
+
 class VoyoAdapter:
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
         """Check if Voyo has valid credentials and if login succeeds."""
+        global _VOYO_CACHE
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
         
@@ -25,6 +28,17 @@ class VoyoAdapter:
         if not email or not password:
             return {"authenticated": False, "email": "", "error": "No credentials stored"}
 
+        import time
+        now = time.time()
+        if _VOYO_CACHE.get("email") == email and (now - _VOYO_CACHE.get("last_check", 0)) < 600:
+            return {
+                "authenticated": True,
+                "email": email,
+                "nickname": _VOYO_CACHE.get("nickname", ""),
+                "subscribed": _VOYO_CACHE.get("subscribed", False),
+                "profile_id": _VOYO_CACHE.get("profile_id", 0)
+            }
+
         try:
             auth = VoyoAuth()
             if device_id:
@@ -34,13 +48,15 @@ class VoyoAdapter:
             auth.login(email, password)
             vcfg.update_device_id(auth.state.device_id)
             
-            return {
+            status = {
                 "authenticated": True,
                 "email": email,
                 "nickname": auth.state.nickname,
                 "subscribed": auth.state.is_subscribed,
                 "profile_id": auth.state.profile_id
             }
+            _VOYO_CACHE = {**status, "last_check": now}
+            return status
         except Exception as e:
             return {"authenticated": False, "email": email, "error": str(e)}
 
@@ -136,12 +152,29 @@ class VoyoAdapter:
 
     @staticmethod
     def make_download_cmd(target: str, mode: str, episodes_range: str = "", resolution: str = "1080p") -> List[str]:
-        """
-        Build download command (for backwards compatibility with queue manager).
-        Returns a list representing Python function call args.
-        """
+        """Build command to run voyo_downloader.py."""
         output_dir = config.get_output_dir()
-        return ["voyo_download", target, mode, episodes_range, resolution, output_dir]
+        
+        import re
+        is_url = bool(re.match(r"^https?://", target.strip(), re.IGNORECASE))
+        
+        cmd = ["python", "voyo_downloader.py"]
+        if is_url:
+            cmd.append(target.strip())
+        else:
+            if mode == "series":
+                cmd += ["--series", target.strip()]
+            else:
+                cmd += ["--video", target.strip()]
+                
+        if mode == "series" and episodes_range and episodes_range.strip():
+            cmd += ["--episodes", episodes_range.strip()]
+            
+        cmd += ["-o", output_dir]
+        if resolution:
+            cmd += ["--resolution", resolution]
+            
+        return cmd
 
     @staticmethod
     def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:

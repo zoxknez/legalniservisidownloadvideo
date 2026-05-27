@@ -1,7 +1,8 @@
 {
-  "name": "frontend",
+  "name": "o0o0o0o-downloader",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "author": "o0o0o0o",
   "type": "module",
   "scripts": {
     "dev": "vite",

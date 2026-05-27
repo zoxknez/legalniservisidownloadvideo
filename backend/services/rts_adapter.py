@@ -55,3 +55,24 @@ class RtsAdapter:
             cmd.append("-v")
 
         return cmd
+
+    @staticmethod
+    def get_video_info(video_id: str) -> Dict[str, Any]:
+        """Fetch metadata for a single RTS Planeta video."""
+        try:
+            from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaAuth
+            auth = RTSPlanetaAuth()
+            info = auth.get_video_info(video_id)
+            # Handle potential nested lists/dicts safely
+            video_list = info.get("video", [])
+            if not video_list:
+                raise ValueError("Video podaci nisu pronađeni na RTS API-ju.")
+            video = video_list[0]
+            return {
+                "success": True,
+                "title": video.get("title", f"RTS Video {video_id}"),
+                "description": video.get("description", ""),
+                "thumbnail": video.get("poster", "")
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
