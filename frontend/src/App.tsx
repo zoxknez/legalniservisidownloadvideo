@@ -336,6 +336,70 @@ function CustomSelect({ value, options, onChange, formatLabel, className = "", p
   );
 }
 
+interface BinaryPathCardProps {
+  name: string;
+  found: boolean;
+  pathValue: string;
+  onChange: (val: string) => void;
+  showToast: (msg: string, type: "success" | "error" | "info") => void;
+}
+
+function BinaryPathCard({ name, found, pathValue, onChange, showToast }: BinaryPathCardProps) {
+  const [copied, setCopied] = useState<boolean>(false);
+  const display = name.toUpperCase().replace("_", ".");
+  return (
+    <div
+      className="exec-monitor-card flex flex-col gap-3 group"
+      style={{
+        "--hover-border": found ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)"
+      } as any}
+    >
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <span className={`exec-status-dot ${found ? "active" : "missing"}`} />
+          <span className="text-sm font-extrabold text-white tracking-wide">{display}</span>
+        </div>
+        <button
+          type="button"
+          title="Kopiraj putanju"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(pathValue || "");
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+              showToast(`${display} putanja kopirana!`, "success");
+            } catch {}
+          }}
+          className="exec-copy-btn text-text-muted hover:text-white p-1 rounded transition-colors"
+        >
+          {copied ? (
+            <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+      </div>
+      
+      <input
+        type="text"
+        value={pathValue || ""}
+        onChange={(e) => onChange(e.target.value)}
+        title={pathValue || ""}
+        className="py-2 px-3 text-[11px] font-mono settings-path-input input-premium"
+        style={{
+          "--focused-border": found ? "#10b981" : "#ef4444",
+          "--focused-glow": found ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)"
+        } as any}
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [downloads, setDownloads] = useState<DownloadTask[]>([]);
@@ -385,6 +449,12 @@ export default function App() {
   const [rtsPassword, setRtsPassword] = useState<string>("");
 
   const [hboMarket, setHboMarket] = useState<string>("emea");
+
+  // Eye-toggle visibility states for credentials
+  const [showVoyoPass, setShowVoyoPass] = useState<boolean>(false);
+  const [showHrtiPass, setShowHrtiPass] = useState<boolean>(false);
+  const [showEonPass, setShowEonPass] = useState<boolean>(false);
+  const [showRtsPass, setShowRtsPass] = useState<boolean>(false);
 
   // Voyo Tab Form State
   const [voyoMode, setVoyoMode] = useState<"video" | "series">("video");
@@ -1219,16 +1289,16 @@ export default function App() {
       )}
 
       {/* ── LEFT SIDEBAR ── */}
-      <aside className="w-64 glass-panel border-r border-glass flex flex-col justify-between p-6">
+      <aside className="w-64 glass-panel border-r border-glass flex flex-col justify-between p-6 bg-gradient-to-b from-[#11121c] to-[#0a0b10]">
         <div>
           {/* Logo */}
-          <div className="flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center glow-indigo">
-              <Download className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3 mb-10 group cursor-pointer">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 flex items-center justify-center glow-indigo shadow-lg transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.5)]">
+              <Download className="w-5 h-5 text-white transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110" />
             </div>
             <div>
-              <h1 className="font-extrabold text-md tracking-wider text-white">o0o0o0o-downloader</h1>
-              <p className="text-[10px] text-indigo-400 font-bold tracking-widest">by o0o0o0o</p>
+              <h1 className="font-extrabold text-sm tracking-wider text-white bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300">o0o0o0o-downloader</h1>
+              <p className="text-[9px] text-indigo-400 font-black tracking-widest uppercase">Premium Downloader</p>
             </div>
           </div>
 
@@ -1266,15 +1336,23 @@ export default function App() {
         </div>
 
         {/* WebSocket Status Indicator */}
-        <div className="flex items-center justify-between p-4 rounded-lg bg-white/[0.02] border border-glass">
-          <div className="flex items-center gap-2">
-            <Server className="w-4 h-4 text-text-muted" />
-            <span className="text-xs text-text-secondary font-semibold">Server:</span>
+        <div className="flex flex-col gap-2 p-4 rounded-xl bg-black/40 border border-white/[0.04] shadow-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Server className="w-3.5 h-3.5 text-text-muted" />
+              <span className="text-[11px] text-text-secondary font-bold uppercase tracking-wider">Sistem Status</span>
+            </div>
+            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${connected ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse"}`}>
+              {connected ? "OK" : "Error"}
+            </span>
           </div>
-          <span className="flex items-center gap-1.5 text-xs font-bold">
-            <span className={`w-2.5 h-2.5 rounded-full ${connected ? "bg-emerald-500" : "bg-red-500 animate-pulse"}`}></span>
-            {connected ? "Povezan" : "Diskonekt"}
-          </span>
+          <div className="flex items-center justify-between border-t border-white/[0.03] pt-2">
+            <span className="text-[10px] text-text-muted">Veza sa serverom:</span>
+            <span className="flex items-center gap-1.5 text-xs font-extrabold text-white">
+              <span className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : "bg-red-400 shadow-[0_0_8px_#f87171] animate-ping"}`}></span>
+              {connected ? "Aktivan" : "U prekidu"}
+            </span>
+          </div>
         </div>
       </aside>
 
@@ -1574,17 +1652,26 @@ export default function App() {
               <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
                 <div>
                   <label>Izaberite tip preuzimanja</label>
-                  <div className="flex gap-4">
+                  <div className="sliding-tabs-wrapper">
+                    <div
+                      className="sliding-tabs-slider"
+                      style={{
+                        width: "calc(50% - 4px)",
+                        transform: `translateX(${voyoMode === "video" ? "0%" : "100%"})`
+                      }}
+                    />
                     <button
+                      type="button"
                       onClick={() => { setVoyoMode("video"); setVoyoSeriesData(null); setVoyoEpisodesRange(""); }}
-                      className={`flex-1 btn ${voyoMode === "video" ? "btn-primary" : "btn-secondary"}`}
+                      className={`sliding-tabs-btn ${voyoMode === "video" ? "active" : ""}`}
                     >
                       <Film className="w-4 h-4" /> Film / Epizoda
                     </button>
                     {/* Bug 7 Fix: also reset voyoEpisodesRange when switching to series */}
                     <button
+                      type="button"
                       onClick={() => { setVoyoMode("series"); setVoyoEpisodesRange(""); }}
-                      className={`flex-1 btn ${voyoMode === "series" ? "btn-primary" : "btn-secondary"}`}
+                      className={`sliding-tabs-btn ${voyoMode === "series" ? "active" : ""}`}
                     >
                       <List className="w-4 h-4" /> Cela Serija
                     </button>
@@ -1824,52 +1911,58 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {catItems.map((item) => (
-                        <div key={item.id} className="glass-card hrti-grid-card p-5 flex flex-col justify-between gap-3">
-                          {/* V5: Gradient thumbnail placeholder */}
-                          <div className={`hrti-thumbnail ${item.type === "movie" ? "hrti-thumbnail-movie" : "hrti-thumbnail-series"}`}>
-                            {item.type === "movie"
-                              ? <Film className="w-8 h-8 hrti-thumbnail-icon text-indigo-300" />
-                              : <Tv className="w-8 h-8 hrti-thumbnail-icon text-purple-300" />
-                            }
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 mb-2">
-                              {item.type === "movie" ? (
-                                <span className="badge flex items-center gap-1.5 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-bold px-2 py-0.5 text-[10px]">
-                                  <Film className="w-3 h-3" /> FILM
+                      {catItems.map((item) => {
+                        const isMovie = item.type === "movie";
+                        const cardGlow = isMovie ? "rgba(6, 182, 212, 0.25)" : "rgba(147, 51, 234, 0.25)";
+                        return (
+                          <div
+                            key={item.id}
+                            className="netflix-card group"
+                            style={{ "--card-glow": cardGlow } as any}
+                            onClick={() => {
+                              if (item.type === "series") fetchHrtiSeriesEpisodes(item.id, item.title);
+                              else startHrtiDownload(item.id, item.title);
+                            }}
+                          >
+                            {/* Visual Thumbnail Gradient Backdrop */}
+                            <div className={`absolute inset-0 w-full h-full flex items-center justify-center transition-transform duration-700 group-hover:scale-105 ${isMovie ? "hrti-thumbnail-movie" : "hrti-thumbnail-series"}`}>
+                              {isMovie ? (
+                                <Film className="w-16 h-16 opacity-10 text-indigo-300 transform -rotate-12 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-0" />
+                              ) : (
+                                <Tv className="w-16 h-16 opacity-10 text-purple-300 transform rotate-12 transition-transform duration-500 group-hover:scale-110 group-hover:rotate-0" />
+                              )}
+                            </div>
+
+                            {/* Floating Top-Right Badge */}
+                            <div className="netflix-card-badge">
+                              {isMovie ? (
+                                <span className="badge flex items-center gap-1.5 bg-cyan-500/25 border-cyan-500/40 text-cyan-300 font-extrabold px-2.5 py-1 rounded-md text-[10px] tracking-wider">
+                                  <Film className="w-3.5 h-3.5" /> FILM
                                 </span>
                               ) : (
-                                <span className="badge flex items-center gap-1.5 bg-purple-500/10 border-purple-500/30 text-purple-400 font-bold px-2 py-0.5 text-[10px]">
-                                  <Tv className="w-3 h-3" /> SERIJA
+                                <span className="badge flex items-center gap-1.5 bg-purple-500/25 border-purple-500/40 text-purple-300 font-extrabold px-2.5 py-1 rounded-md text-[10px] tracking-wider">
+                                  <Tv className="w-3.5 h-3.5" /> SERIJA
                                 </span>
                               )}
                             </div>
-                            <h4 className="font-bold text-white text-base leading-snug line-clamp-2">{item.title}</h4>
-                            <p className="text-[10px] text-text-muted font-mono mt-1 truncate">{item.id}</p>
-                          </div>
 
-                          <div className="flex gap-2">
-                            {item.type === "series" ? (
-                              <button
-                                onClick={() => fetchHrtiSeriesEpisodes(item.id, item.title)}
-                                className="btn btn-secondary w-full text-xs py-2"
-                              >
-                                <List className="w-3.5 h-3.5" />
-                                Prikaži Epizode
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => startHrtiDownload(item.id, item.title)}
-                                className="btn btn-primary w-full text-xs py-2"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                Preuzmi Video
-                              </button>
-                            )}
+                            {/* Center Action Play Circle */}
+                            <div className="netflix-card-play">
+                              {item.type === "series" ? (
+                                <List className="w-5 h-5 text-indigo-900" />
+                              ) : (
+                                <Download className="w-5 h-5 text-cyan-900" />
+                              )}
+                            </div>
+
+                            {/* Lower metadata card details */}
+                            <div className="netflix-card-content">
+                              <h4 className="font-extrabold text-white text-base leading-snug line-clamp-1 group-hover:text-indigo-200 transition-colors">{item.title}</h4>
+                              <p className="text-[9px] text-text-muted font-mono mt-1 select-all">{item.id}</p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -1974,12 +2067,20 @@ export default function App() {
               <div className="md:col-span-2 glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6">
                 <div>
                   <label>Mod Rada (EON)</label>
-                  <div className="flex gap-4">
+                  <div className="sliding-tabs-wrapper">
+                    <div
+                      className="sliding-tabs-slider"
+                      style={{
+                        width: "calc(33.333% - 4px)",
+                        transform: `translateX(${eonMode === "vod" ? "0%" : eonMode === "series" ? "100%" : "200%"})`
+                      }}
+                    />
                     {["vod", "series", "live"].map((mode) => (
                       <button
                         key={mode}
+                        type="button"
                         onClick={() => { setEonMode(mode as any); setEonTarget(""); }}
-                        className={`flex-1 btn ${eonMode === mode ? "btn-primary" : "btn-secondary"}`}
+                        className={`sliding-tabs-btn ${eonMode === mode ? "active" : ""}`}
                       >
                         {mode === "vod" && "VOD / URL"}
                         {mode === "series" && "Epizode / Serije"}
@@ -1993,18 +2094,25 @@ export default function App() {
                   <div className="flex flex-col gap-3">
                     <div>
                       <label>Mod unosa TV kanala</label>
-                      <div className="flex gap-2 mb-2">
+                      <div className="sliding-tabs-wrapper mb-2">
+                        <div
+                          className="sliding-tabs-slider"
+                          style={{
+                            width: "calc(50% - 4px)",
+                            transform: `translateX(${eonLiveInputMode === "catalog" ? "0%" : "100%"})`
+                          }}
+                        />
                         <button
                           type="button"
                           onClick={() => { setEonLiveInputMode("catalog"); setEonTarget(""); }}
-                          className={`btn text-xs py-1.5 px-4 ${eonLiveInputMode === "catalog" ? "btn-primary" : "btn-secondary"}`}
+                          className={`sliding-tabs-btn text-xs ${eonLiveInputMode === "catalog" ? "active" : ""}`}
                         >
                           Izaberi iz liste
                         </button>
                         <button
                           type="button"
                           onClick={() => { setEonLiveInputMode("url"); setEonTarget(""); }}
-                          className={`btn text-xs py-1.5 px-4 ${eonLiveInputMode === "url" ? "btn-primary" : "btn-secondary"}`}
+                          className={`sliding-tabs-btn text-xs ${eonLiveInputMode === "url" ? "active" : ""}`}
                         >
                           Direktan live URL
                         </button>
@@ -2486,24 +2594,25 @@ export default function App() {
             </div>
 
             {/* Mode Toggle */}
-            <div className="flex gap-2 mb-6">
+            <div className="sliding-tabs-wrapper mb-6">
+              <div
+                className="sliding-tabs-slider"
+                style={{
+                  width: "calc(50% - 4px)",
+                  transform: `translateX(${!hboDirectMode ? "0%" : "100%"})`
+                }}
+              />
               <button
+                type="button"
                 onClick={() => setHboDirectMode(false)}
-                className={`btn py-2 px-5 text-sm font-semibold transition-all ${
-                  !hboDirectMode
-                    ? "btn-primary"
-                    : "btn-secondary opacity-60 hover:opacity-100"
-                }`}
+                className={`sliding-tabs-btn ${!hboDirectMode ? "active" : ""}`}
               >
                 Standardno (Login + ID)
               </button>
               <button
+                type="button"
                 onClick={() => setHboDirectMode(true)}
-                className={`btn py-2 px-5 text-sm font-semibold transition-all ${
-                  hboDirectMode
-                    ? "btn-primary"
-                    : "btn-secondary opacity-60 hover:opacity-100"
-                }`}
+                className={`sliding-tabs-btn ${hboDirectMode ? "active" : ""}`}
               >
                 ⚡ Bypass Mode (Direct URL)
               </button>
@@ -2762,6 +2871,7 @@ export default function App() {
                     type="text"
                     value={outputDir}
                     onChange={(e) => setOutputDir(e.target.value)}
+                    className="input-premium"
                   />
                   <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
                 </div>
@@ -2769,28 +2879,17 @@ export default function App() {
                 <div className="border-t border-glass pt-6">
                   <h4 className="font-bold text-sm text-white mb-4">Detektovani Eksterni Alati & CDM</h4>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {status && Object.entries(status.binaries).map(([name, info]) => {
-                      const display = name.toUpperCase().replace("_", ".");
-                      return (
-                        <div key={name} className="flex flex-col gap-2 p-4 rounded-lg bg-white/[0.02] border border-glass">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-bold text-white">{display}</span>
-                            <span className={`badge ${info.found ? "badge-connected" : "badge-missing"}`}>
-                              {info.found ? "Pronađen" : "Nedostaje"}
-                            </span>
-                          </div>
-                          
-                          <input
-                            type="text"
-                            value={binariesPaths[name] || ""}
-                            onChange={(e) => setBinariesPaths({ ...binariesPaths, [name]: e.target.value })}
-                            title={binariesPaths[name] || ""}
-                            className="py-1.5 px-3 text-xs font-mono settings-path-input"
-                          />
-                        </div>
-                      );
-                    })}
+                  <div className="exec-monitor-grid">
+                    {status && Object.entries(status.binaries).map(([name, info]) => (
+                      <BinaryPathCard
+                        key={name}
+                        name={name}
+                        found={info.found}
+                        pathValue={binariesPaths[name] || ""}
+                        onChange={(val) => setBinariesPaths({ ...binariesPaths, [name]: val })}
+                        showToast={showToast}
+                      />
+                    ))}
                   </div>
                 </div>
 
@@ -2899,11 +2998,37 @@ export default function App() {
                     </h4>
                     <div>
                       <label>Email</label>
-                      <input type="email" value={voyoEmail} onChange={(e) => setVoyoEmail(e.target.value)} placeholder="email@voyo.rs" />
+                      <input type="email" value={voyoEmail} onChange={(e) => setVoyoEmail(e.target.value)} placeholder="email@voyo.rs" className="input-premium" style={{"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"} as any} />
                     </div>
                     <div>
                       <label>Lozinka</label>
-                      <input type="password" value={voyoPassword} onChange={(e) => setVoyoPassword(e.target.value)} placeholder="••••••••" />
+                      <div className="password-wrapper">
+                        <input
+                          type={showVoyoPass ? "text" : "password"}
+                          value={voyoPassword}
+                          onChange={(e) => setVoyoPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="input-premium pr-10"
+                          style={{"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"} as any}
+                        />
+                        <button
+                          type="button"
+                          className="password-eye-btn"
+                          onClick={() => setShowVoyoPass(!showVoyoPass)}
+                        >
+                          {showVoyoPass ? (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                              <line x1="1" y1="1" x2="23" y2="23" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword })}
@@ -2921,11 +3046,37 @@ export default function App() {
                     </h4>
                     <div>
                       <label>Email</label>
-                      <input type="email" value={hrtiEmail} onChange={(e) => setHrtiEmail(e.target.value)} placeholder="email@hrti.hr" />
+                      <input type="email" value={hrtiEmail} onChange={(e) => setHrtiEmail(e.target.value)} placeholder="email@hrti.hr" className="input-premium" style={{"--focused-border": "#06b6d4", "--focused-glow": "rgba(6,182,212,0.25)"} as any} />
                     </div>
                     <div>
                       <label>Lozinka</label>
-                      <input type="password" value={hrtiPassword} onChange={(e) => setHrtiPassword(e.target.value)} placeholder="••••••••" />
+                      <div className="password-wrapper">
+                        <input
+                          type={showHrtiPass ? "text" : "password"}
+                          value={hrtiPassword}
+                          onChange={(e) => setHrtiPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="input-premium pr-10"
+                          style={{"--focused-border": "#06b6d4", "--focused-glow": "rgba(6,182,212,0.25)"} as any}
+                        />
+                        <button
+                          type="button"
+                          className="password-eye-btn"
+                          onClick={() => setShowHrtiPass(!showHrtiPass)}
+                        >
+                          {showHrtiPass ? (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                              <line x1="1" y1="1" x2="23" y2="23" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={() => submitLogin("hrti", { email: hrtiEmail, password: hrtiPassword })}
@@ -2944,20 +3095,46 @@ export default function App() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label>EON Korisničko Ime (Email)</label>
-                        <input type="text" value={eonUsername} onChange={(e) => setEonUsername(e.target.value)} placeholder="npr. sbb_user@email.com" />
+                        <input type="text" value={eonUsername} onChange={(e) => setEonUsername(e.target.value)} placeholder="npr. sbb_user@email.com" className="input-premium" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
                       </div>
                       <div>
                         <label>Lozinka</label>
-                        <input type="password" value={eonPassword} onChange={(e) => setEonPassword(e.target.value)} placeholder="••••••••" />
+                        <div className="password-wrapper">
+                          <input
+                            type={showEonPass ? "text" : "password"}
+                            value={eonPassword}
+                            onChange={(e) => setEonPassword(e.target.value)}
+                            placeholder="••••••••"
+                            className="input-premium pr-10"
+                            style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
+                          />
+                          <button
+                            type="button"
+                            className="password-eye-btn"
+                            onClick={() => setShowEonPass(!showEonPass)}
+                          >
+                            {showEonPass ? (
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                                <line x1="1" y1="1" x2="23" y2="23" />
+                              </svg>
+                            ) : (
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
                       </div>
                       <div>
                         <label>Device Serial (Serijski Broj)</label>
-                        <input type="text" value={eonSerial} onChange={(e) => setEonSerial(e.target.value)} placeholder="kopiraj iz payload-a" />
+                        <input type="text" value={eonSerial} onChange={(e) => setEonSerial(e.target.value)} placeholder="kopiraj iz payload-a" className="input-premium" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
                         <p className="text-[10px] text-text-muted mt-1">Vrednost koju vidite kao device-serial u EON browser network payload-u.</p>
                       </div>
                       <div>
                         <label>Device Number (Broj Uređaja)</label>
-                        <input type="text" value={eonNumber} onChange={(e) => setEonNumber(e.target.value)} placeholder="kopiraj iz response-a" />
+                        <input type="text" value={eonNumber} onChange={(e) => setEonNumber(e.target.value)} placeholder="kopiraj iz response-a" className="input-premium" style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any} />
                         <p className="text-[10px] text-text-muted mt-1">Vrednost koju vidite kao device-number u response-u.</p>
                       </div>
                     </div>
@@ -2969,7 +3146,8 @@ export default function App() {
                           value={binariesPaths.device_wvd || ""}
                           onChange={(e) => setBinariesPaths({ ...binariesPaths, device_wvd: e.target.value })}
                           placeholder="npr. D:\ProjektiApp\videodownloadservisi\device.wvd"
-                          className="font-mono text-xs flex-1"
+                          className="font-mono text-xs flex-1 input-premium"
+                          style={{"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"} as any}
                         />
                         <button onClick={handleSaveDeviceWvdPath} className="btn btn-secondary text-xs">
                           Sacuvaj WVD
@@ -2997,11 +3175,37 @@ export default function App() {
                     </h4>
                     <div>
                       <label>Email</label>
-                      <input type="email" value={rtsEmail} onChange={(e) => setRtsEmail(e.target.value)} placeholder="email@rtsplaneta.rs" />
+                      <input type="email" value={rtsEmail} onChange={(e) => setRtsEmail(e.target.value)} placeholder="email@rtsplaneta.rs" className="input-premium" style={{"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"} as any} />
                     </div>
                     <div>
                       <label>Lozinka</label>
-                      <input type="password" value={rtsPassword} onChange={(e) => setRtsPassword(e.target.value)} placeholder="••••••••" />
+                      <div className="password-wrapper">
+                        <input
+                          type={showRtsPass ? "text" : "password"}
+                          value={rtsPassword}
+                          onChange={(e) => setRtsPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="input-premium pr-10"
+                          style={{"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"} as any}
+                        />
+                        <button
+                          type="button"
+                          className="password-eye-btn"
+                          onClick={() => setShowRtsPass(!showRtsPass)}
+                        >
+                          {showRtsPass ? (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                              <line x1="1" y1="1" x2="23" y2="23" />
+                            </svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={() => submitLogin("rts", { email: rtsEmail, password: rtsPassword })}

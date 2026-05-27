@@ -1649,5 +1649,440 @@ textarea {
   direction: ltr; /* switch back to standard left-to-right editing experience when focused */
 }
 
+/* ==========================================
+   💎 PHASE 6: PREMIUM UI MAKEOVER UPGRADES
+   ========================================== */
+
+/* ── 1. Core Visual Animations ── */
+@keyframes pulseGlowBrighter {
+  0%, 100% {
+    box-shadow: 0 0 12px var(--glow-color, rgba(99, 102, 241, 0.2)),
+                0 0 4px var(--glow-color, rgba(99, 102, 241, 0.1));
+    opacity: 0.9;
+  }
+  50% {
+    box-shadow: 0 0 24px var(--glow-color, rgba(99, 102, 241, 0.45)),
+                0 0 8px var(--glow-color, rgba(99, 102, 241, 0.25));
+    opacity: 1;
+  }
+}
+
+@keyframes checkBounce {
+  0% { transform: scale(0.6); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes gradientBG {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ── 2. Brand-Themed Glowing Shadow Halos ── */
+.glow-orange-card { --glow-color: rgba(249, 115, 22, 0.25); }
+.glow-cyan-card   { --glow-color: rgba(6, 182, 212, 0.25); }
+.glow-green-card  { --glow-color: rgba(16, 185, 129, 0.25); }
+.glow-rose-card   { --glow-color: rgba(244, 63, 94, 0.25); }
+.glow-purple-card { --glow-color: rgba(147, 51, 234, 0.25); }
+.glow-amber-card  { --glow-color: rgba(251, 191, 36, 0.25); }
+.glow-indigo-card { --glow-color: rgba(99, 102, 241, 0.25); }
+
+.glow-card-premium {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 15px var(--glow-color, rgba(255,255,255,0.02));
+  transition: all var(--transition-normal);
+}
+.glow-card-premium:hover {
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45), 0 0 25px var(--glow-color, rgba(255,255,255,0.05));
+  border-color: var(--border-color-active, rgba(255, 255, 255, 0.15)) !important;
+  transform: translateY(-2px);
+}
+
+/* ── 3. Ultra-Premium Input Fields ── */
+.input-premium {
+  width: 100%;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 500;
+  outline: none;
+  transition: all var(--transition-normal);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+.input-premium:focus {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--focused-border, var(--primary));
+  border-left-color: var(--focused-border, var(--primary));
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1),
+              0 0 16px var(--focused-glow, rgba(99, 102, 241, 0.25));
+}
+.input-premium::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* ── 4. Micro-Animated Buttons ── */
+.btn-premium {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 28px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  outline: none;
+  transition: all var(--transition-normal);
+}
+.btn-premium:hover {
+  transform: translateY(-2px) scale(1.01);
+}
+.btn-premium:active {
+  transform: translateY(0) scale(0.98);
+}
+.btn-premium:disabled {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text-muted) !important;
+  border-color: transparent !important;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn-premium-primary {
+  background: linear-gradient(135deg, var(--btn-grad-start, #6366f1) 0%, var(--btn-grad-end, #4f46e5) 100%);
+  background-size: 200% 200%;
+  color: white;
+  box-shadow: 0 4px 16px var(--btn-glow, rgba(99, 102, 241, 0.3));
+  animation: gradientBG 4s ease infinite;
+}
+.btn-premium-primary:hover {
+  background-position: right center;
+  box-shadow: 0 8px 24px var(--btn-glow-hover, rgba(99, 102, 241, 0.45));
+}
+
+.btn-premium-secondary {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border: 1px solid var(--border-glass);
+}
+.btn-premium-secondary:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ── 5. Sliding Segmented Controls ── */
+.sliding-tabs-wrapper {
+  position: relative;
+  display: flex;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  overflow: hidden;
+  width: 100%;
+}
+.sliding-tabs-slider {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  transition: transform var(--transition-normal), width var(--transition-normal);
+  z-index: 1;
+}
+.sliding-tabs-btn {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--transition-normal);
+  z-index: 2;
+  outline: none;
+}
+.sliding-tabs-btn.active {
+  color: white;
+  font-weight: 700;
+}
+.sliding-tabs-btn:hover:not(.active) {
+  color: white;
+}
+
+/* ── 6. Advanced Custom Checkboxes ── */
+.custom-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+}
+.custom-checkbox-wrap:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.custom-checkbox-box {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.custom-checkbox-wrap:hover .custom-checkbox-box {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.custom-checkbox-box.checked {
+  background: var(--checkbox-bg, var(--primary));
+  border-color: var(--checkbox-bg, var(--primary));
+  box-shadow: 0 0 10px var(--checkbox-glow, rgba(99, 102, 241, 0.3));
+}
+.custom-checkbox-check {
+  width: 10px;
+  height: 10px;
+  display: none;
+}
+.custom-checkbox-box.checked .custom-checkbox-check {
+  display: block;
+  animation: checkBounce 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+/* ── 7. Netflix-Style Movie/Series Cards ── */
+.netflix-card {
+  position: relative;
+  background: #0f1016;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all var(--transition-normal);
+  aspect-ratio: 16/10;
+  cursor: pointer;
+}
+.netflix-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(10, 11, 16, 0.95) 0%, rgba(10, 11, 16, 0.4) 50%, rgba(10, 11, 16, 0.1) 100%);
+  z-index: 2;
+  transition: all var(--transition-normal);
+}
+.netflix-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 
+              0 0 20px var(--card-glow, rgba(6, 182, 212, 0.15));
+}
+.netflix-card-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+  z-index: 1;
+}
+.netflix-card:hover .netflix-card-thumb {
+  transform: scale(1.08);
+}
+.netflix-card-content {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.netflix-card-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.netflix-card-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  opacity: 0;
+  z-index: 4;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-normal);
+  color: #0a0b10;
+}
+.netflix-card:hover .netflix-card-play {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.netflix-card-play:hover {
+  background: white;
+  transform: translate(-50%, -50%) scale(1.1) !important;
+}
+
+/* ── 8. Password Eye-Toggle input wrapper ── */
+.password-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.password-eye-btn {
+  position: absolute;
+  right: 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition-fast);
+  outline: none;
+  padding: 4px;
+  border-radius: 4px;
+}
+.password-eye-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ── 9. High-Tech Executable Monitor Cards ── */
+.exec-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.exec-monitor-card {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+.exec-monitor-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--hover-border, rgba(99, 102, 241, 0.25));
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.exec-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.exec-status-dot.active {
+  background-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+  animation: pulseGlowBrighter 2s infinite;
+  --glow-color: rgba(16, 185, 129, 0.3);
+}
+.exec-status-dot.missing {
+  background-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+  animation: pulseGlowBrighter 2s infinite;
+  --glow-color: rgba(239, 68, 68, 0.3);
+}
+.exec-copy-btn {
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+.exec-monitor-card:hover .exec-copy-btn {
+  opacity: 1;
+}
+
+/* ── 10. Service Badge Custom Glowing Accents ── */
+.premium-live-pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.premium-live-pill-active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  animation: pulseGlowBrighter 2s infinite;
+  --glow-color: rgba(16, 185, 129, 0.25);
+}
+.premium-live-pill-inactive {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ── 11. Custom Select Premium Overrides ── */
+.premium-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+  color: var(--text-secondary) !important;
+  transition: all var(--transition-fast) !important;
+  cursor: pointer !important;
+}
+.premium-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: white !important;
+}
+.premium-dropdown-item.active {
+  background: var(--primary) !important;
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+
 
 
