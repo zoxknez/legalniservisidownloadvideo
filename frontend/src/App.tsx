@@ -1385,17 +1385,17 @@ export default function App() {
           const previewTheme = smartData ? SVC_THEMES[smartData.service] ?? SVC_THEMES.voyo : null;
 
           return (
-          <div key="dashboard" className="tab-content">
+          <div key="dashboard" className="tab-content max-w-6xl mx-auto flex flex-col gap-8">
             {/* Tab header */}
-            <div className="tab-page-header tab-header-dash mb-6">
-              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#f59e0b,#d97706)"}}>
+            <div className="tab-page-header tab-header-dash">
+              <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#f59e0b,#d97706)"}}>
                 <Zap style={{width:24,height:24,color:"white"}} />
               </div>
               <div style={{flex:1}}>
-                <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
+                <h2 className="text-2.5xl font-extrabold text-white mb-1 flex items-center gap-2.5">
                   <Zap className="w-6 h-6 text-amber-400" /> Pametno Preuzimanje
                 </h2>
-                <p className="text-text-secondary text-sm">Unesite URL adresu za automatsko prepoznavanje i preuzimanje videa sa podržanih servisa.</p>
+                <p className="text-text-secondary text-sm">Unesite URL adresu za automatsko prepoznavanje i preuzimanje videa sa svih podržanih platformi.</p>
               </div>
             </div>
 
@@ -1407,8 +1407,13 @@ export default function App() {
                 return (
                   <div
                     key={k}
-                    className="smart-svc-card"
-                    style={{ "--svc-glow": t.glow, "--svc-color": t.color, borderColor: st.online ? `${t.color}30` : "rgba(255,255,255,0.07)" } as any}
+                    className="smart-svc-card group"
+                    style={{ 
+                      "--svc-glow": t.glow, 
+                      "--svc-glow-hover": t.glow.replace("0.08", "0.25"), 
+                      "--svc-color": t.color, 
+                      borderColor: st.online ? `${t.color}40` : "rgba(255,255,255,0.05)" 
+                    } as any}
                     onClick={() => { setSmartUrl(t.example); handleSmartDetect(t.example); }}
                   >
                     <div className="smart-svc-card-top">
@@ -1416,10 +1421,12 @@ export default function App() {
                       <span className={`smart-svc-dot ${st.online ? "online" : "offline"}`} />
                     </div>
                     <div className="smart-svc-name">{t.name}</div>
-                    <div className="smart-svc-email">{st.label}</div>
+                    <div className={`smart-svc-email text-center ${st.online ? "text-emerald-400" : "text-text-muted"}`}>
+                      {st.online ? "✓ POVEZAN" : "✗ OFF"}
+                    </div>
                     <button
                       className="smart-svc-try-btn"
-                      style={{ "--svc-color": t.color } as any}
+                      style={{ "--svc-color": t.color, "--svc-glow-hover": t.glow.replace("0.08", "0.2") } as any}
                       onClick={e => { e.stopPropagation(); setSmartUrl(t.example); handleSmartDetect(t.example); }}
                     >
                       ▶ Probaj primer
@@ -1429,16 +1436,25 @@ export default function App() {
               })}
             </div>
 
-            <div className="flex flex-col gap-5 max-w-4xl">
-              {/* ── URL Input Bar ── */}
-              <div>
-                <label className="text-white font-semibold text-sm mb-2 block" style={{letterSpacing:"0.01em"}}>
-                  Zalepite link za video, epizodu ili seriju
-                </label>
+            {/* ── Smart Console Card Wrapper ── */}
+            <div className="smart-console-card">
+              <div className="console-scanline" />
+              
+              <div className="flex items-center gap-3 mb-6 border-b border-white/[0.04] pb-4">
+                <Globe className="w-5 h-5 text-amber-500 animate-spin" style={{ animationDuration: "10s" }} />
+                <div>
+                  <h3 className="font-extrabold text-base text-white tracking-wide uppercase">Pametni Media Skener</h3>
+                  <p className="text-text-secondary text-xs">Unesite link za automatsku ekstrakciju formata, epizoda i DRM detalja</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                {/* ── URL Input Bar ── */}
                 <div className="smart-url-wrap">
+                  <Globe className="smart-url-input-icon w-4 h-4" />
                   <input
                     type="text"
-                    className={`smart-url-input ${smartUrl ? "has-value" : ""}`}
+                    className="smart-url-input"
                     placeholder="npr. https://voyo.rs/uspeh-1_50584.html, hrti.hrt.hr, rtsplaneta.rs, eon.tv, max.com..."
                     value={smartUrl}
                     onChange={e => {
@@ -1454,9 +1470,13 @@ export default function App() {
                     onClick={async () => {
                       try {
                         const text = await navigator.clipboard.readText();
-                        if (text.trim().startsWith("http")) { setSmartUrl(text.trim()); handleSmartDetect(text.trim()); }
+                        if (text.trim().startsWith("http")) { 
+                          setSmartUrl(text.trim()); 
+                          handleSmartDetect(text.trim()); 
+                          showToast("Link uspešno zalepljen!", "success");
+                        }
                         else showToast("Clipboard ne sadrži validan URL.", "error");
-                      } catch { showToast("Dozvola za clipboard nije dozvoljena.", "error"); }
+                      } catch { showToast("Dozvola za clipboard nije odobrena.", "error"); }
                     }}
                   >
                     <Copy style={{width:14,height:14}} />
@@ -1470,7 +1490,20 @@ export default function App() {
                     {smartLoading ? "Analizira..." : "Analiziraj"}
                   </button>
                 </div>
+
+                {/* Platform Pills */}
+                <div className="smart-supported-platforms">
+                  <span className="text-[10px] text-text-muted font-bold self-center mr-2">PODRŽANO:</span>
+                  <span className="smart-platform-pill">Voyo.rs Film/Serije</span>
+                  <span className="smart-platform-pill">HRTi Katalog</span>
+                  <span className="smart-platform-pill">EON VOD & Uživo</span>
+                  <span className="smart-platform-pill">RTS Planeta</span>
+                  <span className="smart-platform-pill">HBO Max</span>
+                </div>
               </div>
+            </div>
+
+            <div className="flex flex-col gap-5 max-w-4xl mx-auto w-full">
 
               {/* ── Preview & Download Panel ── */}
               {smartData && previewTheme && (
