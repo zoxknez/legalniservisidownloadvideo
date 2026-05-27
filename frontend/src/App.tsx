@@ -426,12 +426,10 @@ export default function App() {
   const [smartUrl, setSmartUrl] = useState<string>("");
   const [smartLoading, setSmartLoading] = useState<boolean>(false);
   const [smartData, setSmartData] = useState<any | null>(null);
-  // const [smartSelectedEpisodes, setSmartSelectedEpisodes] = useState<number[]>([]);
+  const [smartSelectedEpisodes, setSmartSelectedEpisodes] = useState<any[]>([]);
   const [smartEpisodesRange, setSmartEpisodesRange] = useState<string>("");
   const [smartResolution, setSmartResolution] = useState<string>("1080p");
   const [smartSubs, setSmartSubs] = useState<string>("sr,hr,mk,bs,sl");
-  // const [smartEonMode] = useState<string>("vod");
-  // const [smartEonDuration] = useState<number>(3600);
   const [smartRtsVerbose, setSmartRtsVerbose] = useState<boolean>(false);
 
   // Session Import Form State
@@ -444,14 +442,16 @@ export default function App() {
     if (!val) return;
     setSmartLoading(true);
     setSmartData(null);
+    setSmartSelectedEpisodes([]);
     try {
       const res = await fetch(`${getApiHost()}/api/smart-detect?url=${encodeURIComponent(val)}`);
       const data = await res.json();
       if (res.ok) {
         setSmartData(data);
-        // if (data.episodes) {
-        //   setSmartSelectedEpisodes(data.episodes.map((ep: any) => ep.id));
-        // }
+        // Auto-select all episodes by default
+        if (data.episodes && data.episodes.length > 0) {
+          setSmartSelectedEpisodes(data.episodes.map((ep: any) => ep.id));
+        }
         showToast("Link uspešno prepoznat i analiziran!", "success");
       } else {
         showToast(data.detail || "URL nije prepoznat.", "error");
@@ -468,6 +468,17 @@ export default function App() {
     try {
       showToast("Pokretanje pametnog preuzimanja...", "info");
       let res: Response;
+
+      // Build episodes range from selected episode IDs if no manual range
+      let epRange = smartEpisodesRange;
+      if (!epRange && smartSelectedEpisodes.length > 0 && smartData.episodes) {
+        const indices = smartData.episodes
+          .map((ep: any, idx: number) => smartSelectedEpisodes.includes(ep.id) ? idx + 1 : -1)
+          .filter((i: number) => i !== -1);
+        if (indices.length > 0 && indices.length < smartData.episodes.length) {
+          epRange = indices.join(",");
+        }
+      }
       
       if (smartData.service === "voyo") {
         res = await fetch(`${getApiHost()}/api/voyo/download`, {
@@ -476,11 +487,33 @@ export default function App() {
           body: JSON.stringify({
             target: smartData.target_id,
             mode: smartData.mode,
-            episodes: smartEpisodesRange,
+            episodes: epRange,
             resolution: smartResolution
           })
         });
       } else if (smartData.service === "hrti") {
+        // HRTi: batch queue selected episodes by refId
+        if (smartData.episodes && smartSelectedEpisodes.length > 0) {
+          const selectedEps = smartData.episodes.filter((ep: any) => smartSelectedEpisodes.includes(ep.id));
+          let allOk = true;
+          for (const ep of selectedEps) {
+            const r = await fetch(`${getApiHost()}/api/hrti/download`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ref_id: ep.id, title: ep.title, workers: 16 })
+            });
+            if (!r.ok) allOk = false;
+          }
+          const data = { ok: allOk };
+          if (allOk) {
+            showToast(`${selectedEps.length} epizoda uspešno dodato u red!`, "success");
+            setSmartUrl(""); setSmartData(null); setSmartSelectedEpisodes([]);
+          } else {
+            showToast("Neke epizode nisu mogle biti dodate.", "error");
+          }
+          if (!data) return;
+          return;
+        }
         res = await fetch(`${getApiHost()}/api/hrti/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -497,7 +530,7 @@ export default function App() {
           body: JSON.stringify({
             mode: smartData.mode,
             target: smartData.target_id,
-            episodes: smartEpisodesRange
+            episodes: epRange
           })
         });
       } else if (smartData.service === "rts" || smartData.service === "rtsplaneta") {
@@ -513,7 +546,6 @@ export default function App() {
             verbose: smartRtsVerbose
           })
         });
-        if (false) setSmartRtsVerbose(false);
       } else if (smartData.service === "hbomax") {
         res = await fetch(`${getApiHost()}/api/hbo/download`, {
           method: "POST",
@@ -528,11 +560,12 @@ export default function App() {
         return;
       }
 
-      const data = await res.json();
-      if (res.ok) {
+      const data = await res!.json();
+      if (res!.ok) {
         showToast("Preuzimanje uspešno dodato u red!", "success");
         setSmartUrl("");
         setSmartData(null);
+        setSmartSelectedEpisodes([]);
       } else {
         showToast(data.detail || "Greška pri pokretanju preuzimanja.", "error");
       }
@@ -1216,141 +1249,275 @@ export default function App() {
       <main className="flex-1 p-10 overflow-y-auto max-h-screen">
         
         {/* PAMETNO PREUZIMANJE DASHBOARD */}
-        {activeTab === "dashboard" && (
+        {activeTab === "dashboard" && (() => {
+          // Service theme config
+          const SVC_THEMES: Record<string, {emoji:string; name:string; color:string; glow:string; example:string; exampleLabel:string}> = {
+            voyo:    { emoji:"🟠", name:"Voyo RS",     color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
+            hrti:    { emoji:"🔵", name:"HRTi",        color:"#06b6d4", glow:"rgba(6,182,212,0.08)",    example:"https://hrti.hrt.hr/video/show/4a3b2c1d-0000-0000-0000-000000000001", exampleLabel:"Video (UUID)" },
+            eon:     { emoji:"🟢", name:"EON TV",      color:"#10b981", glow:"rgba(16,185,129,0.08)",   example:"https://eon.tv/player/vod-abc123", exampleLabel:"VOD naslov" },
+            rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
+            hbomax:  { emoji:"🟣", name:"HBO Max",     color:"#9333ea", glow:"rgba(147,51,234,0.08)",   example:"https://www.max.com/show/urn:hbo:episode:xyz123", exampleLabel:"Epizoda/film" },
+          };
+          const svcKeys = Object.keys(SVC_THEMES);
+          // Service auth sub-text (from status if available)
+          const getSvcStatus = (k: string) => {
+            const s = status?.services;
+            if (!s) return { online: false, label: "Nije podešeno" };
+            const svc = s[k === "rts" ? "rtsplaneta" : k];
+            if (!svc) return { online: false, label: "Nije podešeno" };
+            const authenticated = (svc as any).authenticated || (svc as any).ready;
+            const email = (svc as any).email || (svc as any).username || (svc as any).nickname || "";
+            return { online: !!authenticated, label: email ? email : (authenticated ? "Aktivan" : "Nije podešeno") };
+          };
+          // Preview panel service theme
+          const previewTheme = smartData ? SVC_THEMES[smartData.service] ?? SVC_THEMES.voyo : null;
+
+          return (
           <div key="dashboard" className="tab-content">
-            {/* Tab page header */}
-            <div className="tab-page-header tab-header-dash mb-8">
-              <div className="tab-page-header-icon" style={{background: "linear-gradient(135deg, #f59e0b, #d97706)"}}>
-                <Zap style={{width:24, height:24, color:"white"}} />
+            {/* Tab header */}
+            <div className="tab-page-header tab-header-dash mb-6">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#f59e0b,#d97706)"}}>
+                <Zap style={{width:24,height:24,color:"white"}} />
               </div>
               <div style={{flex:1}}>
                 <h2 className="text-2xl font-extrabold text-white mb-1">Pametno Preuzimanje</h2>
-                <p className="text-text-secondary text-sm">Nalepite link sa bilo kog servisa — automatski prepoznajemo, analiziramo i pokrećemo preuzimanje.</p>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {[{emoji:"🟠",label:"Voyo RS"},{emoji:"🔵",label:"HRTi"},{emoji:"🟢",label:"EON TV"},{emoji:"🔴",label:"RTS Planeta"},{emoji:"🟣",label:"HBO Max"}].map(s => (
-                    <span key={s.label} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:999,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)"}}>{s.emoji} {s.label}</span>
-                  ))}
-                </div>
+                <p className="text-text-secondary text-sm">Nalepite link — automatski prepoznajemo servis, analiziramo sadržaj i pokrećemo preuzimanje.</p>
               </div>
             </div>
 
-            <div className="flex flex-col gap-8 max-w-4xl">
-              {/* URL paste input bar */}
-              <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-4">
-                <label className="text-white font-semibold">Zalepite link za video, epizodu ili seriju</label>
-                <div className="flex gap-3">
+            {/* ── Service Status Cards Grid ── */}
+            <div className="smart-svc-grid">
+              {svcKeys.map(k => {
+                const t = SVC_THEMES[k];
+                const st = getSvcStatus(k);
+                return (
+                  <div
+                    key={k}
+                    className="smart-svc-card"
+                    style={{ "--svc-glow": t.glow, "--svc-color": t.color, borderColor: st.online ? `${t.color}30` : "rgba(255,255,255,0.07)" } as any}
+                    onClick={() => { setSmartUrl(t.example); handleSmartDetect(t.example); }}
+                  >
+                    <div className="smart-svc-card-top">
+                      <span className="smart-svc-emoji">{t.emoji}</span>
+                      <span className={`smart-svc-dot ${st.online ? "online" : "offline"}`} />
+                    </div>
+                    <div className="smart-svc-name">{t.name}</div>
+                    <div className="smart-svc-email">{st.label}</div>
+                    <button
+                      className="smart-svc-try-btn"
+                      style={{ "--svc-color": t.color } as any}
+                      onClick={e => { e.stopPropagation(); setSmartUrl(t.example); handleSmartDetect(t.example); }}
+                    >
+                      ▶ Probaj primer
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-5 max-w-4xl">
+              {/* ── URL Input Bar ── */}
+              <div>
+                <label className="text-white font-semibold text-sm mb-2 block" style={{letterSpacing:"0.01em"}}>
+                  Zalepite link za video, epizodu ili seriju
+                </label>
+                <div className="smart-url-wrap">
                   <input
                     type="text"
-                    placeholder="npr. https://voyo.rs/uspeh-1_50584.html, HRTi link, RTS Planeta link, EON ili HBO Max..."
+                    className={`smart-url-input ${smartUrl ? "has-value" : ""}`}
+                    placeholder="npr. https://voyo.rs/uspeh-1_50584.html, hrti.hrt.hr, rtsplaneta.rs, eon.tv, max.com..."
                     value={smartUrl}
-                    onChange={(e) => {
+                    onChange={e => {
                       setSmartUrl(e.target.value);
-                      if (e.target.value.trim().startsWith("http")) {
-                        handleSmartDetect(e.target.value);
-                      }
+                      if (e.target.value.trim().startsWith("http")) handleSmartDetect(e.target.value);
                     }}
-                    className="flex-1 py-3.5 px-4 text-base bg-black/40 border border-glass rounded-lg focus:border-indigo-500 focus:outline-none text-white placeholder-text-muted"
+                    onKeyDown={e => e.key === "Enter" && handleSmartDetect(smartUrl)}
                   />
+                  {/* Clipboard paste btn */}
                   <button
+                    className="smart-url-paste-btn"
+                    title="Nalepi iz clipboard-a"
+                    onClick={async () => {
+                      try {
+                        const text = await navigator.clipboard.readText();
+                        if (text.trim().startsWith("http")) { setSmartUrl(text.trim()); handleSmartDetect(text.trim()); }
+                        else showToast("Clipboard ne sadrži validan URL.", "error");
+                      } catch { showToast("Dozvola za clipboard nije dozvoljena.", "error"); }
+                    }}
+                  >
+                    <Copy style={{width:14,height:14}} />
+                  </button>
+                  <button
+                    className="smart-url-analyze-btn"
                     onClick={() => handleSmartDetect(smartUrl)}
                     disabled={smartLoading || !smartUrl}
-                    className="btn btn-primary px-6"
                   >
-                    {smartLoading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Search className="w-5 h-5" />
-                    )}
-                    Analiziraj
+                    {smartLoading ? <Loader2 style={{width:16,height:16,animation:"spin 1s linear infinite"}} /> : <Search style={{width:16,height:16}} />}
+                    {smartLoading ? "Analizira..." : "Analiziraj"}
                   </button>
                 </div>
               </div>
 
-              {/* Preview & Download Panel */}
-              {smartData && (
-                <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 animate-slide">
-                  <div className="flex flex-col md:flex-row gap-6">
-                    <div className="w-full md:w-48 h-28 bg-indigo-950/40 rounded-lg flex items-center justify-center border border-glass overflow-hidden flex-shrink-0">
-                      {smartData.thumbnail ? (
-                        <img src={smartData.thumbnail} alt={smartData.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <Tv className="w-12 h-12 text-indigo-400/50" />
-                      )}
+              {/* ── Preview & Download Panel ── */}
+              {smartData && previewTheme && (
+                <div
+                  className="smart-preview-panel"
+                  style={{
+                    borderColor: `${previewTheme.color}40`,
+                    boxShadow: `0 0 40px ${previewTheme.glow}, 0 4px 24px rgba(0,0,0,0.4)`,
+                  }}
+                >
+                  {/* Header */}
+                  <div className="smart-preview-header" style={{borderBottom:"1px solid rgba(255,255,255,0.05)", paddingBottom:20}}>
+                    <div className="smart-preview-thumb" style={{borderColor:`${previewTheme.color}30`}}>
+                      {smartData.thumbnail
+                        ? <img src={smartData.thumbnail} alt={smartData.title} />
+                        : <span style={{fontSize:"2rem"}}>{previewTheme.emoji}</span>
+                      }
                     </div>
-
-                    <div className="flex-1 flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="badge badge-connected">
-                          {smartData.service.toUpperCase()}
-                        </span>
-                        <span className="text-xs text-text-muted font-mono">{smartData.mode.toUpperCase()}</span>
+                    <div style={{flex:1}}>
+                      <div
+                        className="smart-preview-badge"
+                        style={{background:`${previewTheme.color}18`, color:previewTheme.color, border:`1px solid ${previewTheme.color}35`}}
+                      >
+                        {previewTheme.emoji} {previewTheme.name} · {smartData.mode?.toUpperCase()}
                       </div>
-                      <h3 className="text-2xl font-extrabold text-white">{smartData.title}</h3>
-                      <p className="text-sm text-text-secondary leading-relaxed">{smartData.description}</p>
+                      <h3 className="smart-preview-title">{smartData.title}</h3>
+                      {smartData.description && <p className="smart-preview-desc">{smartData.description}</p>}
                     </div>
                   </div>
 
-                  <div className="border-t border-glass pt-6 flex flex-col gap-4">
-                    <h4 className="text-md font-bold text-white uppercase tracking-wider">Konfiguracija preuzimanja</h4>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {["voyo", "hrti", "eon"].includes(smartData.service) && (
+                  {/* Body */}
+                  <div className="smart-preview-body">
+                    {/* Episode checklist (series with episodes) */}
+                    {smartData.episodes && smartData.episodes.length > 0 && (
+                      <div>
+                        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+                          <label style={{margin:0}}>
+                            Epizode ({smartSelectedEpisodes.length}/{smartData.episodes.length} odabrano)
+                          </label>
+                          <div style={{display:"flex", gap:12}}>
+                            <button
+                              style={{fontSize:"0.72rem", fontWeight:700, color:previewTheme.color, background:"none", border:"none", cursor:"pointer"}}
+                              onClick={() => setSmartSelectedEpisodes(smartData.episodes.map((e:any)=>e.id))}
+                            >Označi sve</button>
+                            <span style={{color:"var(--text-muted)"}}>|</span>
+                            <button
+                              style={{fontSize:"0.72rem", fontWeight:700, color:"var(--text-muted)", background:"none", border:"none", cursor:"pointer"}}
+                              onClick={() => setSmartSelectedEpisodes([])}
+                            >Odznači sve</button>
+                          </div>
+                        </div>
+                        <div className="smart-ep-list">
+                          {smartData.episodes.map((ep: any, idx: number) => {
+                            const checked = smartSelectedEpisodes.includes(ep.id);
+                            return (
+                              <div
+                                key={ep.id ?? idx}
+                                className={`smart-ep-item ${checked ? "selected" : ""}`}
+                                onClick={() => setSmartSelectedEpisodes(checked
+                                  ? smartSelectedEpisodes.filter((id:any) => id !== ep.id)
+                                  : [...smartSelectedEpisodes, ep.id]
+                                )}
+                                style={checked ? {borderLeft:`3px solid ${previewTheme.color}80`} : {borderLeft:"3px solid transparent"}}
+                              >
+                                <div className={`custom-checkbox-box ${checked ? "checked" : ""}`} style={checked ? {background:previewTheme.color, borderColor:previewTheme.color} : {}}>
+                                  <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                    <polyline points="1.5 5 4 7.5 8.5 2" />
+                                  </svg>
+                                </div>
+                                {(ep.season && ep.episode) && (
+                                  <span style={{fontSize:"0.72rem", fontWeight:800, color:previewTheme.color, minWidth:52, flexShrink:0}}>
+                                    S{String(ep.season).padStart(2,"0")}E{String(ep.episode).padStart(2,"0")}
+                                  </span>
+                                )}
+                                <span style={{flex:1, fontSize:"0.82rem", color:"white", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                                  {ep.title}
+                                </span>
+                                {ep.length_mins > 0 && <span style={{fontSize:"0.7rem", color:"var(--text-muted)", flexShrink:0}}>{ep.length_mins}m</span>}
+                                {ep.drm && <Lock style={{width:12,height:12,color:"#f59e0b",flexShrink:0}} />}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Config row */}
+                    <div className="smart-config-row">
+                      {["voyo","eon"].includes(smartData.service) && (
                         <div>
                           <label>Rezolucija</label>
-                          <select
-                            value={smartResolution}
-                            onChange={(e) => setSmartResolution(e.target.value)}
-                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
-                          >
+                          <select value={smartResolution} onChange={e=>setSmartResolution(e.target.value)}
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full">
                             <option value="1080p">1080p Full HD</option>
                             <option value="720p">720p HD</option>
                             <option value="480p">480p SD</option>
                           </select>
                         </div>
                       )}
-
                       {smartData.service === "hbomax" && (
                         <div>
                           <label>Prevodi (jezici)</label>
-                          <input
-                            type="text"
-                            value={smartSubs}
-                            onChange={(e) => setSmartSubs(e.target.value)}
+                          <input type="text" value={smartSubs} onChange={e=>setSmartSubs(e.target.value)}
                             placeholder="sr,hr,mk,bs,sl"
-                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
-                          />
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
                         </div>
                       )}
-
-                      {smartData.mode === "series" && (
+                      {(smartData.mode === "series" && !smartData.episodes) && (
                         <div>
                           <label>Raspon epizoda (opciono)</label>
-                          <input
-                            type="text"
-                            value={smartEpisodesRange}
-                            onChange={(e) => setSmartEpisodesRange(e.target.value)}
+                          <input type="text" value={smartEpisodesRange} onChange={e=>setSmartEpisodesRange(e.target.value)}
                             placeholder="npr. 1-3 ili 2-"
-                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
-                          />
-                          <p className="text-[10px] text-text-muted mt-1">Ostavite prazno da preuzmete sve dostupne epizode.</p>
+                            className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
+                          <p style={{fontSize:"0.68rem",color:"var(--text-muted)",marginTop:4}}>Ostavite prazno za sve epizode.</p>
+                        </div>
+                      )}
+                      {["rts", "rtsplaneta"].includes(smartData.service) && (
+                        <div className="flex items-center" style={{marginTop: 24}}>
+                          <label className="custom-checkbox-wrap" style={{width: "100%"}}>
+                            <input
+                              type="checkbox"
+                              checked={smartRtsVerbose}
+                              onChange={e => setSmartRtsVerbose(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${smartRtsVerbose ? "checked" : ""}`} style={smartRtsVerbose ? {background:"#f43f5e", borderColor:"#f43f5e"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-sm font-semibold text-white">Verbose/Detaljan Log preuzimanja</span>
+                          </label>
                         </div>
                       )}
                     </div>
 
-                    <button
-                      onClick={startSmartDownload}
-                      className="btn btn-primary py-3.5 font-extrabold text-sm gap-2 self-start mt-4"
-                      style={{ minWidth: "220px" }}
-                    >
-                      <Download className="w-4 h-4" />
-                      Pokreni Preuzimanje
-                    </button>
+                    {/* CTA */}
+                    <div style={{display:"flex", alignItems:"center", gap:14}}>
+                      <button
+                        className={`smart-cta-btn smart-cta-${smartData.service}`}
+                        onClick={startSmartDownload}
+                        disabled={smartData.episodes && smartSelectedEpisodes.length === 0}
+                      >
+                        <Download style={{width:18,height:18}} />
+                        {smartData.episodes
+                          ? `Preuzmi ${smartSelectedEpisodes.length} epizod${smartSelectedEpisodes.length === 1 ? "u" : smartSelectedEpisodes.length < 5 ? "e" : "a"}`
+                          : "Pokreni Preuzimanje"
+                        }
+                      </button>
+                      <button
+                        onClick={() => { setSmartData(null); setSmartUrl(""); setSmartSelectedEpisodes([]); setSmartEpisodesRange(""); }}
+                        style={{fontSize:"0.75rem", color:"var(--text-muted)", background:"none", border:"none", cursor:"pointer"}}
+                      >✕ Otkaži</button>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
+
         {activeTab === "voyo" && (
           <div key="voyo" className="tab-content">
             <div className="tab-page-header tab-header-voyo mb-8">
