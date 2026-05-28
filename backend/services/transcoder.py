@@ -3,7 +3,7 @@ import re
 import subprocess
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Any
 
 logger = logging.getLogger("Transcoder")
 
@@ -208,4 +208,80 @@ def find_and_transcode_completed(title: str, output_dir: str, codec: str = "hevc
             ).start()
     except Exception as e:
         logger.error(f"Error searching for transcode target for title '{title}': {e}")
+
+def get_transcode_diagnostics() -> Dict[str, Any]:
+    """
+    Get diagnostic information about the system's GPU and supported hardware encoders.
+    """
+    import platform
+    supported = _get_supported_encoders()
+    
+    # Detect GPU name on Windows
+    gpu_name = "Generički Video Procesor"
+    try:
+        if platform.system() == "Windows":
+            out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, text=True)
+            lines = [line.strip() for line in out.splitlines() if line.strip() and "Name" not in line]
+            if lines:
+                gpu_name = lines[0]
+        elif platform.system() == "Darwin":
+            out = subprocess.check_output("sysctl -n machdep.cpu.brand_string", shell=True, text=True)
+            gpu_name = out.strip()
+        elif platform.system() == "Linux":
+            try:
+                out = subprocess.check_output("lspci | grep -i vga", shell=True, text=True)
+                gpu_name = out.split(":")[-1].strip()
+            except Exception:
+                gpu_name = "Linux Video Controller"
+    except Exception:
+        pass
+        
+    # Check for specific hardware acceleration support
+    nvenc_support = any("nvenc" in enc for enc in supported)
+    qsv_support = any("qsv" in enc for enc in supported)
+    amf_support = any("amf" in enc for enc in supported)
+    videotoolbox_support = any("videotoolbox" in enc for enc in supported)
+    
+    return {
+        "gpu_name": gpu_name,
+        "supported_encoders": supported,
+        "accelerations": {
+            "nvidia_nvenc": {
+                "supported": nvenc_support,
+                "label": "NVIDIA NVENC (Hardverski)",
+                "description": "Ekstremno brzo HEVC/AV1 kodiranje preko NVIDIA grafičkih kartica."
+            },
+            "intel_qsv": {
+                "supported": qsv_support,
+                "label": "Intel QuickSync (QSV)",
+                "description": "Efikasno kodiranje preko integrisanih Intel procesora."
+            },
+            "amd_amf": {
+                "supported": amf_support,
+                "label": "AMD AMF (Hardverski)",
+                "description": "Hardverska akceleracija za AMD Radeon grafičke kartice."
+            },
+            "apple_videotoolbox": {
+                "supported": videotoolbox_support,
+                "label": "Apple VideoToolbox",
+                "description": "Hardversko ubrzanje za Apple Silicon M1/M2/M3 čipove."
+            },
+            "software": {
+                "supported": True,
+                "label": "Softversko kodiranje (CPU)",
+                "description": "Visok kvalitet kompresije (libx265/libsvtav1), ali visoko opterećenje procesora."
+            }
+        },
+        "available_codecs": {
+            "hevc": {
+                "supported": any(c in supported for c in ["hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox", "libx265"]),
+                "encoder_used": select_best_encoder("hevc")
+            },
+            "av1": {
+                "supported": any(c in supported for c in ["av1_nvenc", "av1_qsv", "libsvtav1"]),
+                "encoder_used": select_best_encoder("av1")
+            }
+        }
+    }
+
 

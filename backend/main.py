@@ -18,6 +18,7 @@ from backend.services.eon_adapter import EonAdapter
 from backend.services.rts_adapter import RtsAdapter
 from backend.services.hbo_adapter import HboAdapter
 from backend.services.smart_parser import SmartParser
+from backend.services.drm_manager import drm_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -741,7 +742,114 @@ async def auto_sync_browser():
         logger.error(f"Error during browser auto-sync: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── DRM / Widevine API ───────────────────────────────────────────────────────
+
+@app.get("/api/drm/health")
+async def drm_health():
+    """
+    Full DRM/Widevine health report:
+    CDM status, WVD metadata (security level L1/L3), key cache stats,
+    provider certs, pywidevine version, recommendations.
+    """
+    loop = asyncio.get_running_loop()
+    report = await loop.run_in_executor(None, drm_manager.get_health_report)
+    return report
+
+@app.post("/api/drm/reload")
+async def drm_reload():
+    """Force reload the CDM (useful after placing a new device.wvd file)."""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, drm_manager.reload)
+    report = await loop.run_in_executor(None, drm_manager.get_health_report)
+    return {"success": True, "health": report}
+
+@app.post("/api/drm/cache/clear")
+def drm_cache_clear():
+    """Invalidate all cached Widevine content keys."""
+    drm_manager.key_cache.invalidate_all()
+    return {"success": True, "message": "Key cache ociscen."}
+
+@app.get("/api/drm/cache/stats")
+def drm_cache_stats():
+    """Return key cache statistics."""
+    return drm_manager.key_cache.stats()
+
+class DrmPrefetchCertRequest(BaseModel):
+    service: str
+    license_url: str
+    headers: Optional[Dict[str, str]] = None
+
+@app.post("/api/drm/prefetch-cert")
+async def drm_prefetch_cert(req: DrmPrefetchCertRequest):
+    """
+    Pre-fetch Widevine provider service certificate for a specific service.
+    Improves license request performance and privacy (encrypts client ID).
+    """
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(
+        None,
+        lambda: drm_manager.prefetch_provider_cert(
+            req.service, req.license_url, req.headers
+        )
+    )
+    if ok:
+        return {"success": True, "message": f"Provider sertifikat preuzet za '{req.service}'."}
+    return {"success": False, "message": "Prefetch nije uspio (server mozda ne podrzava service cert)."}
+
+class DrmTestKeysRequest(BaseModel):
+    mpd_url: str
+    license_url: str
+    headers: Optional[Dict[str, str]] = None
+    service: str = "manual"
+
+@app.post("/api/drm/test-keys")
+async def drm_test_keys(req: DrmTestKeysRequest):
+    """
+    Test Widevine key exchange: fetch MPD, extract all PSSHs, get content keys.
+    Returns the decryption keys (kid:key pairs) for diagnostics.
+    """
+    if not drm_manager.is_ready():
+        raise HTTPException(status_code=503, detail="CDM nije spreman. Dodajte device.wvd fajl.")
+
+    def _run():
+        import requests as _requests
+        # 1. Fetch MPD
+        hdrs = req.headers or {}
+        resp = _requests.get(req.mpd_url, headers=hdrs, timeout=20)
+        resp.raise_for_status()
+        mpd_text = resp.text
+
+        # 2. Extract all PSSHs
+        pssh_list = drm_manager.extract_all_pssh_from_mpd(mpd_text)
+        if not pssh_list:
+            raise RuntimeError("Nije pronasao nijedan Widevine PSSH u MPD manifestu.")
+
+        # 3. Get keys (with multi-PSSH fallback)
+        lic_headers = {"Content-Type": "application/octet-stream", **hdrs}
+        keys = drm_manager.get_keys_multi_pssh(pssh_list, req.license_url, lic_headers, req.service)
+        return {"pssh_count": len(pssh_list), "psshs": pssh_list, "keys": keys}
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=30.0)
+        return {"success": True, **result}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Timeout pri dobavljanju licence (30s).")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/transcoder/diagnose")
+def transcoder_diagnose():
+    """
+    Query system GPU and available hardware-accelerated video encoders.
+    """
+    from backend.services.transcoder import get_transcode_diagnostics
+    return get_transcode_diagnostics()
+
+
 # ── IPTV Server Proxy ─────────────────────────────────────────────────────────
+
 
 @app.get("/api/iptv/playlist.m3u")
 def get_iptv_playlist(request: Request):
