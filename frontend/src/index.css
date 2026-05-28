@@ -81,6 +81,15 @@ body {
   display: flex;
 }
 
+button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  color: inherit;
+}
+
 /* Glassmorphism Classes */
 .glass-panel {
   background: var(--bg-glass);
@@ -611,6 +620,9 @@ select option {
 .bg-rose-600     { background-color: #e11d48 !important; }
 .bg-purple-600   { background-color: #9333ea !important; }
 .bg-amber-500    { background-color: #f59e0b !important; }
+.bg-blue-600     { background-color: #2563eb !important; }
+.bg-violet-600   { background-color: #7c3aed !important; }
+.bg-pink-600     { background-color: #db2777 !important; }
 
 /* ── Download Count Badge (V6) ── */
 .nav-badge {
