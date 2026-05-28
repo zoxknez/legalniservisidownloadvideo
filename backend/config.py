@@ -152,7 +152,22 @@ class AppConfig:
             # Special checks for device.wvd (just a file, not executable)
             if name == "device_wvd":
                 p = Path(path)
-                if p.exists():
+                
+                def verify_wvd(file_path: Path) -> bool:
+                    try:
+                        if not file_path.exists():
+                            return False
+                        sz = file_path.stat().st_size
+                        if sz < 100 or sz > 102400:  # Valid WVD binary blobs are usually 1KB-10KB
+                            return False
+                        # Confirm readable
+                        with open(file_path, "rb") as f:
+                            f.read(10)
+                        return True
+                    except Exception:
+                        return False
+                
+                if verify_wvd(p):
                     found = True
                     resolved_path = str(p.resolve())
                 else:
@@ -170,7 +185,7 @@ class AppConfig:
                     ]
                     for check_dir in search_dirs:
                         check_path = check_dir / "device.wvd"
-                        if check_path.exists():
+                        if verify_wvd(check_path):
                             found = True
                             resolved_path = str(check_path.resolve())
                             break
