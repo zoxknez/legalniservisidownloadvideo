@@ -686,7 +686,50 @@ async def clear_completed():
     await queue_manager.clear_completed()
     return {"success": True}
 
+# ── Zero-Friction Sniffer & Browser Auto-Sync ──────────────────────────────────
+
+class SnifferImportRequest(BaseModel):
+    service: str
+    type: str  # "manifest" | "license"
+    url: str
+    headers: Optional[Dict[str, str]] = None
+    title: Optional[str] = ""
+
+@app.post("/api/sniffer/import")
+async def sniffer_import(req: SnifferImportRequest):
+    """Import a sniffed resource and broadcast it via WebSocket to the React client."""
+    logger.info(f"Imported sniffed resource for {req.service}: {req.type}")
+    await queue_manager.broadcast_sniffer(
+        service=req.service,
+        sniffer_type=req.type,
+        url=req.url,
+        headers=req.headers,
+        title=req.title or ""
+    )
+    return {"success": True}
+
+@app.post("/api/config/auto-sync-browser")
+async def auto_sync_browser():
+    """Trigger Chromium browser session/cookie auto-extraction and update configs."""
+    try:
+        from backend.services.browser_cookies import sync_all_supported_services
+        sync_report = sync_all_supported_services()
+        
+        # Check if at least one service was successfully synced
+        synced_any = any(sync_report.values())
+        
+        return {
+            "success": True,
+            "report": sync_report,
+            "synced_any": synced_any,
+            "message": "Sinhronizacija sesija uspešno završena!" if synced_any else "Nisu pronađene aktivne sesije u pretraživačima."
+        }
+    except Exception as e:
+        logger.error(f"Error during browser auto-sync: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ── Static File Serving ────────────────────────────────────────────────────────
+
 
 static_dir = PROJECT_ROOT / "backend" / "static"
 

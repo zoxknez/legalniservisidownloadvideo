@@ -551,6 +551,7 @@ export default function App() {
   const [importService, setImportService] = useState<string>("voyo");
   const [importSessionData, setImportSessionData] = useState<string>("");
   const [importLoading, setImportLoading] = useState<boolean>(false);
+  const [autoSyncLoading, setAutoSyncLoading] = useState<boolean>(false);
 
   const handleSmartDetect = async (urlStr: string) => {
     const val = urlStr.trim();
@@ -941,6 +942,34 @@ export default function App() {
   }, [activeTab]);
 
   // ── API Operations ─────────────────────────────────────────────────────────
+
+  const handleAutoSyncBrowser = async () => {
+    setAutoSyncLoading(true);
+    try {
+      const res = await fetch(`${getApiHost()}/api/config/auto-sync-browser`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.synced_any) {
+          const successes = Object.entries(data.report)
+            .filter(([_, success]) => success)
+            .map(([service, _]) => service.replace(".rs", "").replace(".hrt.hr", "").replace(".tv", "").toUpperCase())
+            .join(", ");
+          showToast(`Sinhronizacija uspešna za: ${successes}!`, "success");
+        } else {
+          showToast("Nisu pronađene aktivne sesije. Proverite da li ste ulogovani u pretraživačima i zatvorite ih ako su zaključani.", "info");
+        }
+        fetchStatus();
+      } else {
+        showToast(data.detail || "Greška pri sinhronizaciji.", "error");
+      }
+    } catch (e: any) {
+      showToast(e.message || "Greška na serveru", "error");
+    } finally {
+      setAutoSyncLoading(false);
+    }
+  };
 
   const handleSaveConfig = async () => {
     try {
@@ -3828,6 +3857,87 @@ export default function App() {
             </div>
 
             <div className="flex flex-col gap-8">
+
+              {/* Zero-Friction Authentication Panel */}
+              <div className="glass-panel p-8 rounded-xl border border-glass glow-indigo-card glow-card-premium relative overflow-hidden">
+                <div className="console-scanline" />
+                <div className="flex items-center justify-between gap-4 flex-wrap mb-6 pb-4 border-b border-white/[0.04]">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg">
+                      <Sparkles className="w-5 h-5 text-white animate-pulse" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-base text-white tracking-wide uppercase">Zero-Friction Autentifikacija</h3>
+                      <p className="text-text-secondary text-xs">Uvezite sesije jednim klikom direktno iz vašeg pretraživača</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAutoSyncBrowser}
+                    disabled={autoSyncLoading}
+                    className="py-2.5 px-5 rounded-lg text-xs font-black tracking-wider uppercase bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white flex items-center gap-2 transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.4)] disabled:opacity-50"
+                  >
+                    {autoSyncLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                    )}
+                    {autoSyncLoading ? "Sinhronizuje se..." : "Sinhronizuj iz pretraživača"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Left: Info */}
+                  <div className="flex flex-col gap-3">
+                    <h4 className="font-bold text-xs text-indigo-300 tracking-wider uppercase">Kako funkcioniše automatski uvoz?</h4>
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Aplikacija bezbedno skenira lokalne profile instaliranih pretraživača (**Chrome, Edge, Brave**) na vašem računaru i dešifruje aktivne sesijske kolačiće za <strong className="text-white">RTS Planetu, EON TV, Voyo i HRTi</strong> koristeći Windows DPAPI zaštitu.
+                    </p>
+                    <div className="p-3.5 rounded-lg bg-black/40 border border-white/[0.04] text-[11px] text-text-muted flex flex-col gap-2">
+                      <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+                        <Info className="w-3.5 h-3.5" /> Savet za uspešnu sinhronizaciju:
+                      </span>
+                      <span>1. Proverite da li ste prijavljeni na ciljne servise u vašem uobičajenom pretraživaču.</span>
+                      <span>2. Ukoliko dobijete grešku o zaključanoj bazi, nakratko zatvorite pretraživač i probajte ponovo.</span>
+                    </div>
+                  </div>
+
+                  {/* Right: Bookmarklets */}
+                  <div className="flex flex-col gap-3">
+                    <h4 className="font-bold text-xs text-purple-300 tracking-wider uppercase">Alternativa: 1-Klik Bookmarkleti (100% Pouzdano)</h4>
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                      Prevucite ove linkove u vaš Bookmark bar u pretraživaču. Kliknite ih dok ste na sajtu servisa za prenos sesije ili snifovanje linkova:
+                    </p>
+                    
+                    <div className="flex flex-col gap-2.5">
+                      <a
+                        href="javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),customerId:localStorage.getItem('customerId'),eon:sessionStorage.getItem('token')||document.cookie};navigator.clipboard.writeText(JSON.stringify(d));alert('⚡ Sesija kopirana u clipboard! Otvorite tab Postavke -> Uvoz sesije u aplikaciji i samo nalepite (Ctrl+V).');})();"
+                        onClick={() => {
+                          // Drag and drop is supported, but copy on click is a great backup!
+                          navigator.clipboard.writeText("javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),customerId:localStorage.getItem('customerId'),eon:sessionStorage.getItem('token')||document.cookie};navigator.clipboard.writeText(JSON.stringify(d));alert('⚡ Sesija kopirana u clipboard! Otvorite tab Postavke -> Uvoz sesije u aplikaciji i samo nalepite (Ctrl+V).');})();");
+                          showToast("Bookmarklet kopiran u clipboard! Možete ga zalepiti kao adresu novog bookmark-a.", "success");
+                        }}
+                        className="bookmarklet-btn block p-3 text-center rounded-lg text-xs font-bold text-white border border-dashed border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-500/10 transition-all cursor-grab active:cursor-grabbing"
+                        title="Kliknite da kopirate kod ili prevucite na Bookmark bar"
+                      >
+                        🖱️ Prevucite / Kopirajte: ⚡ Kopiraj Sve Sesije
+                      </a>
+                      
+                      <a
+                        href="javascript:(function(){const m=window.location.href;const req={service:'hbomax',type:'manifest',url:m,title:document.title};fetch('http://127.0.0.1:8000/api/sniffer/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)}).then(r=>r.ok?alert('⚡ Link uspešno snifovan i poslat u downloader!'):alert('Greška pri komunikaciji sa serverom.'));})();"
+                        onClick={() => {
+                          navigator.clipboard.writeText("javascript:(function(){const m=window.location.href;const req={service:'hbomax',type:'manifest',url:m,title:document.title};fetch('http://127.0.0.1:8000/api/sniffer/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)}).then(r=>r.ok?alert('⚡ Link uspešno snifovan i poslat u downloader!'):alert('Greška pri komunikaciji sa serverom.'));})();");
+                          showToast("Sniffer Bookmarklet kopiran! Možete ga zalepiti kao adresu novog bookmark-a.", "success");
+                        }}
+                        className="bookmarklet-btn block p-3 text-center rounded-lg text-xs font-bold text-white border border-dashed border-purple-500/30 hover:border-purple-400 hover:bg-purple-500/10 transition-all cursor-grab active:cursor-grabbing"
+                        title="Kliknite da kopirate kod ili prevucite na Bookmark bar"
+                      >
+                        🖱️ Prevucite / Kopirajte: 🎥 Max/HBO Snifer
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* F3: Services Authentication Status Overview */}
               {status && (
