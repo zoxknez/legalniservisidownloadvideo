@@ -1,1489 +1,1744 @@
 #!/usr/bin/env python3
 """
-EON TV Video Downloader - OPTIMIZED VERSION
-Fast parallel downloads using ThreadPoolExecutor and aria2c
+EON TV Video Downloader
+Supports VOD, Series, and Live content with Widevine DRM (CENC) decryption.
 
-Key optimizations:
-1. Parallel segment downloads with ThreadPoolExecutor (10-16 concurrent)
-2. aria2c support for even faster downloads (if available)
-3. Connection pooling with keep-alive
-4. Chunked downloads for large segments
-5. Reduced polling delays for live streams
+Usage:
+    # Save device credentials
+    python eon_downloader.py -u user@email.com -p Password --device-serial SERIAL --device-number NUMBER --save-device
+
+    # Health check
+    python eon_downloader.py --health
+
+    # List channels
+    python eon_downloader.py --list-channels
+
+    # Download VOD (DRM-protected DASH)
+    python eon_downloader.py --vod "https://example.com/manifest.mpd" --license-url "https://lic.example.com/wv"
+
+    # Live capture with DRM
+    python eon_downloader.py --live -c "Channel Name" --duration 120
+
+    # Series download
+    python eon_downloader.py --series "12345" --episodes "1-5"
 """
 
-import os
-import sys
-import re
-import json
-import time
-import shutil
-import logging
 import argparse
-import subprocess
-import platform
-import secrets
-import uuid
 import base64
+import json
+import logging
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime, timedelta
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
-import urllib.parse
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import xmltodict
 
-# Crypto imports for stream URL encryption
-try:
-    from Crypto.Cipher import AES
-    from Crypto.Util.Padding import pad
-    HAS_CRYPTO = True
-except ImportError:
-    HAS_CRYPTO = False
-    logging.warning("pycryptodome not installed. Install with: pip install pycryptodome")
-
-# Import our auth module
-from eon_auth import EONAuth, EONConfig, PROVIDERS
-
-# Logging setup
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from eon_auth import (
+    CONFIG_DIR,
+    EonAuthError,
+    api_request,
+    api_status,
+    device_profile_status,
+    login_api,
+    refresh_api_token,
+    save_device_profile,
+    token_status,
 )
+
 logger = logging.getLogger(__name__)
 
+APP_ROOT = Path(__file__).resolve().parent
+CHANNEL_CATALOG_FILES = [APP_ROOT / "eon_channels.json", CONFIG_DIR / "eon_channels.json"]
+SERIES_CATALOG_FILES = [APP_ROOT / "eon_series.json", CONFIG_DIR / "eon_series.json"]
+VOD_CATALOG_FILES = [APP_ROOT / "eon_vod.json", CONFIG_DIR / "eon_vod.json"]
+EPG_CATALOG_FILES = [APP_ROOT / "eon_epg.json", CONFIG_DIR / "eon_epg.json"]
 
-def create_fast_session() -> requests.Session:
-    """Create an optimized session with connection pooling"""
-    session = requests.Session()
-    
-    # Retry strategy
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=0.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    
-    # Adapter with larger connection pool
-    adapter = HTTPAdapter(
-        max_retries=retry_strategy,
-        pool_connections=20,  # More connections
-        pool_maxsize=20,      # Larger pool
-        pool_block=False
-    )
-    
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    
-    return session
+SAFE_MESSAGE = (
+    "EON engine with full Widevine DRM decryption support. "
+    "Supports VOD, Series, and Live stream download with automatic "
+    "PSSH extraction, license exchange, decryption, and muxing."
+)
 
+DIRECT_MEDIA_EXTENSIONS = (
+    ".m3u8",
+    ".mpd",
+    ".mp4",
+    ".m4v",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".ts",
+)
 
-class FastHLSDownloader:
-    """
-    High-performance HLS downloader with parallel segment fetching.
-    """
-    
-    def __init__(self, max_workers: int = 16, chunk_size: int = 1024 * 1024):
-        """
-        Args:
-            max_workers: Number of parallel download threads
-            chunk_size: Chunk size for streaming downloads (1MB default)
-        """
-        self.max_workers = max_workers
-        self.chunk_size = chunk_size
-        self.session = create_fast_session()
-        self._download_lock = threading.Lock()
-        
-    def set_headers(self, headers: Dict[str, str]):
-        """Set default headers for all requests"""
-        self.session.headers.update(headers)
-    
-    def _fetch_segment(self, seg_info: Tuple[int, str, float]) -> Tuple[int, bytes, float]:
-        """
-        Fetch a single segment.
-        
-        Args:
-            seg_info: (index, url, duration)
-            
-        Returns:
-            (index, data, duration)
-        """
-        idx, url, duration = seg_info
-        
-        try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            return (idx, response.content, duration)
-        except Exception as e:
-            logger.warning(f"Segment {idx} failed: {e}")
-            return (idx, b'', duration)
-    
-    def download_parallel(self, segments: List[Tuple[str, float]], 
-                          output_file: Path,
-                          show_progress: bool = True) -> float:
-        """
-        Download segments in parallel and merge.
-        
-        Args:
-            segments: List of (url, duration) tuples
-            output_file: Output file path
-            show_progress: Show progress bar
-            
-        Returns:
-            Total duration downloaded
-        """
-        total_segments = len(segments)
-        if total_segments == 0:
-            return 0.0
-        
-        logger.info(f"Downloading {total_segments} segments with {self.max_workers} workers...")
-        
-        # Create indexed segment list
-        indexed_segments = [(i, url, dur) for i, (url, dur) in enumerate(segments)]
-        
-        # Results dict to store segments in order
-        results: Dict[int, bytes] = {}
-        total_duration = 0.0
-        completed = 0
-        
-        start_time = time.time()
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all downloads
-            futures = {
-                executor.submit(self._fetch_segment, seg): seg[0] 
-                for seg in indexed_segments
-            }
-            
-            # Collect results as they complete
-            for future in as_completed(futures):
-                idx, data, duration = future.result()
-                
-                if data:
-                    results[idx] = data
-                    total_duration += duration
-                
-                completed += 1
-                
-                if show_progress:
-                    elapsed = time.time() - start_time
-                    speed = completed / elapsed if elapsed > 0 else 0
-                    eta = (total_segments - completed) / speed if speed > 0 else 0
-                    print(f"\r  Progress: {completed}/{total_segments} segments "
-                          f"({100*completed/total_segments:.1f}%) "
-                          f"- {speed:.1f} seg/s - ETA: {eta:.0f}s", end='', flush=True)
-        
-        if show_progress:
-            print()  # Newline after progress
-        
-        elapsed = time.time() - start_time
-        logger.info(f"Downloaded {len(results)} segments in {elapsed:.1f}s "
-                   f"({len(results)/elapsed:.1f} seg/s)")
-        
-        # Write segments in order
-        logger.info(f"Merging segments to {output_file}...")
-        with open(output_file, 'wb') as f:
-            for i in range(total_segments):
-                if i in results:
-                    f.write(results[i])
-        
-        return total_duration
-    
-    def parse_master_playlist(self, url: str) -> Tuple[str, str]:
-        """
-        Parse master playlist and find best quality stream.
-        
-        Returns:
-            (media_playlist_url, master_url_after_redirects)
-        """
-        response = self.session.get(url, allow_redirects=True)
-        response.raise_for_status()
-        
-        master_url = response.url
-        content = response.text
-        
-        # Find best bandwidth stream
-        best_bandwidth = 0
-        best_stream_url = None
-        
-        lines = content.strip().split('\n')
-        for i, line in enumerate(lines):
-            if line.startswith('#EXT-X-STREAM-INF'):
-                bw_match = re.search(r'BANDWIDTH=(\d+)', line)
-                if bw_match:
-                    bandwidth = int(bw_match.group(1))
-                    if bandwidth > best_bandwidth and i + 1 < len(lines):
-                        best_bandwidth = bandwidth
-                        stream_line = lines[i + 1].strip()
-                        
-                        if stream_line.startswith('http'):
-                            best_stream_url = stream_line
-                        else:
-                            base_url = master_url.rsplit('/', 1)[0] + '/'
-                            best_stream_url = urllib.parse.urljoin(base_url, stream_line)
-        
-        # Maybe it's already a media playlist
-        if not best_stream_url and '#EXTINF' in content:
-            best_stream_url = master_url
-        
-        if not best_stream_url:
-            raise ValueError("Could not find stream URL in playlist")
-        
-        logger.info(f"Selected stream: {best_bandwidth/1000:.0f} kbps")
-        return best_stream_url, master_url
-    
-    def parse_media_playlist(self, url: str) -> List[Tuple[str, float]]:
-        """
-        Parse media playlist and extract all segment URLs.
-        
-        Returns:
-            List of (segment_url, duration) tuples
-        """
-        response = self.session.get(url)
-        response.raise_for_status()
-        
-        media_url = response.url
-        content = response.text
-        
-        segments = []
-        lines = content.strip().split('\n')
-        
-        for i, line in enumerate(lines):
-            if line.startswith('#EXTINF'):
-                dur_match = re.search(r'#EXTINF:([\d.]+)', line)
-                duration = float(dur_match.group(1)) if dur_match else 0
-                
-                if i + 1 < len(lines):
-                    seg_line = lines[i + 1].strip()
-                    if not seg_line.startswith('#'):
-                        if seg_line.startswith('http'):
-                            seg_url = seg_line
-                        else:
-                            base_url = media_url.rsplit('/', 1)[0] + '/'
-                            seg_url = urllib.parse.urljoin(base_url, seg_line)
-                        
-                        segments.append((seg_url, duration))
-        
-        return segments
-    
-    def download_vod(self, master_url: str, output_file: Path) -> Path:
-        """
-        Download complete VOD stream.
-        
-        Args:
-            master_url: Master playlist URL
-            output_file: Output .ts file
-            
-        Returns:
-            Path to downloaded file
-        """
-        # Parse playlists
-        media_url, _ = self.parse_master_playlist(master_url)
-        segments = self.parse_media_playlist(media_url)
-        
-        logger.info(f"Found {len(segments)} segments, "
-                   f"total duration: {sum(d for _, d in segments)/60:.1f} minutes")
-        
-        # Download all segments in parallel
-        temp_ts = output_file.with_suffix('.ts')
-        self.download_parallel(segments, temp_ts)
-        
-        return temp_ts
-    
-    def download_live(self, master_url: str, output_file: Path, 
-                      duration: int = 60) -> Path:
-        """
-        Download live stream for specified duration.
-        
-        Downloads segments IMMEDIATELY as they appear in the playlist,
-        because live segments expire quickly on the server (~30-60 seconds).
-        
-        Args:
-            master_url: Master playlist URL
-            output_file: Output .ts file
-            duration: Duration in seconds
-            
-        Returns:
-            Path to downloaded file
-        """
-        # Parse master playlist
-        media_url, _ = self.parse_master_playlist(master_url)
-        
-        downloaded_urls = set()
-        total_duration = 0.0
-        no_new_segments_count = 0
-        segment_count = 0
-        
-        temp_ts = output_file.with_suffix('.ts')
-        
-        logger.info(f"Recording {duration} seconds of live stream...")
-        logger.info(f"Downloading segments in real-time (they expire quickly on server)")
-        
-        start_time = time.time()
-        last_log_time = start_time
-        
-        # Open output file for writing
-        with open(temp_ts, 'wb') as outfile:
-            while total_duration < duration:
-                # Fetch current playlist
-                try:
-                    new_segments = self.parse_media_playlist(media_url)
-                except Exception as e:
-                    logger.warning(f"Playlist fetch error: {e}, retrying...")
-                    time.sleep(2)
-                    continue
-                
-                # Filter to only new segments
-                segments_to_download = []
-                for url, dur in new_segments:
-                    if url not in downloaded_urls:
-                        segments_to_download.append((url, dur))
-                        downloaded_urls.add(url)
-                
-                if segments_to_download:
-                    # Download each segment IMMEDIATELY and append to file
-                    for url, dur in segments_to_download:
-                        try:
-                            response = self.session.get(url, timeout=30)
-                            response.raise_for_status()
-                            outfile.write(response.content)
-                            outfile.flush()
-                            
-                            total_duration += dur
-                            segment_count += 1
-                            
-                        except Exception as e:
-                            logger.warning(f"Segment download failed: {e}")
-                    
-                    no_new_segments_count = 0
-                    
-                    # Log progress periodically
-                    current_time = time.time()
-                    if current_time - last_log_time >= 10:
-                        elapsed = current_time - start_time
-                        logger.info(f"Progress: {total_duration:.1f}s / {duration}s "
-                                   f"({segment_count} segments, {elapsed:.0f}s elapsed)")
-                        last_log_time = current_time
-                else:
-                    no_new_segments_count += 1
-                    if no_new_segments_count > 30:
-                        logger.warning(f"No new segments for 30+ seconds. Stream may have ended.")
-                        break
-                
-                # Wait before polling again
-                if total_duration < duration:
-                    time.sleep(1)
-                
-                # Safety timeout
-                elapsed = time.time() - start_time
-                if elapsed > duration * 2 + 60:
-                    logger.warning(f"Timeout: spent {elapsed:.0f}s but only got {total_duration:.0f}s")
-                    break
-        
-        if segment_count == 0:
-            raise ValueError("No segments downloaded from live stream")
-        
-        actual_time = time.time() - start_time
-        logger.info(f"Recorded {total_duration:.1f}s ({segment_count} segments) in {actual_time:.1f}s")
-        
-        return temp_ts
-    
-    def download_live_realtime(self, master_url: str, output_file: Path,
-                                duration: int = 60, 
-                                on_segment_ready: Optional[callable] = None) -> Path:
-        """
-        Download live stream in real-time, writing segments as they arrive.
-        
-        This allows playback while recording - the file grows as new segments
-        are downloaded.
-        
-        Args:
-            master_url: Master playlist URL
-            output_file: Output .ts file
-            duration: Duration in seconds (0 = indefinite until Ctrl+C)
-            on_segment_ready: Callback when first segment is ready
-            
-        Returns:
-            Path to downloaded file
-        """
-        # Parse master playlist
-        media_url, _ = self.parse_master_playlist(master_url)
-        
-        downloaded_urls = set()
-        total_duration = 0.0
-        no_new_segments_count = 0
-        segment_count = 0
-        
-        temp_ts = output_file.with_suffix('.ts')
-        
-        indefinite = (duration == 0)
-        if indefinite:
-            logger.info(f"Recording live stream indefinitely (Ctrl+C to stop)...")
-        else:
-            logger.info(f"Recording {duration} seconds of live stream (real-time)...")
-        
-        start_time = time.time()
-        last_log_time = start_time
-        player_launched = False
-        
-        # Open output file for appending
-        with open(temp_ts, 'wb') as outfile:
-            try:
-                while indefinite or total_duration < duration:
-                    # Fetch current playlist
-                    try:
-                        new_segments = self.parse_media_playlist(media_url)
-                    except Exception as e:
-                        logger.warning(f"Playlist fetch error: {e}, retrying...")
-                        time.sleep(2)
-                        continue
-                    
-                    # Filter to only new segments
-                    segments_to_download = []
-                    for url, dur in new_segments:
-                        if url not in downloaded_urls:
-                            segments_to_download.append((url, dur))
-                            downloaded_urls.add(url)
-                    
-                    if segments_to_download:
-                        # Download and write each segment immediately
-                        for url, dur in segments_to_download:
-                            try:
-                                response = self.session.get(url, timeout=30)
-                                response.raise_for_status()
-                                outfile.write(response.content)
-                                outfile.flush()  # Ensure it's written to disk
-                                
-                                total_duration += dur
-                                segment_count += 1
-                                
-                                # Callback after first segment (for launching player)
-                                if segment_count == 1 and on_segment_ready:
-                                    on_segment_ready(temp_ts)
-                                    player_launched = True
-                                    
-                            except Exception as e:
-                                logger.warning(f"Segment download failed: {e}")
-                        
-                        no_new_segments_count = 0
-                        
-                        # Log progress periodically
-                        current_time = time.time()
-                        if current_time - last_log_time >= 10:
-                            elapsed = current_time - start_time
-                            if indefinite:
-                                logger.info(f"Recording: {total_duration:.1f}s "
-                                           f"({segment_count} segments, {elapsed:.0f}s elapsed)")
-                            else:
-                                logger.info(f"Progress: {total_duration:.1f}s / {duration}s "
-                                           f"({segment_count} segments)")
-                            last_log_time = current_time
-                    else:
-                        no_new_segments_count += 1
-                        if no_new_segments_count > 30:
-                            logger.warning(f"No new segments for 30+ seconds. Stream may have ended.")
-                            break
-                    
-                    # Wait before polling again
-                    time.sleep(1)
-                    
-            except KeyboardInterrupt:
-                logger.info(f"\nStopped by user. Recorded {total_duration:.1f}s")
-        
-        actual_time = time.time() - start_time
-        logger.info(f"Recorded {total_duration:.1f}s in {actual_time:.1f}s (real-time)")
-        
-        return temp_ts
+WIDEVINE_SYSTEM_ID = "urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"
 
 
-class EONDownloader:
-    """
-    Main downloader class for EON TV content - OPTIMIZED VERSION.
-    """
-    
-    def __init__(self, provider: str = 'sbb', output_dir: str = "output", 
-                 temp_dir: str = "temp", force_new_device: bool = False,
-                 max_workers: int = 16):
-        """
-        Initialize the downloader.
-        
-        Args:
-            provider: Provider identifier ('sbb', 'telemach', etc.)
-            output_dir: Directory for final output files
-            temp_dir: Directory for temporary files
-            force_new_device: Force registration of a new device
-            max_workers: Number of parallel download threads (default 16)
-        """
-        self.output_dir = Path(output_dir)
-        self.temp_dir = Path(temp_dir)
-        self._force_new_device = force_new_device
-        self.provider = provider
-        self.max_workers = max_workers
-        
-        # Initialize auth
-        self.auth = EONAuth(provider=provider)
-        self.config = EONConfig()
-        
-        # Provider-specific URLs
-        provider_config = PROVIDERS[provider]
-        cdn = provider_config['cdn']
-        
-        self.api_base = self.auth.api_base
-        self.wtms_base = f"https://wtms.{cdn}.cdn.united.cloud"
-        self.media_base = f"https://{cdn}-be.cdn.united.cloud"
-        
-        # Binary detection
-        self.binaries = self._detect_binaries()
-        
-        # Fast HLS downloader
-        self.hls_downloader = FastHLSDownloader(max_workers=max_workers)
-        
-        # Create directories
-        self._setup_directories()
-        
-        # Channel cache
-        self._channels_cache: Optional[List[Dict]] = None
-    
-    def _detect_binaries(self) -> Dict[str, str]:
-        """Detect required binaries"""
-        is_windows = platform.system() == 'Windows'
-        ext = '.exe' if is_windows else ''
-        
-        binaries = {
-            'ffmpeg': f'ffmpeg{ext}',
-            'ffprobe': f'ffprobe{ext}',
-            'aria2c': f'aria2c{ext}',  # For even faster downloads
-        }
-        
-        for name, binary in binaries.items():
-            found = shutil.which(binary)
-            if found:
-                binaries[name] = found
-            else:
-                local_path = Path('binaries') / binary
-                if local_path.exists():
-                    binaries[name] = str(local_path)
-                elif name != 'aria2c':  # aria2c is optional
-                    logger.warning(f"Binary not found: {binary}")
-        
-        return binaries
-    
-    def _setup_directories(self):
-        """Create necessary directories"""
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-    
-    def login(self, username: Optional[str] = None, password: Optional[str] = None):
-        """Authenticate with EON TV."""
-        if not username or not password:
-            if self.config.has_credentials():
-                username, password, _ = self.config.get_credentials()
-                logger.info(f"Using stored credentials for: {username}")
-            else:
-                raise ValueError("No credentials provided and none stored")
-        
-        self.auth.login(username, password, force_new_device=self._force_new_device)
-        
-        # Set headers on HLS downloader
-        self.hls_downloader.set_headers({
-            'Referer': 'https://eon.tv/',
-            'Origin': 'https://eon.tv',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        })
-        
-        logger.info("Authentication successful!")
-    
-    def get_channels(self, channel_type: str = 'TV', force_refresh: bool = False) -> List[Dict]:
-        """Get list of available channels."""
-        if self._channels_cache and not force_refresh:
-            return self._channels_cache
-        
-        url = f"{self.auth.api_base}/v3/channels"
-        params = {'channelType': channel_type}
-        headers = self.auth._add_common_headers({'X-Ucp-Language': 'srp'})
-        
-        response = self.auth.session.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        
-        self._channels_cache = response.json()
-        return self._channels_cache
-    
-    def find_channel(self, query: str) -> Optional[Dict]:
-        """Find a channel by name or ID."""
-        channels = self.get_channels()
-        
-        try:
-            channel_id = int(query)
-            for ch in channels:
-                if ch.get('id') == channel_id:
-                    return ch
-        except ValueError:
-            pass
-        
-        query_lower = query.lower()
-        for ch in channels:
-            name = ch.get('name', '').lower()
-            short_name = ch.get('shortName', '').lower()
-            if query_lower in name or query_lower in short_name:
-                return ch
-        
+class EonSafeError(RuntimeError):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Widevine CDM wrapper (same pattern as hrti_downloader.py)
+# ---------------------------------------------------------------------------
+
+class WidevineCDM:
+    """Wrapper around pywidevine for Widevine license exchange."""
+
+    def __init__(self, device_path: Optional[str] = None):
+        self.device_path = device_path
+        self.cdm = None
+        self.device = None
+        self.legacy_mode = False
+        self.PSSH = None
+        self._init_cdm()
+
+    def _find_device_file(self) -> Optional[Path]:
+        search_paths = [
+            Path.cwd() / "device.wvd",
+            Path.cwd() / "cdm" / "device.wvd",
+            Path.home() / ".wvd" / "device.wvd",
+            Path.home() / ".videodownload" / "device.wvd",
+            APP_ROOT / "device.wvd",
+            APP_ROOT / "binaries" / "device.wvd",
+        ]
+        if self.device_path:
+            p = Path(self.device_path)
+            if p.exists():
+                if p.is_file() and p.suffix == ".wvd":
+                    return p
+                elif p.is_dir():
+                    wvd = list(p.glob("*.wvd"))
+                    if wvd:
+                        return wvd[0]
+        for path in search_paths:
+            if path.exists():
+                return path
         return None
-    
-    def _urlsafe_b64encode(self, data: bytes) -> str:
-        return base64.urlsafe_b64encode(data).decode('utf-8').rstrip('=')
-    
-    def _urlsafe_b64decode(self, data: str) -> bytes:
-        padding = 4 - len(data) % 4
-        if padding != 4:
-            data += '=' * padding
-        return base64.urlsafe_b64decode(data)
-    
-    def _build_encrypted_stream_url(self, publishing_point: str, sig: str,
-                                     stream_type: str = 'live',
-                                     start_time: Optional[int] = None,
-                                     server: Optional[Dict] = None) -> str:
-        """Build an encrypted stream URL using AES-CBC encryption."""
-        if not HAS_CRYPTO:
-            raise RuntimeError("pycryptodome required: pip install pycryptodome")
-        
-        if not server:
-            servers = self.get_servers()
-            
-            if stream_type == 'live':
-                server_list = servers.get('live_servers', [])
-            elif stream_type == 'vod':
-                server_list = servers.get('vod_servers', [])
-            else:
-                server_list = servers.get('timeshift_servers', [])
-            
-            if not server_list:
-                raise ValueError(f"No {stream_type} streaming servers available")
-            
-            server = server_list[1] if len(server_list) > 1 else server_list[0]
-        
-        iv = secrets.token_bytes(16)
-        key = self._urlsafe_b64decode(self.auth.state.stream_key)
-        session_id = str(uuid.uuid4())
-        ctime = str(int(time.time() * 1000))
-        
-        player_type = "m3u8v" if stream_type == 'vod' else "m3u8"
-        stream_quality = "hp7000"
-        asset_key = "asset" if stream_type == 'vod' else "channel"
-        
-        params = [
-            f"{asset_key}={publishing_point}",
-            f"stream={stream_quality}",
-            f"sp={self.provider}",
-            f"u={self.auth.state.stream_un}",
-            f"ss={self.auth.state.stream_key}",
-            f"minvbr=100",
-            f"adaptive=true",
-            f"player={player_type}",
-            f"sig={sig}",
-            f"session={session_id}",
-            f"m={server.get('ip', '')}",
-            f"device={self.auth.state.device_number}",
-            f"ctime={ctime}",
-            f"conn=BROWSER",
-        ]
-        
-        if start_time and stream_type in ('cutv', 'vod'):
-            params.append(f"t={start_time}")
-        
-        params.append("aa=false")
-        
-        plain_text = ";".join(params)
-        
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        encrypted = cipher.encrypt(pad(plain_text.encode('utf-8'), AES.block_size))
-        
-        i_param = self._urlsafe_b64encode(iv)
-        a_param = self._urlsafe_b64encode(encrypted)
-        
-        return (
-            f"https://{server.get('hostname')}/stream"
-            f"?i={i_param}&a={a_param}&sp={self.provider}"
-            f"&u={self.auth.state.stream_un}&player={player_type}"
-            f"&session={session_id}&sig={sig}"
-        )
-    
-    def get_servers(self) -> Dict:
-        """Get available streaming servers"""
-        url = f"{self.api_base}/v1/servers"
-        response = self.auth.session.get(url)
-        response.raise_for_status()
-        return response.json()
-    
-    def get_stream_url(self, channel: Dict, stream_type: str = 'live',
-                       start_time: Optional[int] = None) -> str:
-        """Construct the stream URL for a channel."""
-        pub_points = channel.get('publishingPoint', [])
-        if not pub_points:
-            raise ValueError(f"No publishing point for channel: {channel.get('name')}")
-        
-        pub_point = pub_points[0]
-        publishing_point = pub_point.get('publishingPoint', '')
-        
-        if channel.get('drmRequired', False):
-            logger.warning(f"Channel {channel.get('name')} requires DRM!")
-        
-        player_cfgs = pub_point.get('playerCfgs', [])
-        player_cfg = None
-        for cfg in player_cfgs:
-            if cfg.get('type') == stream_type:
-                player_cfg = cfg
-                break
-        
-        if not player_cfg:
-            player_cfg = player_cfgs[0] if player_cfgs else {}
-        
-        sig = player_cfg.get('sig', '')
-        
-        return self._build_encrypted_stream_url(
-            publishing_point=publishing_point,
-            sig=sig,
-            stream_type=stream_type,
-            start_time=start_time
-        )
-    
-    def _convert_to_mp4(self, ts_file: Path, output_file: Path) -> Path:
-        """Convert TS file to MP4 using ffmpeg."""
-        if not self.binaries.get('ffmpeg'):
-            logger.warning("ffmpeg not found, keeping .ts file")
-            return ts_file
-        
-        cmd = [
-            self.binaries['ffmpeg'],
-            '-y',
-            '-i', str(ts_file),
-            '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc',
-            str(output_file)
-        ]
-        
+
+    def _init_cdm(self):
         try:
-            subprocess.run(cmd, check=True, capture_output=True)
-            ts_file.unlink()
-            return output_file
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"ffmpeg conversion failed: {e}")
-            return ts_file
-    
-    def sanitize_filename(self, name: str) -> str:
-        """Create safe filename"""
-        name = re.sub(r'[<>:"/\\|?*]', '', name)
-        name = re.sub(r'\s+', '.', name)
-        name = re.sub(r'\.+', '.', name)
-        return name.strip('.')
-    
-    def download_live(self, channel_id: int = None, channel_name: str = None,
-                      duration: int = 60) -> Path:
-        """
-        Download live TV stream with parallel downloads.
-        
-        Args:
-            channel_id: Channel ID
-            channel_name: Or channel name
-            duration: Duration in seconds
-            
-        Returns:
-            Path to downloaded file
-        """
-        query = str(channel_id) if channel_id else channel_name
-        if not query:
-            raise ValueError("Provide channel_id or channel_name")
-        
-        channel = self.find_channel(query)
-        if not channel:
-            raise ValueError(f"Channel not found: {query}")
-        
-        logger.info(f"Downloading live: {channel.get('name')} ({duration}s)")
-        
-        stream_url = self.get_stream_url(channel, stream_type='live')
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_name = self.sanitize_filename(channel.get('name', 'unknown'))
-        output_file = self.output_dir / f"{safe_name}.live.{timestamp}.mp4"
-        
-        # Use fast parallel downloader
-        ts_file = self.hls_downloader.download_live(stream_url, output_file, duration)
-        
-        # Convert to MP4
-        return self._convert_to_mp4(ts_file, output_file)
-    
-    def download_live_with_playback(self, channel_id: int = None, channel_name: str = None,
-                                     duration: int = 0, player: str = 'auto') -> Path:
-        """
-        Download live TV stream while playing it in a media player.
-        
-        Args:
-            channel_id: Channel ID
-            channel_name: Or channel name
-            duration: Duration in seconds (0 = indefinite, Ctrl+C to stop)
-            player: Media player to use ('vlc', 'mpv', 'auto', or path to player)
-            
-        Returns:
-            Path to downloaded file
-        """
-        query = str(channel_id) if channel_id else channel_name
-        if not query:
-            raise ValueError("Provide channel_id or channel_name")
-        
-        channel = self.find_channel(query)
-        if not channel:
-            raise ValueError(f"Channel not found: {query}")
-        
-        channel_name = channel.get('name', 'unknown')
-        logger.info(f"Recording + Playing: {channel_name}")
-        
-        stream_url = self.get_stream_url(channel, stream_type='live')
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_name = self.sanitize_filename(channel_name)
-        output_file = self.output_dir / f"{safe_name}.live.{timestamp}.mp4"
-        
-        # Find media player
-        player_path = self._find_player(player)
-        player_process = None
-        
-        def launch_player(ts_file: Path):
-            nonlocal player_process
-            if player_path:
-                logger.info(f"Launching player: {player_path}")
-                try:
-                    # Launch player in background
-                    if 'vlc' in player_path.lower():
-                        # VLC can handle growing files well
-                        player_process = subprocess.Popen(
-                            [player_path, str(ts_file), '--no-video-title-show'],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                    elif 'mpv' in player_path.lower():
-                        # MPV with cache for live streams
-                        player_process = subprocess.Popen(
-                            [player_path, str(ts_file), '--cache=yes', '--force-seekable=yes'],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                    else:
-                        player_process = subprocess.Popen(
-                            [player_path, str(ts_file)],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to launch player: {e}")
+            from pywidevine.cdm import Cdm
+            from pywidevine.device import Device
+            from pywidevine.pssh import PSSH
+
+            self.PSSH = PSSH
+            device_file = self._find_device_file()
+            if device_file:
+                self.device = Device.load(device_file)
+                self.cdm = Cdm.from_device(self.device)
+                logger.info(f"Loaded CDM from: {device_file}")
             else:
-                logger.warning("No media player found. Recording only.")
-                print(f"\nRecording to: {ts_file}")
-                print("Open this file in VLC/MPV to watch while recording.")
-        
-        # Download in real-time with playback callback
-        ts_file = self.hls_downloader.download_live_realtime(
-            stream_url, output_file, duration,
-            on_segment_ready=launch_player
-        )
-        
-        # Wait a moment for player to close gracefully
-        if player_process:
-            try:
-                player_process.terminate()
-            except:
-                pass
-        
-        # Convert to MP4
-        return self._convert_to_mp4(ts_file, output_file)
-    
-    def _find_player(self, player: str) -> Optional[str]:
-        """Find a media player executable."""
-        if player == 'auto':
-            # Try common players
-            for p in ['vlc', 'mpv', 'mpc-hc64', 'mpc-hc', 'ffplay']:
-                found = shutil.which(p)
-                if found:
-                    return found
-            
-            # Check common Windows locations
-            if platform.system() == 'Windows':
-                common_paths = [
-                    r'C:\Program Files\VideoLAN\VLC\vlc.exe',
-                    r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe',
-                    r'C:\Program Files\mpv\mpv.exe',
-                    r'C:\Program Files\MPC-HC\mpc-hc64.exe',
-                ]
-                for p in common_paths:
-                    if Path(p).exists():
-                        return p
-            
-            return None
-        
-        elif player in ('vlc', 'mpv', 'ffplay'):
-            return shutil.which(player)
-        
-        else:
-            # Assume it's a path
-            if Path(player).exists():
-                return player
-            return shutil.which(player)
-    
-    def download_catchup(self, channel_id: int = None, channel_name: str = None,
-                         start_time: datetime = None, 
-                         duration_minutes: int = 60) -> Path:
-        """Download catchup/replay content."""
-        query = str(channel_id) if channel_id else channel_name
-        if not query:
-            raise ValueError("Provide channel_id or channel_name")
-        
-        channel = self.find_channel(query)
-        if not channel:
-            raise ValueError(f"Channel not found: {query}")
-        
-        if not start_time:
-            start_time = datetime.now() - timedelta(hours=1)
-        
-        logger.info(f"Downloading catchup: {channel.get('name')} from {start_time}")
-        
-        if not channel.get('cutvEnabled', False):
-            raise ValueError(f"Catchup not enabled for channel: {channel.get('name')}")
-        
-        start_ts = int(start_time.timestamp() * 1000)
-        stream_url = self.get_stream_url(channel, stream_type='cutv', start_time=start_ts)
-        
-        timestamp = start_time.strftime('%Y%m%d_%H%M%S')
-        safe_name = self.sanitize_filename(channel.get('name', 'unknown'))
-        output_file = self.output_dir / f"{safe_name}.catchup.{timestamp}.mp4"
-        
-        # VOD-style download (all segments available)
-        ts_file = self.hls_downloader.download_vod(stream_url, output_file)
-        
-        return self._convert_to_mp4(ts_file, output_file)
-    
-    def get_vod_asset(self, asset_id: int) -> Dict:
-        """Get VOD asset metadata."""
-        url = f"{self.api_base}/v1/vodassets/{asset_id}"
-        headers = {'Authorization': f'Bearer {self.auth.state.access_token}'}
-        
-        response = self.auth.session.get(url, headers=headers)
-        response.raise_for_status()
-        
-        return response.json()
-    
-    def get_series_seasons(self, series_id: int) -> List[Dict]:
-        """
-        Get all seasons and episodes for a series.
-        
-        API: GET /v1/vodassets/{series_id}/seasons
-        
-        Returns:
-            List of season dicts, each containing episodes list
-        """
-        url = f"{self.api_base}/v1/vodassets/{series_id}/seasons"
-        headers = {'Authorization': f'Bearer {self.auth.state.access_token}'}
-        
-        response = self.auth.session.get(url, headers=headers)
-        response.raise_for_status()
-        
-        return response.json()
-    
-    def parse_series_url(self, url: str) -> Tuple[int, Optional[int]]:
-        """
-        Parse EON series URL to extract series ID and optional season number.
-        
-        Supports formats:
-            https://eon.tv/ondemand/detail/162073-s1  -> series 162073, season 1
-            https://eon.tv/sr/ondemand/detail/162073-s1  -> series 162073, season 1
-            https://eon.tv/ondemand/detail/162073  -> series 162073, all seasons
-            162073-s1  -> series 162073, season 1
-            162073  -> series 162073, all seasons
-        
-        Returns:
-            (series_id, season_number) - season_number is None for all seasons
-        """
-        # Extract the ID portion (could be full URL or just ID)
-        match = re.search(r'(\d+)(?:-s(\d+))?', url)
-        if not match:
-            raise ValueError(f"Could not parse series ID from: {url}")
-        
-        series_id = int(match.group(1))
-        season_number = int(match.group(2)) if match.group(2) else None
-        
-        return series_id, season_number
-    
-    def list_series_episodes(self, series_url_or_id: str) -> List[Dict]:
-        """
-        List all episodes from a series URL or ID.
-        
-        Args:
-            series_url_or_id: Full EON URL or just series ID (e.g., "162073-s1")
-            
-        Returns:
-            List of episode dicts with id, title, season, episode number, duration
-        """
-        series_id, season_filter = self.parse_series_url(series_url_or_id)
-        
-        logger.info(f"Fetching series {series_id}...")
-        
-        # Get series info (title, etc.)
-        series_info = self.get_vod_asset(series_id)
-        series_title = series_info.get('title', f'Series {series_id}')
-        vod_type = series_info.get('vodType', 'UNKNOWN')
-        
-        if vod_type != 'SERIES':
-            raise ValueError(f"Asset {series_id} is not a series (type: {vod_type})")
-        
-        logger.info(f"Series: {series_title}")
-        
-        # Get all seasons with episodes
-        seasons = self.get_series_seasons(series_id)
-        logger.info(f"Total seasons: {len(seasons)}")
-        
-        all_episodes = []
-        
-        for season in seasons:
-            season_num = season.get('seasonNumber', 0)
-            
-            # Skip if filtering to specific season
-            if season_filter is not None and season_num != season_filter:
-                continue
-            
-            episodes = season.get('episodes', [])
-            logger.info(f"Season {season_num}: {len(episodes)} episodes")
-            
-            for ep in episodes:
-                ep_num = ep.get('episodeNumber', 0)
-                ep_title = ep.get('title', '') or ep.get('originalTitle', '') or f'Episode {ep_num}'
-                ep_id = ep.get('id')
-                duration_ms = ep.get('duration', 0)
-                drm_required = ep.get('drmRequired', False)
-                short_desc = ep.get('shortDescription', '')
-                
-                all_episodes.append({
-                    'id': ep_id,
-                    'series_id': series_id,
-                    'series_title': series_title,
-                    'season': season_num,
-                    'episode': ep_num,
-                    'title': ep_title if ep_title.strip() else f'Episode {ep_num}',
-                    'description': short_desc[:80] + '...' if len(short_desc) > 80 else short_desc,
-                    'duration_ms': duration_ms,
-                    'duration_min': duration_ms // 60000,
-                    'drm_required': drm_required or False,
-                    'full_title': f"{series_title} S{season_num:02d}E{ep_num:02d}"
-                })
-        
-        # Sort by season and episode
-        all_episodes.sort(key=lambda x: (x['season'], x['episode']))
-        
-        return all_episodes
-    
-    def download_series(self, series_url_or_id: str, 
-                        episode_filter: Optional[str] = None,
-                        skip_drm: bool = True,
-                        dry_run: bool = False) -> List[Path]:
-        """
-        Download all episodes from a series.
-        
-        Args:
-            series_url_or_id: Series URL or ID (e.g., "162073-s1" or full URL)
-            episode_filter: Optional filter like "1-5" or "3" or "1,3,5"
-            skip_drm: Skip DRM-protected episodes (default: True)
-            dry_run: Just list what would be downloaded
-            
-        Returns:
-            List of downloaded file paths
-        """
-        episodes = self.list_series_episodes(series_url_or_id)
-        
-        if not episodes:
-            logger.warning("No episodes found!")
-            return []
-        
-        # Apply episode filter if specified
-        if episode_filter:
-            filtered = []
-            for ep in episodes:
-                ep_num = ep['episode']
-                
-                if '-' in episode_filter:
-                    # Range: "1-5"
-                    start, end = map(int, episode_filter.split('-'))
-                    if start <= ep_num <= end:
-                        filtered.append(ep)
-                elif ',' in episode_filter:
-                    # List: "1,3,5"
-                    nums = [int(x.strip()) for x in episode_filter.split(',')]
-                    if ep_num in nums:
-                        filtered.append(ep)
-                else:
-                    # Single: "3"
-                    if ep_num == int(episode_filter):
-                        filtered.append(ep)
-            episodes = filtered
-        
-        # Summary
-        print(f"\n{'='*70}")
-        print(f"SERIES DOWNLOAD: {episodes[0]['series_title'] if episodes else 'Unknown'}")
-        print(f"{'='*70}")
-        print(f"\n{'#':<4} {'ID':<10} {'Episode':<40} {'Duration':<10} {'DRM':<5}")
-        print('-' * 70)
-        
-        downloadable = []
-        for i, ep in enumerate(episodes, 1):
-            drm_flag = '⚠️ DRM' if ep['drm_required'] else '✓'
-            title_short = ep['full_title'][:38]
-            print(f"{i:<4} {ep['id']:<10} {title_short:<40} {ep['duration_min']:<10} min {drm_flag}")
-            
-            if not ep['drm_required'] or not skip_drm:
-                downloadable.append(ep)
-        
-        print(f"\nTotal episodes: {len(episodes)}")
-        print(f"Downloadable (no DRM): {len(downloadable)}")
-        
-        if dry_run:
-            print("\n[DRY RUN - No downloads performed]")
-            return []
-        
-        if not downloadable:
-            print("\nNo downloadable episodes (all require DRM)")
-            return []
-        
-        # Confirm before batch download
+                logger.warning("No .wvd device file found.")
+        except ImportError:
+            logger.warning("Modern pywidevine not found.")
+            self._init_legacy_cdm()
+
+    def _init_legacy_cdm(self):
         try:
-            confirm = input(f"\nDownload {len(downloadable)} episodes? [y/N]: ").strip().lower()
-            if confirm != 'y':
-                print("Cancelled.")
-                return []
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
-            return []
-        
-        # Download each episode
-        downloaded = []
-        failed = []
-        
-        for i, ep in enumerate(downloadable, 1):
-            print(f"\n[{i}/{len(downloadable)}] Downloading: {ep['full_title']}")
-            
+            from pywidevine.decrypt.wvdecryptcustom import WvDecrypt  # noqa
+            self.legacy_mode = True
+            logger.info("Using legacy pywidevine CDM")
+        except ImportError as e:
+            raise RuntimeError(f"pywidevine not installed: {e}")
+
+    def is_ready(self) -> bool:
+        return self.cdm is not None or self.legacy_mode
+
+    def get_keys(self, pssh_b64: str, license_url: str, headers: dict) -> List[str]:
+        if self.legacy_mode:
+            return self._get_keys_legacy(pssh_b64, license_url, headers)
+        return self._get_keys_modern(pssh_b64, license_url, headers)
+
+    def _unwrap_license(self, resp: requests.Response) -> bytes:
+        """
+        Handle different license response formats.
+        Some servers return JSON with base64 license, others return raw protobuf.
+        """
+        try:
+            j = resp.json()
+            # DRMtoday format: {"status":"OK","license":"<base64>"}
+            if j.get("status") == "OK" and "license" in j:
+                return base64.b64decode(j["license"])
+            # Other formats
+            for field in ("license", "ckc", "message", "licenseData", "license_data", "widevine_license"):
+                if field in j:
+                    return base64.b64decode(j[field])
+        except Exception:
+            pass
+        # Already raw protobuf
+        return resp.content
+
+    def _get_keys_modern(self, pssh_b64: str, license_url: str, headers: dict) -> List[str]:
+        if not self.cdm:
+            raise RuntimeError("CDM not initialized. Check device.wvd file.")
+        pssh = self.PSSH(pssh_b64)
+        session_id = self.cdm.open()
+        try:
+            challenge = self.cdm.get_license_challenge(session_id, pssh)
+            resp = requests.post(license_url, data=challenge, headers=headers)
+            resp.raise_for_status()
+
+            logger.debug(f"License response: CT={resp.headers.get('Content-Type')} "
+                         f"size={len(resp.content)}B "
+                         f"first_bytes={resp.content[:8].hex()}")
+
+            license_bytes = self._unwrap_license(resp)
+            logger.debug(f"Unwrapped license: size={len(license_bytes)}B "
+                         f"first_bytes={license_bytes[:8].hex()}")
+
+            self.cdm.parse_license(session_id, license_bytes)
+            keys = []
+            for key in self.cdm.get_keys(session_id):
+                if key.type == "CONTENT":
+                    keys.append(f"{key.kid.hex}:{key.key.hex()}")
+            return keys
+        finally:
+            self.cdm.close(session_id)
+
+    def _get_keys_legacy(self, pssh_b64: str, license_url: str, headers: dict) -> List[str]:
+        from pywidevine.decrypt.wvdecryptcustom import WvDecrypt
+        for attempt in range(3):
             try:
-                # Create filename: SeriesTitle.S01E01.vod.mp4
-                safe_series = self.sanitize_filename(ep['series_title'])
-                filename = f"{safe_series}.S{ep['season']:02d}E{ep['episode']:02d}"
-                
-                output_path = self.download_vod(ep['id'], output_name=filename)
-                downloaded.append(output_path)
-                print(f"    ✓ Saved: {output_path}")
-                
+                wvd = WvDecrypt(init_data_b64=pssh_b64.encode(), cert_data_b64=None)
+                challenge = wvd.get_challenge()
+                resp = requests.post(license_url, data=challenge, headers=headers)
+                resp.raise_for_status()
+                wvd.update_license(base64.b64encode(resp.content))
+                success, keys = wvd.start_process()
+                if success and keys:
+                    return keys
             except Exception as e:
-                logger.error(f"    ✗ Failed: {e}")
-                failed.append(ep)
-        
-        # Summary
-        print(f"\n{'='*70}")
-        print(f"DOWNLOAD COMPLETE")
-        print(f"{'='*70}")
-        print(f"  Successful: {len(downloaded)}")
-        print(f"  Failed:     {len(failed)}")
-        
-        if failed:
-            print(f"\nFailed episodes:")
-            for ep in failed:
-                print(f"  - {ep['full_title']} (ID: {ep['id']})")
-        
-        return downloaded
-    
-    def get_vod_stream_url(self, asset: Dict) -> str:
-        """Build encrypted stream URL for VOD content."""
-        pub_points = asset.get('publishingPoint', [])
-        if not pub_points:
-            raise ValueError(f"No publishing point for VOD: {asset.get('title')}")
-        
-        pub_point = pub_points[0]
-        publishing_point = pub_point.get('publishingPoint', '')
-        
-        if asset.get('drmRequired', False):
-            raise ValueError(f"VOD '{asset.get('title')}' requires DRM - not supported")
-        
-        player_cfgs = pub_point.get('playerCfgs', [])
-        player_cfg = None
-        for cfg in player_cfgs:
-            if cfg.get('type') == 'vod':
-                player_cfg = cfg
-                break
-        
-        if not player_cfg:
-            player_cfg = player_cfgs[0] if player_cfgs else {}
-        
-        sig = player_cfg.get('sig', '')
-        
-        return self._build_encrypted_stream_url(
-            publishing_point=publishing_point,
-            sig=sig,
-            stream_type='vod'
-        )
-    
-    def download_vod(self, asset_id: int, output_name: Optional[str] = None) -> Path:
-        """
-        Download VOD content with parallel downloads.
-        
-        Args:
-            asset_id: VOD asset ID
-            output_name: Optional custom filename
-            
-        Returns:
-            Path to downloaded file
-        """
-        logger.info(f"Fetching VOD asset: {asset_id}")
-        
-        asset = self.get_vod_asset(asset_id)
-        
-        title = asset.get('title', f'vod_{asset_id}')
-        duration_ms = asset.get('duration', 0)
-        
-        logger.info(f"VOD: {title} ({duration_ms // 60000} minutes)")
-        
-        stream_url = self.get_vod_stream_url(asset)
-        
-        safe_name = self.sanitize_filename(output_name or title)
-        output_file = self.output_dir / f"{safe_name}.vod.mp4"
-        
-        # Fast parallel download
-        ts_file = self.hls_downloader.download_vod(stream_url, output_file)
-        
-        return self._convert_to_mp4(ts_file, output_file)
-    
-    def list_channels(self, subscribed_only: bool = True) -> List[Dict]:
-        """List available channels."""
-        channels = self.get_channels()
-        
-        result = []
-        for ch in channels:
-            if subscribed_only and not ch.get('subscribed', False):
-                continue
-            
-            result.append({
-                'id': ch.get('id'),
-                'name': ch.get('name'),
-                'short_name': ch.get('shortName'),
-                'drm_required': ch.get('drmRequired', False),
-                'live_enabled': ch.get('liveEnabled', True),
-                'catchup_enabled': ch.get('cutvEnabled', False),
-                'subscribed': ch.get('subscribed', False),
-            })
-        
+                logger.warning(f"Key attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    time.sleep(2)
+        raise Exception("Failed to get decryption keys after 3 attempts")
+
+
+# ---------------------------------------------------------------------------
+# MPD Parsing / PSSH extraction
+# ---------------------------------------------------------------------------
+
+def extract_pssh_from_mpd(mpd_text: str) -> Optional[str]:
+    """Extract the first Widevine PSSH from MPD XML."""
+    try:
+        mpd = xmltodict.parse(mpd_text)
+        periods = mpd.get("MPD", {}).get("Period", [])
+        if isinstance(periods, dict):
+            periods = [periods]
+        for period in periods:
+            adapt_sets = period.get("AdaptationSet", [])
+            if isinstance(adapt_sets, dict):
+                adapt_sets = [adapt_sets]
+            for adapt in adapt_sets:
+                cp = adapt.get("ContentProtection", [])
+                if isinstance(cp, dict):
+                    cp = [cp]
+                for prot in cp:
+                    scheme = prot.get("@schemeIdUri", "")
+                    if scheme.lower() == WIDEVINE_SYSTEM_ID.lower():
+                        pssh_elem = prot.get("cenc:pssh") or prot.get("pssh")
+                        if pssh_elem:
+                            return pssh_elem if isinstance(pssh_elem, str) else pssh_elem.get("#text", "")
+    except Exception as e:
+        logger.warning(f"MPD PSSH parse error: {e}")
+
+    # Fallback: regex
+    m = re.search(r"<(?:cenc:)?pssh[^>]*>([A-Za-z0-9+/=]+)</(?:cenc:)?pssh>", mpd_text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return None
+
+
+def extract_license_url_from_mpd(mpd_text: str) -> Optional[str]:
+    """Try to extract the Widevine license URL from MPD XML (ms:laurl or similar)."""
+    try:
+        mpd = xmltodict.parse(mpd_text)
+        periods = mpd.get("MPD", {}).get("Period", [])
+        if isinstance(periods, dict):
+            periods = [periods]
+        for period in periods:
+            adapt_sets = period.get("AdaptationSet", [])
+            if isinstance(adapt_sets, dict):
+                adapt_sets = [adapt_sets]
+            for adapt in adapt_sets:
+                cp = adapt.get("ContentProtection", [])
+                if isinstance(cp, dict):
+                    cp = [cp]
+                for prot in cp:
+                    scheme = prot.get("@schemeIdUri", "")
+                    if scheme.lower() == WIDEVINE_SYSTEM_ID.lower():
+                        # Check for ms:laurl or similar license acquisition URL
+                        laurl = prot.get("ms:laurl") or prot.get("clearkey:Laurl") or prot.get("dashif:Laurl")
+                        if isinstance(laurl, dict):
+                            return laurl.get("@licenseUrl") or laurl.get("@Url") or laurl.get("#text")
+                        if isinstance(laurl, str):
+                            return laurl
+    except Exception:
+        pass
+
+    # Fallback: regex for laurl
+    m = re.search(r'licenseUrl\s*=\s*["\']([^"\']+)["\']', mpd_text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return None
+
+
+def get_best_streams(mpd_text: str) -> Dict[str, Any]:
+    """Parse MPD and return the best (highest bitrate) video and audio stream info."""
+    try:
+        mpd = xmltodict.parse(mpd_text)
+        periods = mpd.get("MPD", {}).get("Period", [])
+        if isinstance(periods, dict):
+            periods = [periods]
+
+        max_video_br = 0
+        max_audio_br = 0
+
+        for period in periods:
+            adapt_sets = period.get("AdaptationSet", [])
+            if isinstance(adapt_sets, dict):
+                adapt_sets = [adapt_sets]
+            for adapt in adapt_sets:
+                mime = adapt.get("@mimeType", adapt.get("@contentType", ""))
+                reps = adapt.get("Representation", [])
+                if isinstance(reps, dict):
+                    reps = [reps]
+                for rep in reps:
+                    br = int(rep.get("@bandwidth", 0))
+                    if "video" in mime:
+                        max_video_br = max(max_video_br, br)
+                    elif "audio" in mime:
+                        max_audio_br = max(max_audio_br, br)
+
+        return {
+            "video_bitrate": max_video_br,
+            "audio_bitrate": max_audio_br,
+        }
+    except Exception as e:
+        logger.debug(f"Stream parse error: {e}")
+        return {}
+
+
+def is_drm_protected(mpd_text: str) -> bool:
+    """Check if MPD manifest contains DRM protection markers."""
+    lower = mpd_text.lower()
+    drm_markers = (
+        "<contentprotection",
+        "cenc:pssh",
+        "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed",
+        "widevine",
+    )
+    return any(marker in lower for marker in drm_markers)
+
+
+# ---------------------------------------------------------------------------
+# Binary detection
+# ---------------------------------------------------------------------------
+
+def detect_binaries() -> Dict[str, str]:
+    """Find required external binaries (mp4decrypt, mkvmerge, ffmpeg, aria2c)."""
+    is_win = platform.system() == "Windows"
+    ext = ".exe" if is_win else ""
+    names = {
+        "aria2c": f"aria2c{ext}",
+        "mp4decrypt": f"mp4decrypt{ext}",
+        "mkvmerge": f"mkvmerge{ext}",
+        "ffmpeg": f"ffmpeg{ext}",
+    }
+    found = {}
+    for key, binary in names.items():
+        path = shutil.which(binary)
+        if not path:
+            # Check in binaries/ folder
+            local = APP_ROOT / "binaries" / binary
+            if local.exists():
+                path = str(local)
+        if not path:
+            # Check in project root
+            local = APP_ROOT / binary
+            if local.exists():
+                path = str(local)
+        if not path:
+            # Common Windows locations
+            if key == "mkvmerge":
+                for hint in [r"C:\Program Files\MKVToolNix\mkvmerge.exe",
+                             r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe"]:
+                    if Path(hint).exists():
+                        path = hint
+                        break
+        if path:
+            found[key] = path
+        else:
+            logger.warning(f"Binary not found in PATH: {binary}")
+            found[key] = binary  # fall back to bare name
+    return found
+
+
+# ---------------------------------------------------------------------------
+# Utility helpers (unchanged from original)
+# ---------------------------------------------------------------------------
+
+def is_url(value: str) -> bool:
+    parsed = urlparse(value or "")
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def is_direct_media_url(value: str) -> bool:
+    if not is_url(value):
+        return False
+    path = urlparse(value).path.lower()
+    return any(path.endswith(ext) for ext in DIRECT_MEDIA_EXTENSIONS)
+
+
+def safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "_", value or "eon")
+    cleaned = re.sub(r"\s+", ".", cleaned).strip("._-")
+    return cleaned[:120] or "eon"
+
+
+def read_json_file(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def first_existing(paths: Iterable[Path]) -> Optional[Path]:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+
+def normalize_channel_catalog(payload: Any) -> List[Dict[str, str]]:
+    if isinstance(payload, dict):
+        if isinstance(payload.get("channels"), list):
+            payload = payload["channels"]
+        else:
+            payload = [{"name": str(name), "url": str(url)} for name, url in payload.items()]
+
+    channels = []
+    if not isinstance(payload, list):
+        return channels
+
+    for item in payload:
+        if isinstance(item, str):
+            channels.append({"name": item, "url": ""})
+        elif isinstance(item, dict):
+            name = str(item.get("name") or item.get("title") or item.get("channel") or "").strip()
+            url = str(item.get("url") or item.get("stream_url") or item.get("manifest") or "").strip()
+            if name:
+                channels.append({"name": name, "url": url})
+    return channels
+
+
+def as_list_payload(payload: Any) -> List[Any]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("items", "results", "videos", "content", "channels", "programs", "entries"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def normalize_media_items(payload: Any) -> List[Dict[str, str]]:
+    items = []
+    for item in as_list_payload(payload):
+        if isinstance(item, str):
+            items.append({"id": item, "title": item, "url": item if is_url(item) else ""})
+        elif isinstance(item, dict):
+            media_id = str(item.get("id") or item.get("ref_id") or item.get("asset_id") or item.get("slug") or "").strip()
+            title = str(item.get("title") or item.get("name") or media_id or "Untitled").strip()
+            url = str(
+                item.get("url")
+                or item.get("stream_url")
+                or item.get("manifest")
+                or item.get("media_url")
+                or item.get("playback_url")
+                or ""
+            ).strip()
+            items.append({"id": media_id, "title": title, "url": url})
+    return items
+
+
+def find_first_media_url(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload if is_direct_media_url(payload) else ""
+    if isinstance(payload, dict):
+        for key in ("url", "stream_url", "manifest", "media_url", "playback_url", "src", "href"):
+            value = str(payload.get(key) or "").strip()
+            if is_direct_media_url(value):
+                return value
+        for value in payload.values():
+            found = find_first_media_url(value)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = find_first_media_url(item)
+            if found:
+                return found
+    return ""
+
+
+def find_license_url_in_payload(payload: Any) -> str:
+    """Recursively search API response for license URL fields."""
+    if isinstance(payload, str):
+        return ""
+    if isinstance(payload, dict):
+        for key in ("license_url", "licenseUrl", "license_server", "licenseServer",
+                     "drm_license_url", "widevine_license_url", "widevineLicenseUrl",
+                     "la_url", "laUrl"):
+            value = str(payload.get(key) or "").strip()
+            if value and is_url(value):
+                return value
+        for value in payload.values():
+            found = find_license_url_in_payload(value)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = find_license_url_in_payload(item)
+            if found:
+                return found
+    return ""
+
+
+def find_drm_headers_in_payload(payload: Any) -> Dict[str, str]:
+    """Recursively search API response for DRM-specific headers."""
+    if isinstance(payload, dict):
+        for key in ("drm_headers", "drmHeaders", "license_headers", "licenseHeaders", "headers"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                return {str(k): str(v) for k, v in value.items() if v}
+        for value in payload.values():
+            found = find_drm_headers_in_payload(value)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = find_drm_headers_in_payload(item)
+            if found:
+                return found
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Catalog / API functions (unchanged)
+# ---------------------------------------------------------------------------
+
+def load_channels() -> List[Dict[str, str]]:
+    try:
+        return normalize_channel_catalog(api_request("channels", {}, require_auth=True))
+    except Exception:
+        path = first_existing(CHANNEL_CATALOG_FILES)
+        if not path:
+            return []
+        return normalize_channel_catalog(read_json_file(path))
+
+
+def find_channel(name: str) -> Optional[Dict[str, str]]:
+    wanted = (name or "").strip().lower()
+    for channel in load_channels():
+        if channel["name"].strip().lower() == wanted:
+            return channel
+    return None
+
+
+def load_series_catalog() -> Dict[str, List[Dict[str, str]]]:
+    path = first_existing(SERIES_CATALOG_FILES)
+    if not path:
+        return {}
+    payload = read_json_file(path)
+    if isinstance(payload, dict) and isinstance(payload.get("series"), dict):
+        payload = payload["series"]
+    if not isinstance(payload, dict):
+        return {}
+
+    normalized: Dict[str, List[Dict[str, str]]] = {}
+    for series_id, episodes in payload.items():
+        if not isinstance(episodes, list):
+            continue
+        normalized_eps = []
+        for index, episode in enumerate(episodes, start=1):
+            if isinstance(episode, str):
+                normalized_eps.append({"title": f"Episode {index}", "url": episode})
+            elif isinstance(episode, dict):
+                title = str(episode.get("title") or episode.get("name") or f"Episode {index}")
+                url = str(episode.get("url") or episode.get("stream_url") or episode.get("manifest") or "")
+                normalized_eps.append({"title": title, "url": url})
+        normalized[str(series_id)] = normalized_eps
+    return normalized
+
+
+def normalize_episode_items(payload: Any) -> List[Dict[str, str]]:
+    episodes = []
+    for index, episode in enumerate(as_list_payload(payload), start=1):
+        if isinstance(episode, str):
+            episodes.append({"title": f"Episode {index}", "url": episode})
+        elif isinstance(episode, dict):
+            title = str(episode.get("title") or episode.get("name") or f"Episode {index}")
+            url = str(
+                episode.get("url")
+                or episode.get("stream_url")
+                or episode.get("manifest")
+                or episode.get("media_url")
+                or episode.get("playback_url")
+                or ""
+            )
+            episode_id = str(episode.get("id") or episode.get("ref_id") or episode.get("asset_id") or "")
+            episodes.append({"id": episode_id, "title": title, "url": url})
+    return episodes
+
+
+def load_series_episodes(series_id: str) -> List[Dict[str, str]]:
+    series_id = (series_id or "").strip()
+    try:
+        payload = api_request("series", {"target": series_id, "series": series_id}, require_auth=True)
+        episodes = normalize_episode_items(payload)
+        if episodes:
+            return episodes
+    except Exception:
+        pass
+    return load_series_catalog().get(series_id, [])
+
+
+def load_vod_catalog() -> List[Dict[str, str]]:
+    path = first_existing(VOD_CATALOG_FILES)
+    if not path:
+        return []
+    return normalize_media_items(read_json_file(path))
+
+
+def search_vod(query: str) -> List[Dict[str, str]]:
+    query = (query or "").strip()
+    if not query:
+        return []
+    try:
+        return normalize_media_items(api_request("search", {"query": query}, require_auth=True))
+    except Exception:
+        q = query.lower()
+        return [item for item in load_vod_catalog() if q in item.get("title", "").lower() or q in item.get("id", "").lower()]
+
+
+def get_vod_info(target: str) -> Dict[str, Any]:
+    target = (target or "").strip()
+    if is_url(target):
+        return {"id": target, "title": target, "url": target}
+    for item in load_vod_catalog():
+        if target.lower() in {item.get("id", "").lower(), item.get("title", "").lower()}:
+            return item
+    try:
+        payload = api_request("vod_detail", {"target": target}, require_auth=True)
+        if isinstance(payload, dict):
+            return payload
+        return {"id": target, "payload": payload}
+    except Exception as exc:
+        return {"id": target, "title": target, "url": "", "found": False, "message": str(exc)}
+
+
+def get_epg(channel: str) -> List[Dict[str, Any]]:
+    channel = (channel or "").strip()
+    try:
+        return as_list_payload(api_request("epg", {"channel": channel}, require_auth=True))
+    except Exception:
+        path = first_existing(EPG_CATALOG_FILES)
+        if not path:
+            return []
+        payload = read_json_file(path)
+        if isinstance(payload, dict) and isinstance(payload.get("channels"), dict):
+            return payload["channels"].get(channel, [])
+        if isinstance(payload, dict):
+            return payload.get(channel, [])
+        return []
+
+
+def resolve_media_url(target: str, kind: str) -> str:
+    if is_direct_media_url(target):
+        return target
+    try:
+        payload = api_request("resolve", {"target": target, "kind": kind}, require_auth=True)
+        url = find_first_media_url(payload)
+        if url:
+            return url
+    except Exception:
+        pass
+    if kind == "vod":
+        info = get_vod_info(target)
+        url = find_first_media_url(info)
+        if url:
+            return url
+    raise EonSafeError(f"Could not resolve a media URL for {kind}: {target}")
+
+
+def resolve_stream_info(target: str, kind: str) -> Dict[str, Any]:
+    """Resolve target to stream info including mpd_url, license_url, drm_headers."""
+    result = {"mpd_url": "", "license_url": "", "drm_headers": {}, "title": target}
+
+    if is_direct_media_url(target):
+        result["mpd_url"] = target
         return result
 
+    try:
+        payload = api_request("resolve", {"target": target, "kind": kind}, require_auth=True)
+        url = find_first_media_url(payload)
+        if url:
+            result["mpd_url"] = url
+        result["license_url"] = find_license_url_in_payload(payload)
+        result["drm_headers"] = find_drm_headers_in_payload(payload)
+        if isinstance(payload, dict):
+            result["title"] = str(payload.get("title") or payload.get("name") or target)
+        return result
+    except Exception:
+        pass
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='EON TV Video Downloader - FAST VERSION',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Save credentials
-  %(prog)s --save-credentials -u email@example.com -p password
-  
-  # List channels
-  %(prog)s --list-channels
-  
-  # Download 60 seconds of live TV (fast parallel download)
-  %(prog)s --live --channel "RTS 1 HD" --duration 60
-  
-  # Record AND play live TV simultaneously (opens VLC/MPV)
-  %(prog)s --live --channel "RTS 1 HD" --play --duration 300
-  
-  # Record indefinitely while watching (Ctrl+C to stop)
-  %(prog)s --live --channel "RTS 1 HD" --play --duration 0
-  
-  # Use specific player
-  %(prog)s --live --channel "RTS 1" --play --player vlc
-  %(prog)s --live --channel "RTS 1" --play --player "C:\\Program Files\\mpv\\mpv.exe"
-  
-  # Download catchup
-  %(prog)s --catchup --channel "N1 HD" --hours-ago 2 --duration 60
-  
-  # Download single VOD
-  %(prog)s --vod 132592
-  
-  # Download entire series (season 1)
-  %(prog)s --series "https://eon.tv/ondemand/detail/162073-s1"
-  %(prog)s --series 162073-s1
-  
-  # Download all seasons
-  %(prog)s --series 162073
-  
-  # List episodes without downloading
-  %(prog)s --series 162073-s1 --list-episodes
-  
-  # Download specific episodes (ep 1-5, or ep 3, or ep 1,3,5)
-  %(prog)s --series 162073-s1 --episodes 1-5
-  %(prog)s --series 162073-s1 --episodes 1,3,5
-  
-  # Control parallelism (default 16 workers)
-  %(prog)s --live --channel "RTS 1 HD" --workers 32
-        """
-    )
-    
-    parser.add_argument('-u', '--username', help='EON username/email')
-    parser.add_argument('-p', '--password', help='EON password')
-    parser.add_argument('--provider', default='sbb', 
-                        help=f"Provider: {', '.join(PROVIDERS.keys())}")
-    parser.add_argument('--save-credentials', action='store_true')
-    
-    parser.add_argument('--device-serial', help='Device serial from HAR')
-    parser.add_argument('--device-number', help='Device number from HAR')
-    parser.add_argument('--save-device', action='store_true')
-    parser.add_argument('--new-device', action='store_true')
-    
-    parser.add_argument('--list-channels', action='store_true')
-    parser.add_argument('--live', action='store_true')
-    parser.add_argument('--catchup', action='store_true')
-    parser.add_argument('--vod', type=int, metavar='ASSET_ID')
-    
-    # Live playback options
-    parser.add_argument('--play', action='store_true',
-                        help='Record and play live stream simultaneously')
-    parser.add_argument('--player', default='auto',
-                        help='Media player: vlc, mpv, auto, or path (default: auto)')
-    
-    # Series options
-    parser.add_argument('--series', metavar='URL_OR_ID',
-                        help='Series URL or ID (e.g., 162073-s1 or full URL)')
-    parser.add_argument('--list-episodes', action='store_true',
-                        help='List episodes without downloading')
-    parser.add_argument('--episodes', metavar='FILTER',
-                        help='Episode filter: "1-5" or "3" or "1,3,5"')
-    parser.add_argument('--include-drm', action='store_true',
-                        help='Attempt to download DRM episodes (will likely fail)')
-    
-    parser.add_argument('-c', '--channel', help='Channel name or ID')
-    parser.add_argument('--duration', type=int, default=60,
-                        help='Duration in seconds (live) or minutes (catchup)')
-    parser.add_argument('--hours-ago', type=float, default=1)
-    
-    # Performance options
-    parser.add_argument('--workers', type=int, default=16,
-                        help='Number of parallel download threads (default: 16)')
-    
-    parser.add_argument('-o', '--output', default='output')
-    parser.add_argument('-v', '--verbose', action='store_true')
-    
-    args = parser.parse_args()
-    
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-    
-    # Initialize with worker count
-    downloader = EONDownloader(
-        provider=args.provider,
-        output_dir=args.output,
-        force_new_device=args.new_device,
-        max_workers=args.workers
-    )
-    
-    if args.device_serial and args.device_number:
-        downloader.auth.set_device(args.device_serial, args.device_number, 
-                                   save=args.save_device)
-    
-    if args.save_credentials:
-        if not args.username or not args.password:
-            print("Error: --save-credentials requires -u and -p")
-            sys.exit(1)
-        config = EONConfig()
-        config.set_credentials(args.username, args.password, args.provider)
-        print(f"Credentials saved!")
-        if not (args.list_channels or args.live or args.catchup or args.vod or args.series):
-            sys.exit(0)
-    
-    try:
-        downloader.login(args.username, args.password)
-    except ValueError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-    
-    try:
-        if args.list_channels:
-            channels = downloader.list_channels()
-            print(f"\n{'ID':<8} {'Name':<40} {'DRM':<5} {'Live':<5} {'Catchup':<7}")
-            print('-' * 70)
-            for ch in channels:
-                print(f"{ch['id']:<8} {ch['name'][:38]:<40} "
-                      f"{'Yes' if ch['drm_required'] else 'No':<5} "
-                      f"{'Yes' if ch['live_enabled'] else 'No':<5} "
-                      f"{'Yes' if ch['catchup_enabled'] else 'No':<7}")
-        
-        elif args.series:
-            if args.list_episodes:
-                # Just list episodes
-                episodes = downloader.list_series_episodes(args.series)
-                print(f"\n{'#':<4} {'ID':<10} {'Episode':<45} {'Duration':<8} {'DRM':<5}")
-                print('-' * 75)
-                for i, ep in enumerate(episodes, 1):
-                    drm = '⚠️ DRM' if ep['drm_required'] else '✓'
-                    print(f"{i:<4} {ep['id']:<10} {ep['full_title'][:43]:<45} "
-                          f"{ep['duration_min']:<8}min {drm}")
-                print(f"\nTotal: {len(episodes)} episodes")
-            else:
-                # Download series
-                downloaded = downloader.download_series(
-                    args.series,
-                    episode_filter=args.episodes,
-                    skip_drm=not args.include_drm,
-                    dry_run=False
-                )
-                print(f"\n✓ Downloaded {len(downloaded)} episodes")
-        
-        elif args.live:
-            if not args.channel:
-                print("Error: --live requires --channel")
-                sys.exit(1)
-            
-            if args.play:
-                # Record and play simultaneously
-                output_path = downloader.download_live_with_playback(
-                    channel_name=args.channel,
-                    duration=args.duration,  # 0 = indefinite
-                    player=args.player
-                )
-            else:
-                # Normal recording (parallel download at end)
-                output_path = downloader.download_live(
-                    channel_name=args.channel,
-                    duration=args.duration
-                )
-            print(f"\n✓ Download complete: {output_path}")
-        
-        elif args.catchup:
-            if not args.channel:
-                print("Error: --catchup requires --channel")
-                sys.exit(1)
-            start_time = datetime.now() - timedelta(hours=args.hours_ago)
-            output_path = downloader.download_catchup(
-                channel_name=args.channel,
-                start_time=start_time,
-                duration_minutes=args.duration
-            )
-            print(f"\n✓ Download complete: {output_path}")
-        
-        elif args.vod:
-            output_path = downloader.download_vod(args.vod)
-            print(f"\n✓ Download complete: {output_path}")
-        
+    if kind == "vod":
+        info = get_vod_info(target)
+        url = find_first_media_url(info)
+        if url:
+            result["mpd_url"] = url
+        result["license_url"] = find_license_url_in_payload(info)
+        result["drm_headers"] = find_drm_headers_in_payload(info)
+        if isinstance(info, dict):
+            result["title"] = str(info.get("title") or info.get("name") or target)
+
+    return result
+
+
+def parse_episode_selection(selection: str, total: int) -> List[int]:
+    if not selection:
+        return list(range(1, total + 1))
+    selected = set()
+    for part in selection.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            left, right = part.split("-", 1)
+            start = int(left) if left.strip() else 1
+            end = int(right) if right.strip() else total
+            for number in range(max(1, start), min(total, end) + 1):
+                selected.add(number)
         else:
-            print("No action specified. Use --list-channels, --live, --catchup, --vod, or --series")
-            parser.print_help()
-            sys.exit(1)
-            
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
-        sys.exit(1)
+            number = int(part)
+            if 1 <= number <= total:
+                selected.add(number)
+    return sorted(selected)
+
+
+def fetch_text(url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 EONDownloader/2.0"}
+    response = requests.get(url, headers=headers, timeout=30)
+    response.raise_for_status()
+    return response.text
+
+
+def ensure_output_dir(path: str) -> Path:
+    out = Path(path or "output")
+    out.mkdir(parents=True, exist_ok=True)
+    return out.resolve()
+
+
+# ---------------------------------------------------------------------------
+# DRM Download Pipeline
+# ---------------------------------------------------------------------------
+
+class EONDownloader:
+    """Full download pipeline with Widevine DRM support."""
+
+    def __init__(
+        self,
+        output_dir: str = "output",
+        temp_dir: str = "temp",
+        device_path: Optional[str] = None,
+        workers: int = 16,
+    ):
+        self.output_dir = Path(output_dir)
+        self.temp_dir = Path(temp_dir)
+        self.cdm = WidevineCDM(device_path)
+        self.bins = detect_binaries()
+        self.workers = workers
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def get_decryption_keys(
+        self,
+        mpd_url: str,
+        license_url: str,
+        drm_headers: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
+        """Fetch MPD, extract PSSH, get Widevine decryption keys."""
+        logger.info(f"Fetching MPD: {mpd_url}")
+        mpd_text = fetch_text(mpd_url)
+
+        # Log stream quality
+        streams = get_best_streams(mpd_text)
+        if streams:
+            vbr = streams.get("video_bitrate", 0)
+            abr = streams.get("audio_bitrate", 0)
+            logger.info(f"Best streams — video: {vbr // 1000}kbps, audio: {abr // 1000}kbps")
+
+        pssh = extract_pssh_from_mpd(mpd_text)
+        if not pssh:
+            raise EonSafeError("Could not find Widevine PSSH in MPD manifest")
+        logger.info(f"PSSH: {pssh[:40]}...")
+
+        # If no license URL provided, try to extract from MPD
+        if not license_url:
+            license_url = extract_license_url_from_mpd(mpd_text) or ""
+        if not license_url:
+            raise EonSafeError(
+                "No license URL available. Provide --license-url or configure the API to return it."
+            )
+
+        # License request headers
+        lic_headers = {
+            "Content-Type": "application/octet-stream",
+            "User-Agent": "Mozilla/5.0 EONDownloader/2.0",
+        }
+        if drm_headers:
+            lic_headers.update(drm_headers)
+
+        logger.info(f"Fetching decryption keys from: {license_url}")
+        keys = self.cdm.get_keys(pssh, license_url, lic_headers)
+        if not keys:
+            raise EonSafeError("No CONTENT keys returned from license server")
+        for k in keys:
+            logger.info(f"  Key: {k}")
+        return keys
+
+    def download_fragments(self, mpd_url: str, output_name: str,
+                           workers: int = 16) -> Tuple[Path, Path]:
+        """
+        Download encrypted audio and video fragments via yt-dlp.
+        Uses concurrent fragment downloads for speed.
+        Returns (video_path, audio_path).
+        """
+        from yt_dlp import YoutubeDL
+
+        video_out = self.temp_dir / f"{output_name}_enc_video.mp4"
+        audio_out = self.temp_dir / f"{output_name}_enc_audio.mp4"
+
+        aria2c = self.bins.get("aria2c")
+        use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
+
+        def _progress(d):
+            if d.get("status") == "downloading":
+                fname = d.get("filename", "")
+                track = "Video" if "video" in fname.lower() else "Audio"
+                done = d.get("downloaded_bytes", 0)
+                total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
+                speed = d.get("speed") or 0
+                eta = d.get("eta") or 0
+                fi = d.get("fragment_index")
+                fc = d.get("fragment_count")
+                spd_str = f"{speed / 1024 / 1024:.1f}MB/s" if speed else "??MB/s"
+                eta_str = f"ETA {eta}s" if eta else ""
+                if total:
+                    pct = done / total * 100
+                    filled = int(20 * done / total)
+                    bar = "█" * filled + "░" * (20 - filled)
+                    size = f"{total / 1024 / 1024:.1f}MB"
+                    frag = f" frag {fi}/{fc}" if fi else ""
+                    line = f"  {track} [{bar}] {pct:5.1f}% of {size}  {spd_str}  {eta_str}{frag}"
+                elif fi:
+                    line = f"  {track} frag {fi}/{fc or '?'}  {spd_str}  {eta_str}"
+                else:
+                    line = f"  {track} {done // 1024}KB  {spd_str}"
+                print(f"\r{line:<70}", end="", flush=True)
+            elif d.get("status") == "finished":
+                fname = d.get("filename", "")
+                track = "Video" if "video" in fname.lower() else "Audio"
+                size = (d.get("total_bytes") or d.get("downloaded_bytes", 0)) / 1024 / 1024
+                print(f"\r  {track} ✓  {size:.1f}MB" + " " * 40)
+
+        ydl_opts = {
+            "allow_unplayable_formats": True,
+            "outtmpl": str(self.temp_dir / f"{output_name}_enc.%(ext)s"),
+            "format": "bestvideo+bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "noprogress": True,
+            "continuedl": False,
+            "fixup": "never",
+            "merge_output_format": None,
+            "postprocessors": [],
+            "progress_hooks": [_progress],
+            "concurrent_fragment_downloads": workers,
+        }
+
+        if use_aria2c:
+            ydl_opts["external_downloader"] = {"default": aria2c}
+            ydl_opts["external_downloader_args"] = {
+                "default": [
+                    "--max-connection-per-server=16",
+                    "--split=16",
+                    "--min-split-size=1M",
+                    "--console-log-level=warn",
+                ]
+            }
+            logger.info(f"Using aria2c with {workers} concurrent fragments")
+        else:
+            logger.info(f"Using yt-dlp with {workers} concurrent fragments")
+
+        logger.info(f"Downloading encrypted fragments from: {mpd_url}")
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(mpd_url, download=True)
+
+        # yt-dlp writes separate files for video and audio
+        v_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4")) + \
+                       list(self.temp_dir.glob(f"{output_name}_enc.mp4"))
+        a_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.m4a")) + \
+                       list(self.temp_dir.glob(f"{output_name}_enc.m4a")) + \
+                       list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4"))
+
+        # Filter duplicates
+        v_candidates = [p for p in v_candidates if p != video_out]
+        a_candidates = [p for p in a_candidates if p != audio_out and p != video_out]
+
+        if not v_candidates and not a_candidates:
+            merged = list(self.temp_dir.glob(f"{output_name}_enc.*"))
+            if merged:
+                logger.warning("yt-dlp produced a single merged file. Will attempt decryption.")
+                return merged[0], merged[0]
+            raise FileNotFoundError("yt-dlp produced no output files")
+
+        if v_candidates:
+            v_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            shutil.copy2(v_candidates[0], video_out)
+        if a_candidates:
+            a_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            shutil.copy2(a_candidates[0], audio_out)
+
+        logger.info(f"Video fragment: {video_out} ({video_out.stat().st_size // 1024}KB)")
+        if audio_out.exists():
+            logger.info(f"Audio fragment: {audio_out} ({audio_out.stat().st_size // 1024}KB)")
+
+        return video_out, audio_out
+
+    def decrypt_file(self, encrypted: Path, keys: List[str]) -> Path:
+        """Decrypt a single file with mp4decrypt."""
+        decrypted = encrypted.with_name(encrypted.stem.replace("_enc", "_dec") + encrypted.suffix)
+        cmd = [self.bins["mp4decrypt"]]
+        for key in keys:
+            cmd += ["--key", key]
+        cmd += [str(encrypted), str(decrypted)]
+
+        logger.info(f"Decrypting: {encrypted.name} -> {decrypted.name}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise EonSafeError(f"mp4decrypt failed: {result.stderr}")
+        logger.info(f"Decrypted: {decrypted.name} ({decrypted.stat().st_size // 1024}KB)")
+        return decrypted
+
+    def fix_with_ffmpeg(self, input_path: Path) -> Path:
+        """Re-mux a fragment through ffmpeg to fix timing / codec boxes."""
+        fixed = input_path.with_name(input_path.stem + "_fixed.mp4")
+        cmd = [
+            self.bins["ffmpeg"], "-y",
+            "-i", str(input_path),
+            "-c", "copy",
+            str(fixed),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.warning(f"ffmpeg fix failed (non-fatal): {result.stderr[-300:]}")
+            return input_path
+        return fixed
+
+    def mux_output(self, video_path: Path, audio_path: Path, output_path: Path) -> Path:
+        """Mux video and audio with mkvmerge, fallback to ffmpeg."""
+        mkvmerge = self.bins.get("mkvmerge")
+        ffmpeg = self.bins.get("ffmpeg")
+
+        # Try mkvmerge first
+        if mkvmerge and (shutil.which(mkvmerge) or Path(mkvmerge).exists()):
+            cmd = [
+                mkvmerge,
+                "-o", str(output_path),
+                str(video_path),
+                str(audio_path),
+            ]
+            logger.info(f"Muxing with mkvmerge to: {output_path}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode in (0, 1):
+                logger.info(f"Output: {output_path} ({output_path.stat().st_size // 1024 // 1024}MB)")
+                return output_path
+            logger.warning(f"mkvmerge failed (code {result.returncode}), trying ffmpeg...")
+
+        # Fallback to ffmpeg
+        if ffmpeg and (shutil.which(ffmpeg) or Path(ffmpeg).exists()):
+            output_mp4 = output_path.with_suffix(".mp4")
+            cmd = [
+                ffmpeg, "-y",
+                "-i", str(video_path),
+                "-i", str(audio_path),
+                "-c", "copy",
+                "-async", "1",
+                "-vsync", "-1",
+                "-fflags", "+genpts+igndts",
+                "-movflags", "+faststart",
+                str(output_mp4),
+            ]
+            logger.info(f"Muxing with ffmpeg to: {output_mp4}")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info(f"Output: {output_mp4} ({output_mp4.stat().st_size // 1024 // 1024}MB)")
+                return output_mp4
+            raise EonSafeError(f"ffmpeg mux failed: {result.stderr[-500:]}")
+
+        raise EonSafeError("Neither mkvmerge nor ffmpeg found for muxing")
+
+    def cleanup(self, name: str):
+        """Remove temp files for a given download name."""
+        for pattern in [f"{name}_enc*", f"{name}_dec*", f"{name}_fixed*"]:
+            for f in self.temp_dir.glob(pattern):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+    def download(
+        self,
+        mpd_url: str,
+        license_url: str = "",
+        drm_headers: Optional[Dict[str, str]] = None,
+        title: str = "EON.Video",
+        workers: int = 16,
+    ) -> Path:
+        """
+        Full DRM download pipeline:
+        1. Fetch MPD, extract PSSH
+        2. License exchange to get content keys
+        3. Download encrypted fragments via yt-dlp
+        4. Decrypt with mp4decrypt
+        5. Fix with ffmpeg if needed
+        6. Mux with mkvmerge/ffmpeg
+        """
+        safe_name = safe_filename(title)
+        logger.info(f"=== EON DRM Download: {title} ===")
+        logger.info(f"MPD: {mpd_url}")
+        print(f"\n[EON] Starting download: {title}")
+        print(f"[EON] MPD: {mpd_url}")
+
+        # Step 1: Check if DRM is present
+        mpd_text = fetch_text(mpd_url)
+        drm_present = is_drm_protected(mpd_text)
+
+        if not drm_present:
+            # Non-DRM stream: just download with yt-dlp directly
+            print("[EON] Stream is not DRM-protected, downloading directly...")
+            return self._download_direct(mpd_url, safe_name, workers)
+
+        print("[EON] Widevine DRM detected, starting decryption pipeline...")
+
+        # Step 2: Extract PSSH and get keys
+        keys = self.get_decryption_keys(mpd_url, license_url, drm_headers)
+        print(f"[EON] Got {len(keys)} decryption key(s)")
+
+        # Step 3: Download encrypted fragments
+        print("[EON] Downloading encrypted fragments...")
+        enc_video, enc_audio = self.download_fragments(mpd_url, safe_name, workers)
+
+        # Step 4: Decrypt
+        print("[EON] Decrypting video...")
+        dec_video = self.decrypt_file(enc_video, keys)
+        dec_audio = dec_video  # default if same file
+        if enc_audio != enc_video and enc_audio.exists():
+            print("[EON] Decrypting audio...")
+            dec_audio = self.decrypt_file(enc_audio, keys)
+
+        # Step 5: Fix with ffmpeg if needed
+        dec_video = self.fix_with_ffmpeg(dec_video)
+        if dec_audio != dec_video:
+            dec_audio = self.fix_with_ffmpeg(dec_audio)
+
+        # Step 6: Mux
+        output_path = self.output_dir / f"{safe_name}.mkv"
+        print("[EON] Muxing final output...")
+        result = self.mux_output(dec_video, dec_audio, output_path)
+
+        # Step 7: Cleanup
+        self.cleanup(safe_name)
+
+        print(f"\n[EON] ✓ Download complete: {result}")
+        print(f"[EON] ✓ Size: {result.stat().st_size / 1024 / 1024:.1f} MB")
+        return result
+
+    def _download_direct(self, url: str, safe_name: str, workers: int) -> Path:
+        """Download a non-DRM stream directly with yt-dlp."""
+        from yt_dlp import YoutubeDL
+
+        output_template = str(self.output_dir / f"{safe_name}.%(ext)s")
+        ydl_opts = {
+            "outtmpl": output_template,
+            "format": "bestvideo+bestaudio/best",
+            "merge_output_format": "mkv",
+            "concurrent_fragment_downloads": workers,
+            "retries": 10,
+            "fragment_retries": 10,
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find output file
+        for ext in ("mkv", "mp4", "webm", "ts"):
+            out = self.output_dir / f"{safe_name}.{ext}"
+            if out.exists():
+                return out
+        return self.output_dir / f"{safe_name}.mkv"
+
+    def download_live(
+        self,
+        mpd_url: str,
+        license_url: str = "",
+        drm_headers: Optional[Dict[str, str]] = None,
+        title: str = "EON.Live",
+        duration: int = 60,
+        player: str = "",
+        play: bool = False,
+    ) -> Path:
+        """Download/record a live stream with optional DRM decryption."""
+        safe_name = safe_filename(title)
+        logger.info(f"=== EON Live Capture: {title} ===")
+        print(f"\n[EON] Starting live capture: {title}")
+        print(f"[EON] Duration: {duration}s")
+
+        if play and player:
+            subprocess.Popen([player, mpd_url])
+        elif play:
+            print(f"[EON] Stream URL for playback: {mpd_url}")
+
+        # Check if DRM
+        mpd_text = fetch_text(mpd_url)
+        drm_present = is_drm_protected(mpd_text)
+
+        if not drm_present:
+            # Non-DRM: use ffmpeg directly
+            ffmpeg = self.bins.get("ffmpeg")
+            if not ffmpeg:
+                raise EonSafeError("ffmpeg is required for live capture")
+            output_file = self.output_dir / f"{safe_name}.ts"
+            cmd = [ffmpeg, "-hide_banner", "-loglevel", "info", "-y",
+                   "-reconnect", "1", "-reconnect_streamed", "1"]
+            if duration > 0:
+                cmd += ["-t", str(duration)]
+            cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(output_file)]
+            print("[EON] Recording non-DRM live stream with ffmpeg...")
+            subprocess.run(cmd)
+            print(f"[EON] ✓ Live capture saved: {output_file}")
+            return output_file
+
+        # DRM live: get keys, download, decrypt, mux
+        print("[EON] Widevine DRM detected on live stream...")
+        keys = self.get_decryption_keys(mpd_url, license_url, drm_headers)
+        print(f"[EON] Got {len(keys)} decryption key(s)")
+
+        # For live, use ffmpeg to capture limited duration of encrypted stream
+        enc_output = self.temp_dir / f"{safe_name}_enc_live.mp4"
+        ffmpeg = self.bins.get("ffmpeg")
+        if not ffmpeg:
+            raise EonSafeError("ffmpeg is required for DRM live capture")
+
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",
+               "-reconnect", "1", "-reconnect_streamed", "1"]
+        if duration > 0:
+            cmd += ["-t", str(duration)]
+        cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(enc_output)]
+        try:
+            print(f"[EON] Capturing encrypted live stream ({duration}s)...")
+            subprocess.run(cmd)
+        except KeyboardInterrupt:
+            print("\n[EON] Snimanje prekinuto od strane korisnika. Pokušavam dešifrovati do sada snimljeni deo...")
+
+        if not enc_output.exists() or enc_output.stat().st_size < 1024:
+            raise EonSafeError("Nema snimljenog materijala ili je snimak premali.")
+
+        # Decrypt
+        print("[EON] Decrypting captured stream...")
+        dec_output = self.decrypt_file(enc_output, keys)
+
+        # Fix and rename
+        fixed = self.fix_with_ffmpeg(dec_output)
+        final = self.output_dir / f"{safe_name}.mp4"
+        shutil.move(str(fixed), str(final))
+
+        self.cleanup(safe_name)
+        print(f"[EON] ✓ Live capture complete: {final}")
+        return final
+
+
+# ---------------------------------------------------------------------------
+# Non-DRM fallback download (for when no keys are needed)
+# ---------------------------------------------------------------------------
+
+def run_yt_dlp(
+    url: str,
+    output_dir: Path,
+    title: str,
+    verbose: bool = False,
+    quality: str = "best",
+    subs: str = "",
+) -> int:
+    """Download a direct media URL using yt-dlp (non-DRM path)."""
+    output_template = str(output_dir / f"{safe_filename(title)}.%(ext)s")
+    cmd = [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--no-part",
+        "--continue",
+        "--retries",
+        "10",
+        "--fragment-retries",
+        "10",
+        "--restrict-filenames",
+        "-f",
+        quality or "best",
+        "-o",
+        output_template,
+        url,
+    ]
+    if subs:
+        cmd[3:3] = ["--write-subs", "--write-auto-subs", "--sub-langs", subs]
+    if verbose:
+        cmd.insert(-1, "--verbose")
+    print("[EON] Downloading with yt-dlp")
+    return subprocess.run(cmd).returncode
+
+
+def run_live_capture(url: str, output_dir: Path, title: str, duration: int, player: str = "", play: bool = False) -> int:
+    """Capture a direct non-DRM live stream with ffmpeg."""
+    if play:
+        if player:
+            subprocess.Popen([player, url])
+        else:
+            print("[EON] --play requested without --player; stream URL:")
+            print(url)
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise EonSafeError("ffmpeg is required for live capture.")
+
+    output_file = output_dir / f"{safe_filename(title)}.ts"
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "info", "-y", "-reconnect", "1", "-reconnect_streamed", "1"]
+    if duration > 0:
+        cmd += ["-t", str(duration)]
+    cmd += ["-i", url, "-c", "copy", str(output_file)]
+    try:
+        print("[EON] Capturing live stream with ffmpeg")
+        return subprocess.run(cmd).returncode
+    except KeyboardInterrupt:
+        print("\n[EON] Snimanje uživo prekinuto od strane korisnika.")
+        if output_file.exists() and output_file.stat().st_size >= 1024:
+            return 0
+        return 1
+
+
+# ---------------------------------------------------------------------------
+# Health / Status
+# ---------------------------------------------------------------------------
+
+def build_health() -> Dict[str, Any]:
+    channels = load_channels()
+    series_catalog = load_series_catalog()
+    vod_catalog = load_vod_catalog()
+
+    # Check CDM availability
+    cdm_ready = False
+    try:
+        cdm = WidevineCDM()
+        cdm_ready = cdm.is_ready()
+    except Exception:
+        pass
+
+    # Check binaries
+    bins = detect_binaries()
+    bins_status = {}
+    for name, path in bins.items():
+        found = bool(shutil.which(path) or Path(path).exists())
+        bins_status[name] = {"found": found, "path": path}
+
+    return {
+        "name": "EON DRM Downloader Engine",
+        "download_supported": True,
+        "message": SAFE_MESSAGE,
+        "device": device_profile_status(),
+        "token": token_status(),
+        "api": api_status(),
+        "cdm_ready": cdm_ready,
+        "binaries": bins_status,
+        "catalog": {
+            "channels": len(channels),
+            "series": len(series_catalog),
+            "vod": len(vod_catalog),
+            "channel_files": [str(path) for path in CHANNEL_CATALOG_FILES],
+            "series_files": [str(path) for path in SERIES_CATALOG_FILES],
+            "vod_files": [str(path) for path in VOD_CATALOG_FILES],
+            "epg_files": [str(path) for path in EPG_CATALOG_FILES],
+        },
+        "capabilities": {
+            "save_device": True,
+            "api_login": True,
+            "api_refresh": True,
+            "api_status": True,
+            "list_channels": True,
+            "epg": True,
+            "search": True,
+            "vod_info": True,
+            "live": True,
+            "vod": True,
+            "series": True,
+            "drm_decryption": cdm_ready,
+            "direct_non_drm": True,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="EON TV Video Downloader with Widevine DRM support.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  # Save device credentials
+  python eon_downloader.py -u user@email.com -p Password --device-serial SERIAL --device-number NUMBER --save-device
+
+  # Health check
+  python eon_downloader.py --health
+
+  # Download DRM-protected VOD
+  python eon_downloader.py --vod "https://example.com/manifest.mpd" --license-url "https://lic.example.com/wv"
+
+  # Download VOD from catalog/API
+  python eon_downloader.py --vod "12345" -v
+
+  # Live stream capture (DRM or non-DRM)
+  python eon_downloader.py --live -c "RTS 1" --duration 120
+
+  # Series download
+  python eon_downloader.py --series "12345" --episodes "1-5"
+
+  # List channels
+  python eon_downloader.py --list-channels
+
+  # Search
+  python eon_downloader.py --search "movie name" --json
+""",
+    )
+    # Account / device
+    parser.add_argument("-u", "--username", help="EON username / email")
+    parser.add_argument("-p", "--password", help="EON password")
+    parser.add_argument("--device-serial", help="EON device serial")
+    parser.add_argument("--device-number", help="EON device number")
+    parser.add_argument("--save-device", action="store_true", help="Save local EON device metadata")
+
+    # Info / status
+    parser.add_argument("--health", action="store_true", help="Print JSON health/capability status")
+    parser.add_argument("--api-status", action="store_true", help="Print configured EON API endpoint/token status")
+    parser.add_argument("--login-api", action="store_true", help="Run configured API login endpoint")
+    parser.add_argument("--refresh-token", action="store_true", help="Run configured refresh endpoint")
+    parser.add_argument("--list-channels", action="store_true", help="List channels")
+    parser.add_argument("--epg", help="Print EPG entries for a channel")
+    parser.add_argument("--search", help="Search VOD catalog/API")
+    parser.add_argument("--vod-info", help="Print VOD metadata")
+    parser.add_argument("--resolve-stream", help="Resolve EON stream (channel name or VOD ID) and output JSON")
+    parser.add_argument("--kind", default="live", help="Kind of target to resolve: live or vod")
+
+    # Download modes
+    parser.add_argument("--live", action="store_true", help="Live stream capture")
+    parser.add_argument("-c", "--channel", help="Live channel name or direct URL")
+    parser.add_argument("--duration", type=int, default=60, help="Live recording duration in seconds (0=until stopped)")
+    parser.add_argument("--play", action="store_true", help="Open stream in player while recording")
+    parser.add_argument("--player", help="Player executable path")
+    parser.add_argument("--vod", help="VOD target (URL, ID, or MPD link)")
+    parser.add_argument("--series", help="Series ID")
+    parser.add_argument("--list-episodes", action="store_true", help="List series episodes")
+    parser.add_argument("--episodes", help="Episode range, e.g. 1-3, 2-, -5, 4")
+
+    # DRM options
+    parser.add_argument("--license-url", help="Widevine DRM license server URL")
+    parser.add_argument("--device-wvd", help="Path to .wvd CDM device file")
+
+    # Output options
+    parser.add_argument("--quality", default="best", help="yt-dlp format selector")
+    parser.add_argument("--subs", default="", help="Subtitle languages, e.g. sr,hr,en or all")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    parser.add_argument("-o", "--output", default="output", help="Output directory")
+    parser.add_argument("-t", "--title", help="Override output filename")
+    parser.add_argument("-w", "--workers", type=int, default=16, help="Concurrent fragment downloads")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    return parser.parse_args()
+
+
+def extract_id_from_url(target: str) -> str:
+    if not target:
+        return ""
+    target = target.strip()
+    # Matches /ondemand/detail/12345 or /series/detail/162073-s1 or similar
+    match = re.search(r"/(?:ondemand|series)/detail/([^/?#]+)", target)
+    if match:
+        return match.group(1)
+    return target
+
+
+def handle_save_device(args: argparse.Namespace) -> int:
+    try:
+        profile = save_device_profile(
+            username=args.username or "",
+            serial=args.device_serial or "",
+            number=args.device_number or "",
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"EON device metadata saved for {profile['username']}.")
+
+    # Automatically trigger API login if password is provided
+    if args.password:
+        print("Performing API login with provided credentials...")
+        try:
+            res = login_api(
+                username=args.username or "",
+                password=args.password,
+                serial=args.device_serial or "",
+                number=args.device_number or "",
+            )
+            if res.get("tokens_saved"):
+                print("API login successful, tokens saved.")
+            else:
+                print("API login executed, but no tokens were extracted.", file=sys.stderr)
+        except Exception as exc:
+            print(f"API login failed: {exc}", file=sys.stderr)
+            return 1
+    return 0
+
+
+
+def handle_list_channels(as_json: bool = False) -> int:
+    channels = load_channels()
+    if as_json:
+        print(json.dumps(channels, indent=2, ensure_ascii=False))
+        return 0
+    if not channels:
+        print("No channels found.")
+        return 0
+    for channel in channels:
+        print(channel["name"])
+    return 0
+
+
+def print_payload(payload: Any, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                label = item.get("title") or item.get("name") or item.get("id") or json.dumps(item, ensure_ascii=False)
+                extra = item.get("id") or item.get("start") or item.get("url") or ""
+                print(f"{label}" + (f" [{extra}]" if extra else ""))
+            else:
+                print(item)
+    elif isinstance(payload, dict):
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        print(payload)
+
+
+def resolve_live_url(channel_or_url: str) -> str:
+    if is_url(channel_or_url):
+        return channel_or_url
+    channel = find_channel(channel_or_url)
+    if channel and channel.get("url"):
+        return channel["url"]
+    resolved = resolve_media_url(channel_or_url, "live")
+    if resolved:
+        return resolved
+    if not channel:
+        raise EonSafeError(f"Channel not found in local catalog: {channel_or_url}")
+    raise EonSafeError(f"Channel has no URL in local catalog: {channel_or_url}")
+
+
+def handle_vod_download(args: argparse.Namespace) -> int:
+    """Handle VOD download with full DRM support."""
+    target = extract_id_from_url(args.vod)
+    output_dir = ensure_output_dir(args.output)
+
+    # Try to resolve stream info from API
+    stream_info = resolve_stream_info(target, "vod")
+    mpd_url = stream_info.get("mpd_url") or target
+    license_url = args.license_url or stream_info.get("license_url", "")
+    drm_headers = stream_info.get("drm_headers", {})
+    title = args.title or stream_info.get("title") or target
+
+    if not is_url(mpd_url):
+        raise EonSafeError(f"Could not resolve media URL for: {target}")
+
+    # Check if the URL is an MPD with DRM
+    try:
+        mpd_text = fetch_text(mpd_url)
+        has_drm = is_drm_protected(mpd_text)
+    except Exception:
+        has_drm = False
+
+    if has_drm and license_url:
+        # Full DRM pipeline
+        downloader = EONDownloader(
+            output_dir=str(output_dir),
+            temp_dir=str(output_dir / "temp"),
+            device_path=args.device_wvd,
+            workers=args.workers,
+        )
+        downloader.download(
+            mpd_url=mpd_url,
+            license_url=license_url,
+            drm_headers=drm_headers,
+            title=title,
+            workers=args.workers,
+        )
+        return 0
+    elif has_drm and not license_url:
+        # DRM detected but no license URL - try to extract from MPD
+        extracted_lic = extract_license_url_from_mpd(mpd_text)
+        if extracted_lic:
+            downloader = EONDownloader(
+                output_dir=str(output_dir),
+                temp_dir=str(output_dir / "temp"),
+                device_path=args.device_wvd,
+                workers=args.workers,
+            )
+            downloader.download(
+                mpd_url=mpd_url,
+                license_url=extracted_lic,
+                drm_headers=drm_headers,
+                title=title,
+                workers=args.workers,
+            )
+            return 0
+        else:
+            print("[EON] DRM detected but no license URL found.", file=sys.stderr)
+            print("[EON] Use --license-url to provide the Widevine license server URL.", file=sys.stderr)
+            return 2
+    else:
+        # Non-DRM: simple download
+        return run_yt_dlp(mpd_url, output_dir, title, args.verbose, args.quality, args.subs)
+
+
+def handle_live_download(args: argparse.Namespace) -> int:
+    """Handle live stream capture with DRM support."""
+    if not args.channel:
+        raise EonSafeError("--live requires -c/--channel")
+
+    output_dir = ensure_output_dir(args.output)
+    live_url = resolve_live_url(args.channel)
+    title = args.title or args.channel
+    license_url = args.license_url or ""
+
+    # Check if DRM
+    try:
+        mpd_text = fetch_text(live_url)
+        has_drm = is_drm_protected(mpd_text)
+    except Exception:
+        has_drm = False
+
+    if has_drm:
+        # Try to get license URL from API or MPD
+        if not license_url:
+            stream_info = resolve_stream_info(args.channel, "live")
+            license_url = stream_info.get("license_url", "")
+        if not license_url:
+            license_url = extract_license_url_from_mpd(mpd_text) or ""
+
+        if license_url:
+            downloader = EONDownloader(
+                output_dir=str(output_dir),
+                temp_dir=str(output_dir / "temp"),
+                device_path=args.device_wvd,
+                workers=args.workers,
+            )
+            downloader.download_live(
+                mpd_url=live_url,
+                license_url=license_url,
+                title=title,
+                duration=args.duration,
+                player=args.player or "",
+                play=args.play,
+            )
+            return 0
+        else:
+            print("[EON] DRM detected but no license URL found.", file=sys.stderr)
+            print("[EON] Use --license-url to provide the Widevine license server URL.", file=sys.stderr)
+            return 2
+    else:
+        return run_live_capture(live_url, output_dir, title, args.duration, args.player or "", args.play)
+
+
+def handle_series(args: argparse.Namespace) -> int:
+    """Handle series download with DRM support."""
+    series_id = extract_id_from_url(args.series or "")
+    episodes = load_series_episodes(series_id)
+    if not episodes:
+        print(f"Series not found in configured API/local catalog: {args.series}", file=sys.stderr)
+        return 1
+
+    if args.list_episodes:
+        if args.json:
+            print(json.dumps(episodes, indent=2, ensure_ascii=False))
+            return 0
+        for index, episode in enumerate(episodes, start=1):
+            print(f"{index}. {episode['title']}")
+        return 0
+
+    output_dir = ensure_output_dir(args.output)
+    selected = parse_episode_selection(args.episodes or "", len(episodes))
+    if not selected:
+        print("No episodes selected.", file=sys.stderr)
+        return 1
+
+    license_url = args.license_url or ""
+    final_code = 0
+
+    for number in selected:
+        episode = episodes[number - 1]
+        title = args.title or f"{args.series}.E{number:02d}.{episode['title']}"
+        ep_url = episode.get("url", "")
+
+        if not ep_url:
+            print(f"[EON] Episode {number} has no URL, skipping", file=sys.stderr)
+            final_code = 1
+            continue
+
+        # Check DRM
+        try:
+            mpd_text = fetch_text(ep_url)
+            has_drm = is_drm_protected(mpd_text)
+        except Exception:
+            has_drm = False
+
+        if has_drm:
+            ep_license = license_url
+            if not ep_license:
+                ep_license = extract_license_url_from_mpd(mpd_text) or ""
+            if not ep_license:
+                stream_info = resolve_stream_info(episode.get("id", ""), "vod")
+                ep_license = stream_info.get("license_url", "")
+
+            if ep_license:
+                try:
+                    downloader = EONDownloader(
+                        output_dir=str(output_dir),
+                        temp_dir=str(output_dir / "temp"),
+                        device_path=args.device_wvd,
+                        workers=args.workers,
+                    )
+                    downloader.download(
+                        mpd_url=ep_url,
+                        license_url=ep_license,
+                        title=title,
+                        workers=args.workers,
+                    )
+                except Exception as exc:
+                    print(f"[EON] Episode {number} failed: {exc}", file=sys.stderr)
+                    final_code = 1
+            else:
+                print(f"[EON] Episode {number} is DRM-protected but no license URL found.", file=sys.stderr)
+                final_code = 2
+        else:
+            code = run_yt_dlp(ep_url, output_dir, title, args.verbose, args.quality, args.subs)
+            if code != 0:
+                final_code = code
+
+    return final_code
+
+
+def main() -> int:
+    args = parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    try:
+        if args.health:
+            print(json.dumps(build_health(), indent=2, ensure_ascii=False))
+            return 0
+
+        if args.api_status:
+            print(json.dumps(api_status(), indent=2, ensure_ascii=False))
+            return 0
+
+        if args.save_device:
+            return handle_save_device(args)
+
+        if args.login_api:
+            if not args.username or not args.password or not args.device_serial or not args.device_number:
+                raise EonSafeError("--login-api requires -u, -p, --device-serial and --device-number")
+            print(json.dumps(login_api(args.username, args.password, args.device_serial, args.device_number), indent=2, ensure_ascii=False))
+            return 0
+
+        if args.refresh_token:
+            print(json.dumps(refresh_api_token(), indent=2, ensure_ascii=False))
+            return 0
+
+        if args.list_channels:
+            return handle_list_channels(args.json)
+
+        if args.search:
+            print_payload(search_vod(args.search), args.json)
+            return 0
+
+        if args.epg:
+            print_payload(get_epg(args.epg), args.json)
+            return 0
+
+        if args.vod_info:
+            print_payload(get_vod_info(args.vod_info), True)
+            return 0
+
+        if args.resolve_stream:
+            print(json.dumps(resolve_stream_info(args.resolve_stream, args.kind), indent=2, ensure_ascii=False))
+            return 0
+
+        if args.series:
+            return handle_series(args)
+
+        if args.live:
+            return handle_live_download(args)
+
+        if args.vod:
+            return handle_vod_download(args)
+
+        print(json.dumps(build_health(), indent=2, ensure_ascii=False))
+        return 0
+
+    except EonSafeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except requests.RequestException as exc:
+        print(f"Network error: {exc}", file=sys.stderr)
+        return 2
+    except EonAuthError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except Exception as exc:
+        logger.exception("Unexpected error")
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

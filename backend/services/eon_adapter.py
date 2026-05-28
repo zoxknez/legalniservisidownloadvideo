@@ -498,3 +498,15 @@ class EonAdapter:
                     cmd += ["--player", player_path.strip()]
 
         return cmd
+
+    @classmethod
+    def resolve_stream(cls, target: str, kind: str = "live") -> Dict[str, Any]:
+        """Resolve a stream (live channel or VOD) using the external EON downloader engine."""
+        cls._require_engine_supported()
+        res = cls._run_engine(["--resolve-stream", target, "--kind", kind])
+        if res.returncode != 0:
+            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to resolve EON stream."))
+        try:
+            return json.loads(res.stdout or "{}")
+        except Exception as e:
+            raise RuntimeError(f"Invalid JSON from resolver: {e}. Output: {res.stdout}")

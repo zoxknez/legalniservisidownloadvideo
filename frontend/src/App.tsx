@@ -76,6 +76,7 @@ interface ServiceStatus {
 interface AppStatus {
   binaries: Record<string, BinaryStatus>;
   output_dir: string;
+  transcode_mode?: string;
   services: Record<string, ServiceStatus>;
   system_metrics?: {
     disk: { total: number; used: number; free: number; percent: number };
@@ -158,6 +159,7 @@ const SERVICE_META = [
   { id: "eon",      label: "EON TV",               icon: Play,         colorClass: "service-eon",      activeBg: "bg-emerald-600",activeGlow: "rgba(16,185,129,0.3)"  },
   { id: "rts",      label: "RTS Planeta",          icon: Radio,        colorClass: "service-rts",      activeBg: "bg-rose-600",   activeGlow: "rgba(244,63,94,0.3)"   },
   { id: "hbo",      label: "HBO Max",              icon: Clapperboard, colorClass: "service-hbo",      activeBg: "bg-purple-600", activeGlow: "rgba(147,51,234,0.3)"  },
+  { id: "iptv",     label: "IPTV Server",          icon: Server,       colorClass: "text-blue-400",    activeBg: "bg-blue-600",   activeGlow: "rgba(59,130,246,0.3)"  },
   { id: "settings", label: "Postavke",             icon: Settings,     colorClass: "text-text-muted",  activeBg: "bg-indigo-600", activeGlow: "rgba(99,102,241,0.3)"  },
 ];
 
@@ -454,6 +456,7 @@ export default function App() {
 
   // Global Config Form State
   const [outputDir, setOutputDir] = useState<string>("");
+  const [transcodeMode, setTranscodeMode] = useState<string>("off");
   const [binariesPaths, setBinariesPaths] = useState<Record<string, string>>({
     ffmpeg: "",
     mkvmerge: "",
@@ -835,6 +838,9 @@ export default function App() {
         const data: AppStatus = await res.json();
         setStatus(data);
         setOutputDir(data.output_dir);
+        if (data.transcode_mode) {
+          setTranscodeMode(data.transcode_mode);
+        }
         const paths: Record<string, string> = {};
         for (const [name, info] of Object.entries(data.binaries)) {
           paths[name] = info.path;
@@ -976,7 +982,11 @@ export default function App() {
       const res = await fetch(`${getApiHost()}/api/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ output_dir: outputDir, binaries: binariesPaths })
+        body: JSON.stringify({ 
+          output_dir: outputDir, 
+          transcode_mode: transcodeMode, 
+          binaries: binariesPaths 
+        })
       });
       if (res.ok) {
         showToast("Podešavanja uspešno sačuvana!");
@@ -3839,6 +3849,139 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}        {/* IPTV SERVER TAB */}
+        {activeTab === "iptv" && (
+          <div key="iptv" className="tab-content">
+            <div className="tab-page-header tab-header-eon mb-6">
+              <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#3b82f6,#2563eb)",boxShadow:"0 0 20px rgba(59,130,246,0.4)"}}>
+                <Server style={{width:24,height:24,color:"white"}} />
+              </div>
+              <div style={{flex:1}}>
+                <h2 className="text-lg font-extrabold text-white mb-1 flex items-center gap-2">
+                  <Server className="w-5 h-5 text-blue-400" /> Kućni IPTV Streaming Centar
+                </h2>
+                <p className="text-xs text-text-muted">
+                  Pretvorite svoj računar u 24/7 lokalni IPTV server za VLC, Kodi, PotPlayer ili Smart TV.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-[10px] font-bold text-emerald-400 tracking-wider uppercase">Online</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Lefty card: Server details */}
+              <div className="md:col-span-2 flex flex-col gap-5">
+                <div className="smart-console-card">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                    <Globe className="w-4 h-4 text-blue-400" /> Pristupna M3U Plejlista
+                  </h3>
+                  <p className="text-xs text-text-muted mb-4 leading-relaxed">
+                    Kopirajte donju adresu i unesite je u svoj omiljeni media plejer (npr. VLC, Kodi ili IPTV aplikaciju na Smart TV-u) za gledanje EON kanala uživo bez preuzimanja!
+                  </p>
+                  
+                  <div className="flex items-center gap-2 bg-black/35 border border-white/10 rounded-xl p-3 mb-4">
+                    <input 
+                      type="text" 
+                      readOnly 
+                      value={`${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}/api/iptv/playlist.m3u`}
+                      className="bg-transparent text-xs text-blue-300 font-mono flex-1 outline-none border-none"
+                    />
+                    <button 
+                      onClick={() => {
+                        const url = `${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}/api/iptv/playlist.m3u`;
+                        navigator.clipboard.writeText(url);
+                        showToast("M3U plejlista kopirana u međuspremnik!");
+                      }}
+                      className="p-1.5 hover:bg-white/10 rounded-lg text-text-muted hover:text-white transition-all flex items-center gap-1"
+                      title="Kopiraj link"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-semibold">Kopiraj</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs text-text-muted bg-white/5 border border-white/5 p-3 rounded-xl">
+                    <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>
+                      FFmpeg radi automatsku transmuksaciju i prilagođavanje u realnom vremenu sa <strong>ultraniskom latencijom</strong>.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Available Channels catalog grid */}
+                <div className="smart-console-card">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                    <List className="w-4 h-4 text-emerald-400" /> Dostupni IPTV Kanali
+                  </h3>
+                  
+                  {eonChannels.length === 0 ? (
+                    <div className="text-center py-6 text-text-muted text-xs">
+                      Nema konfigurisanih kanala. Prijavite se na EON TV tabu za automatsko učitavanje kanala.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {eonChannels.map((channel, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-3 transition-all">
+                          <div className="flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span className="text-xs font-semibold text-white">{channel}</span>
+                          </div>
+                          <a 
+                            href={`${window.location.protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}/api/iptv/stream/eon/${encodeURIComponent(channel)}`}
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 border border-blue-500/20 hover:border-blue-500/40 px-2.5 py-1 rounded-lg bg-blue-500/5 transition-all"
+                          >
+                            <Play className="w-3 h-3 fill-blue-400" /> Pokreni
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Righty column: Instructions / Info card */}
+              <div className="flex flex-col gap-5">
+                <div className="smart-console-card">
+                  <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                    <Tv className="w-4 h-4 text-indigo-400" /> Kako koristiti?
+                  </h3>
+                  <ol className="text-xs text-text-muted flex flex-col gap-3 list-decimal pl-4">
+                    <li>Kopirajte link pristupne M3U plejliste.</li>
+                    <li>Otvorite <strong>VLC Media Player</strong>, pritisnite <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px]">Ctrl+N</kbd> (Mrežni tok).</li>
+                    <li>Nalijepite kopirani link i kliknite <strong>Slušaj/Pusti</strong>.</li>
+                    <li>Svi kanali se pojavljuju u vašoj VLC plejlisti (pritisnite <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px]">Ctrl+L</kbd>).</li>
+                  </ol>
+                </div>
+
+                <div className="smart-console-card">
+                  <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-purple-400" /> Server Statistika
+                  </h3>
+                  <div className="flex flex-col gap-2.5 text-xs text-text-muted">
+                    <div className="flex justify-between">
+                      <span>Protokol:</span>
+                      <span className="font-mono text-white">HLS / MPEG-TS</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Aktivni klijenti:</span>
+                      <span className="font-semibold text-emerald-400">0 (Lokalna mreža)</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Dekodiranje:</span>
+                      <span className="font-semibold text-blue-400">FFmpeg stream copy</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* SETTINGS TAB */}
@@ -3987,6 +4130,24 @@ export default function App() {
                     style={{"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"} as any}
                   />
                   <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
+                </div>
+
+                <div className="mt-2 border-t border-white/[0.04] pt-4">
+                  <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">GPU Hardverska Kompresija (Nakon preuzimanja)</label>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={transcodeMode}
+                      onChange={(e) => setTranscodeMode(e.target.value)}
+                      className="input-premium font-semibold text-xs py-2 px-3 rounded-lg bg-black/45 text-white border border-white/10 outline-none focus:border-indigo-500 focus:shadow-[0_0_10px_rgba(99,102,241,0.25)] transition-all flex-1"
+                    >
+                      <option value="off">Isključeno (Bez automatske kompresije)</option>
+                      <option value="hevc">HEVC / H.265 (Hardware Accelerated - Preporučeno)</option>
+                      <option value="av1">AV1 (Hardware Accelerated - Maksimalna ušteda prostora)</option>
+                    </select>
+                  </div>
+                  <p className="text-[10px] text-text-muted mt-2">
+                    * FFmpeg će automatski detektovati vaš GPU (NVIDIA NVENC, Intel QSV, AMD AMF, Apple Silicon) i komprimovati gotove video fajlove uz **30-50% uštede diska** bez vidljivog gubitka kvaliteta slike.
+                  </p>
                 </div>
 
                 <div className="border-t border-white/[0.04] pt-6">

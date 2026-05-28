@@ -16,6 +16,7 @@ DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / "output")
 
 DEFAULT_CONFIG = {
     "output_dir": DEFAULT_OUTPUT_DIR,
+    "transcode_mode": "off",
     "binaries": {
         "ffmpeg": "ffmpeg",
         "mkvmerge": "mkvmerge",
@@ -113,6 +114,13 @@ class AppConfig:
 
     def set_output_dir(self, path: str):
         self.data["output_dir"] = path
+        self.save()
+
+    def get_transcode_mode(self) -> str:
+        return self.data.get("transcode_mode", "off")
+
+    def set_transcode_mode(self, mode: str):
+        self.data["transcode_mode"] = mode
         self.save()
 
     def set_credential(self, service: str, key: str, value: str):

@@ -983,6 +983,9 @@ class EONDownloader:
                 "-i", str(video_path),
                 "-i", str(audio_path),
                 "-c", "copy",
+                "-async", "1",
+                "-vsync", "-1",
+                "-fflags", "+genpts+igndts",
                 "-movflags", "+faststart",
                 str(output_mp4),
             ]
@@ -1129,7 +1132,7 @@ class EONDownloader:
                    "-reconnect", "1", "-reconnect_streamed", "1"]
             if duration > 0:
                 cmd += ["-t", str(duration)]
-            cmd += ["-i", mpd_url, "-c", "copy", str(output_file)]
+            cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(output_file)]
             print("[EON] Recording non-DRM live stream with ffmpeg...")
             subprocess.run(cmd)
             print(f"[EON] ✓ Live capture saved: {output_file}")
@@ -1150,7 +1153,7 @@ class EONDownloader:
                "-reconnect", "1", "-reconnect_streamed", "1"]
         if duration > 0:
             cmd += ["-t", str(duration)]
-        cmd += ["-i", mpd_url, "-c", "copy", str(enc_output)]
+        cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(enc_output)]
         try:
             print(f"[EON] Capturing encrypted live stream ({duration}s)...")
             subprocess.run(cmd)
@@ -1351,6 +1354,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epg", help="Print EPG entries for a channel")
     parser.add_argument("--search", help="Search VOD catalog/API")
     parser.add_argument("--vod-info", help="Print VOD metadata")
+    parser.add_argument("--resolve-stream", help="Resolve EON stream (channel name or VOD ID) and output JSON")
+    parser.add_argument("--kind", default="live", help="Kind of target to resolve: live or vod")
 
     # Download modes
     parser.add_argument("--live", action="store_true", help="Live stream capture")
@@ -1702,6 +1707,10 @@ def main() -> int:
 
         if args.vod_info:
             print_payload(get_vod_info(args.vod_info), True)
+            return 0
+
+        if args.resolve_stream:
+            print(json.dumps(resolve_stream_info(args.resolve_stream, args.kind), indent=2, ensure_ascii=False))
             return 0
 
         if args.series:

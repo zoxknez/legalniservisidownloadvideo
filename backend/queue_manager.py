@@ -565,6 +565,22 @@ class DownloadQueueManager:
                     item.status = "finished"
                     item.progress = 100.0
                     item.logs.append("\n[✓ Download completed successfully!]")
+                    
+                    # Trigger background HEVC/AV1 hardware-accelerated transcoding!
+                    try:
+                        trans_mode = config.get_transcode_mode()
+                        if trans_mode and trans_mode != "off":
+                            from backend.services.transcoder import find_and_transcode_completed
+                            output_dir_val = None
+                            for idx, part in enumerate(item.cmd):
+                                if part == "-o" and idx + 1 < len(item.cmd):
+                                    output_dir_val = item.cmd[idx + 1]
+                                    break
+                            if not output_dir_val:
+                                output_dir_val = config.get_output_dir()
+                            find_and_transcode_completed(item.title, output_dir_val, trans_mode)
+                    except Exception as trans_err:
+                        logger.error(f"Failed to initiate automatic transcode: {trans_err}")
                 else:
                     item.status = "failed"
                     item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
