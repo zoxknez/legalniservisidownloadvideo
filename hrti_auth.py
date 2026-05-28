@@ -41,6 +41,28 @@ class HRTIAuthState:
     aviion_ref_id: str = ""
 
 
+from requests.adapters import HTTPAdapter
+
+class ChromeTLSAdapter(HTTPAdapter):
+    """Custom HTTPAdapter that forces urllib3 to use a customized SSL Context matching Chrome."""
+    def init_poolmanager(self, *args, **kwargs):
+        import ssl
+        from urllib3.util.ssl_ import create_urllib3_context
+        context = create_urllib3_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
+        try:
+            context.set_ciphers(
+                "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:"
+                "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
+                "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
+                "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
+            )
+        except Exception:
+            pass
+        kwargs["ssl_context"] = context
+        return super().init_poolmanager(*args, **kwargs)
+
 class HRTIAuth:
     """
     Handles HRTI authentication.
@@ -62,6 +84,9 @@ class HRTIAuth:
 
     def __init__(self, config_path: Optional[str] = None):
         self.session = requests.Session()
+        adapter = ChromeTLSAdapter()
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update(self.DEFAULT_HEADERS)
         self.state = HRTIAuthState()
         self.config_path = Path(config_path) if config_path else Path.home() / ".hrti" / "config.json"
