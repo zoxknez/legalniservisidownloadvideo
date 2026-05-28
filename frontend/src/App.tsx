@@ -541,7 +541,7 @@ function DrmPanel() {
   const slBg = sl === 1 ? "rgba(16,185,129,0.12)" : sl === 2 ? "rgba(245,158,11,0.12)" : sl === 3 ? "rgba(99,102,241,0.12)" : "rgba(100,116,139,0.12)";
 
   return (
-    <div key="drm" className="tab-content">
+    <div key="drm" className="tab-content tab-content-drm">
       {/* Header */}
       <div className="tab-page-header mb-6" style={{background:"linear-gradient(135deg,rgba(139,92,246,0.15),rgba(99,102,241,0.08))",border:"1px solid rgba(139,92,246,0.2)",borderRadius:16,padding:"20px 24px",display:"flex",alignItems:"center",gap:16}}>
         <div style={{width:52,height:52,borderRadius:14,background:"linear-gradient(135deg,#7c3aed,#4f46e5)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 24px rgba(124,58,237,0.5)"}}>
@@ -2115,7 +2115,7 @@ export default function App() {
           const previewTheme = smartData ? SVC_THEMES[smartData.service] ?? SVC_THEMES.voyo : null;
 
           return (
-          <div key="dashboard" className="tab-content max-w-5xl mx-auto flex flex-col gap-5">
+          <div key="dashboard" className="tab-content tab-content-dash max-w-5xl mx-auto flex flex-col gap-5">
             {/* Tab header */}
             <div className="tab-page-header tab-header-dash" style={{ padding: "12px 18px", marginBottom: "0px", borderRadius: "14px" }}>
               <div className="tab-page-header-icon" style={{ background: "linear-gradient(135deg,#f59e0b,#d97706)", width: 36, height: 36, borderRadius: 8 }}>
@@ -2716,7 +2716,7 @@ export default function App() {
         })()}
 
         {activeTab === "voyo" && (
-          <div key="voyo" className="tab-content">
+          <div key="voyo" className="tab-content tab-content-voyo">
             <div className="tab-page-header tab-header-voyo mb-8">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#f97316,#ea580c)"}}>
                 <Tv style={{width:24,height:24,color:"white"}} />
@@ -2971,7 +2971,7 @@ export default function App() {
 
         {/* HRTi TAB */}
         {activeTab === "hrti" && (
-          <div key="hrti" className="tab-content">
+          <div key="hrti" className="tab-content tab-content-hrti">
             <div className="tab-page-header tab-header-hrti mb-8">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#06b6d4,#0284c7)"}}>
                 <Film style={{width:24,height:24,color:"white"}} />
@@ -3206,7 +3206,7 @@ export default function App() {
 
         {/* EON TAB */}
         {activeTab === "eon" && (
-          <div key="eon" className="tab-content">
+          <div key="eon" className="tab-content tab-content-eon">
             <div className="tab-page-header tab-header-eon mb-8">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#10b981,#059669)"}}>
                 <Play style={{width:24,height:24,color:"white"}} />
@@ -3861,7 +3861,7 @@ export default function App() {
 
         {/* RTS PLANETA TAB */}
         {activeTab === "rts" && (
-          <div key="rts" className="tab-content">
+          <div key="rts" className="tab-content tab-content-rts">
             <div className="tab-page-header tab-header-rts mb-8">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#f43f5e,#e11d48)"}}>
                 <Radio style={{width:24,height:24,color:"white"}} />
@@ -4031,7 +4031,7 @@ export default function App() {
 
         {/* HBO MAX TAB */}
         {activeTab === "hbo" && (
-          <div key="hbo" className="tab-content">
+          <div key="hbo" className="tab-content tab-content-hbo">
             <div className="tab-page-header tab-header-hbo mb-6">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#9333ea,#7e22ce)"}}>
                 <Clapperboard style={{width:24,height:24,color:"white"}} />
@@ -4322,7 +4322,7 @@ export default function App() {
           </div>
         )}        {/* IPTV SERVER TAB */}
         {activeTab === "iptv" && (
-          <div key="iptv" className="tab-content">
+          <div key="iptv" className="tab-content tab-content-iptv">
             <div className="tab-page-header tab-header-eon mb-6">
               <div className="tab-page-header-icon" style={{background:"linear-gradient(135deg,#3b82f6,#2563eb)",boxShadow:"0 0 20px rgba(59,130,246,0.4)"}}>
                 <Server style={{width:24,height:24,color:"white"}} />
@@ -4462,7 +4462,7 @@ export default function App() {
 
         {/* SETTINGS TAB */}
         {activeTab === "settings" && (
-          <div key="settings" className="tab-content">
+          <div key="settings" className="tab-content tab-content-settings">
             <div className="tab-page-header tab-header-settings mb-8">
               <div className="tab-page-header-icon animate-pulse" style={{background:"linear-gradient(135deg,#6366f1,#4f46e5)"}}>
                 <Settings style={{width:24,height:24,color:"white"}} />
@@ -5151,7 +5151,7 @@ export default function App() {
 
         {/* ABOUT TAB */}
         {activeTab === "about" && (
-          <div key="about" className="tab-content max-w-4xl mx-auto flex flex-col gap-6">
+          <div key="about" className="tab-content tab-content-about max-w-4xl mx-auto flex flex-col gap-6">
             <div className="tab-page-header tab-header-about mb-4" style={{ background: "linear-gradient(135deg, #ec4899, #be185d)" }}>
               <div className="tab-page-header-icon animate-pulse" style={{ background: "rgba(255, 255, 255, 0.15)", width: 40, height: 40, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Info style={{ width: 20, height: 20, color: "white" }} />
