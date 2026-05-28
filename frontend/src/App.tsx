@@ -5182,10 +5182,6 @@ export default function App() {
                   </span>
                 </div>
 
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  Autor i arhitekta o0o0o0o-downloader platforme. Specijalizovan za reverzni inženjering, mrežnu bezbednost, striming tehnologije i DRM dekripciju.
-                </p>
-
                 <div className="w-full border-t border-white/[0.04] pt-4 mt-2">
                   <a
                     href="https://github.com/zoxknez"
@@ -5210,24 +5206,6 @@ export default function App() {
               {/* System Specs & Description */}
               <div className="md:col-span-2 flex flex-col gap-6">
                 
-                {/* App Bio */}
-                <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-3">
-                  <h3 className="font-extrabold text-base text-white border-b border-white/[0.04] pb-2">o0o0o0o-downloader (v2.6.4 Ultimate)</h3>
-                  <p className="text-xs text-text-secondary leading-relaxed m-0">
-                    Sveobuhvatni, visokotehnološki softver za bezbedno preuzimanje i skladištenje video i audio sadržaja sa premijum striming servisa i veb sajtova. Dizajniran sa fokusom na maksimalne performanse, elegantnu estetiku i robusnost u zaobilaženju svih modernih oblika zaštite.
-                  </p>
-                  
-                  <div className="grid grid-cols-2 gap-3.5 mt-2">
-                    <div className="p-3.5 rounded-lg bg-black/40 border border-white/[0.03] text-xs">
-                      <span className="text-text-muted block text-[10px] font-bold uppercase tracking-wider">Aktivna CDM Zaštita</span>
-                      <span className="text-indigo-400 font-extrabold block mt-0.5">Widevine L3 TEE Tretman</span>
-                    </div>
-                    <div className="p-3.5 rounded-lg bg-black/40 border border-white/[0.03] text-xs">
-                      <span className="text-text-muted block text-[10px] font-bold uppercase tracking-wider">Transkodiranje</span>
-                      <span className="text-purple-400 font-extrabold block mt-0.5">Hardware Accelerated (GPU)</span>
-                    </div>
-                  </div>
-                </div>
 
                 {/* Key Technologies */}
                 <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 animate-slide">
