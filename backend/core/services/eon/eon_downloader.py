@@ -41,7 +41,7 @@ from urllib.parse import urlparse
 import requests
 import xmltodict
 
-from eon_auth import (
+from .eon_auth import (
     CONFIG_DIR,
     EonAuthError,
     api_request,
@@ -54,6 +54,14 @@ from eon_auth import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Centralized DRM Manager (shared singleton with key caching, multi-PSSH support)
+try:
+    from backend.services.drm_manager import drm_manager as _drm_manager
+    _USE_CENTRAL_DRM = True
+except ImportError:
+    _USE_CENTRAL_DRM = False
+    _drm_manager = None
 
 APP_ROOT = Path(__file__).resolve().parent
 CHANNEL_CATALOG_FILES = [APP_ROOT / "eon_channels.json", CONFIG_DIR / "eon_channels.json"]
@@ -763,7 +771,13 @@ class EONDownloader:
     ):
         self.output_dir = Path(output_dir)
         self.temp_dir = Path(temp_dir)
-        self.cdm = WidevineCDM(device_path)
+        # Prefer centralized DRM manager (shared singleton with key caching)
+        if _USE_CENTRAL_DRM and _drm_manager and _drm_manager.is_ready():
+            self.cdm = _drm_manager
+            logger.info("[EONDownloader] Using centralized DRM manager (key caching enabled)")
+        else:
+            self.cdm = WidevineCDM(device_path)
+            logger.info("[EONDownloader] Using standalone WidevineCDM")
         self.bins = detect_binaries()
         self.workers = workers
 
@@ -776,7 +790,7 @@ class EONDownloader:
         license_url: str,
         drm_headers: Optional[Dict[str, str]] = None,
     ) -> List[str]:
-        """Fetch MPD, extract PSSH, get Widevine decryption keys."""
+        """Fetch MPD, extract all PSSHs, get Widevine decryption keys via DRM Manager."""
         logger.info(f"Fetching MPD: {mpd_url}")
         mpd_text = fetch_text(mpd_url)
 
@@ -786,11 +800,6 @@ class EONDownloader:
             vbr = streams.get("video_bitrate", 0)
             abr = streams.get("audio_bitrate", 0)
             logger.info(f"Best streams — video: {vbr // 1000}kbps, audio: {abr // 1000}kbps")
-
-        pssh = extract_pssh_from_mpd(mpd_text)
-        if not pssh:
-            raise EonSafeError("Could not find Widevine PSSH in MPD manifest")
-        logger.info(f"PSSH: {pssh[:40]}...")
 
         # If no license URL provided, try to extract from MPD
         if not license_url:
@@ -808,8 +817,21 @@ class EONDownloader:
         if drm_headers:
             lic_headers.update(drm_headers)
 
-        logger.info(f"Fetching decryption keys from: {license_url}")
-        keys = self.cdm.get_keys(pssh, license_url, lic_headers)
+        # Use multi-PSSH via centralized DRM Manager (with key caching)
+        if _USE_CENTRAL_DRM and _drm_manager and hasattr(_drm_manager, 'extract_all_pssh_from_mpd'):
+            pssh_list = _drm_manager.extract_all_pssh_from_mpd(mpd_text)
+            if not pssh_list:
+                raise EonSafeError("Could not find Widevine PSSH in MPD manifest")
+            logger.info(f"Found {len(pssh_list)} PSSH(s). Fetching keys from: {license_url}")
+            keys = _drm_manager.get_keys_multi_pssh(pssh_list, license_url, lic_headers, "eon")
+        else:
+            pssh = extract_pssh_from_mpd(mpd_text)
+            if not pssh:
+                raise EonSafeError("Could not find Widevine PSSH in MPD manifest")
+            logger.info(f"PSSH: {pssh[:40]}...")
+            logger.info(f"Fetching decryption keys from: {license_url}")
+            keys = self.cdm.get_keys(pssh, license_url, lic_headers)
+
         if not keys:
             raise EonSafeError("No CONTENT keys returned from license server")
         for k in keys:

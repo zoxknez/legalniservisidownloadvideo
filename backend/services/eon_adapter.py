@@ -1,27 +1,31 @@
 import importlib.util
-import json
 import logging
 import re
 import shutil
-import subprocess
-import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 from backend.config import config
+from backend.core.services.eon import EONEngine
+from backend.core.services.runner import EON_DOWNLOADER, python_module_cmd
 
 logger = logging.getLogger(__name__)
 CWD = Path(__file__).parent.parent.parent.resolve()
 
-# Cache for EON engine health check — avoid spawning subprocess on every /api/status poll
 _eon_health_cache: Dict[str, Any] = {}
 _eon_health_cache_ts: float = 0.0
-_EON_HEALTH_TTL = 60  # seconds
+_EON_HEALTH_TTL = 60.0
+
+
+def _invalidate_health_cache() -> None:
+    global _eon_health_cache, _eon_health_cache_ts
+    _eon_health_cache = {}
+    _eon_health_cache_ts = 0.0
 
 
 class EonAdapter:
-    SCRIPT_NAME = "eon_downloader.py"
-    SCRIPT_FILES = ("eon_downloader.py", "eon_auth.py")
+    ENGINE_MODULE = EON_DOWNLOADER
     SUPPORTED_MODES = {"vod", "series", "live"}
     REQUIRED_PACKAGES = {
         "requests": "requests",
@@ -32,7 +36,6 @@ class EonAdapter:
         "xmltodict": "xmltodict",
         "pywidevine": "pywidevine",
     }
-    SENSITIVE_FLAGS = {"-p", "--password"}
     CHANNEL_CATALOG = CWD / "eon_channels.json"
     SERIES_CATALOG = CWD / "eon_series.json"
     VOD_CATALOG = CWD / "eon_vod.json"
@@ -45,8 +48,8 @@ class EonAdapter:
     API_CONFIG_EXAMPLE = CWD / "eon_api.example.json"
 
     @classmethod
-    def script_path(cls) -> Path:
-        return CWD / cls.SCRIPT_NAME
+    def _engine_importable(cls) -> bool:
+        return importlib.util.find_spec(cls.ENGINE_MODULE) is not None
 
     @classmethod
     def _package_status(cls) -> Dict[str, Dict[str, Any]]:
@@ -59,20 +62,15 @@ class EonAdapter:
     @classmethod
     def _missing_environment(cls) -> List[str]:
         missing = []
-        for script_file in cls.SCRIPT_FILES:
-            if not (CWD / script_file).exists():
-                missing.append(script_file)
-
+        if not cls._engine_importable():
+            missing.append(cls.ENGINE_MODULE)
         package_status = cls._package_status()
         for _import_name, package_name in cls.REQUIRED_PACKAGES.items():
-            info = package_status.get(package_name, {})
-            if not info.get("found"):
+            if not package_status.get(package_name, {}).get("found"):
                 missing.append(package_name)
-
         binaries = config.check_binaries_status()
         if not binaries.get("ffmpeg", {}).get("found"):
             missing.append("ffmpeg")
-
         return missing
 
     @classmethod
@@ -90,36 +88,16 @@ class EonAdapter:
 
     @classmethod
     def _engine_status(cls) -> Dict[str, Any]:
-        import time
         global _eon_health_cache, _eon_health_cache_ts
         now = time.monotonic()
         if _eon_health_cache and (now - _eon_health_cache_ts) < _EON_HEALTH_TTL:
             return _eon_health_cache
 
-        if not all((CWD / script_file).exists() for script_file in cls.SCRIPT_FILES):
-            result = {"available": False, "download_supported": False, "message": "EON engine files are missing."}
-            _eon_health_cache = result
-            _eon_health_cache_ts = now
-            return result
-
-        try:
-            res = subprocess.run(
-                [sys.executable, str(cls.script_path()), "--health"],
-                cwd=str(CWD),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=10,
-            )
-            if res.returncode != 0:
-                result = {
-                    "available": True,
-                    "download_supported": False,
-                    "message": cls._redact_text(res.stderr or res.stdout or "EON engine health check failed."),
-                }
-            else:
-                payload = json.loads(res.stdout or "{}")
+        if not cls._engine_importable():
+            result = {"available": False, "download_supported": False, "message": "EON engine module is missing."}
+        else:
+            try:
+                payload = EONEngine.health()
                 result = {
                     "available": True,
                     "download_supported": bool(payload.get("download_supported")),
@@ -130,12 +108,13 @@ class EonAdapter:
                     "device": payload.get("device", {}),
                     "token": payload.get("token", {}),
                 }
-        except Exception as exc:
-            result = {
-                "available": True,
-                "download_supported": False,
-                "message": cls._redact_text(str(exc)),
-            }
+            except Exception as exc:
+                result = {
+                    "available": True,
+                    "download_supported": False,
+                    "message": cls._redact_text(str(exc)),
+                }
+
         _eon_health_cache = result
         _eon_health_cache_ts = now
         return result
@@ -149,14 +128,9 @@ class EonAdapter:
         authenticated = bool(username and serial and number)
         missing = cls._missing_environment()
         optional_missing = cls._optional_environment()
-        engine_installed = all((CWD / script_file).exists() for script_file in cls.SCRIPT_FILES)
+        engine_installed = cls._engine_importable()
         engine_status = cls._engine_status()
         engine_download_supported = bool(engine_status.get("download_supported"))
-        package_status = cls._package_status()
-        dependency_ready = not any(
-            not package_status.get(package_name, {}).get("found")
-            for package_name in cls.REQUIRED_PACKAGES.values()
-        )
 
         if not engine_installed:
             error = "EON downloader engine is not installed."
@@ -175,11 +149,14 @@ class EonAdapter:
             "engine_installed": engine_installed,
             "engine_download_supported": engine_download_supported,
             "engine_status": engine_status,
-            "dependency_ready": dependency_ready,
+            "dependency_ready": not any(
+                not cls._package_status().get(p, {}).get("found")
+                for p in cls.REQUIRED_PACKAGES.values()
+            ),
             "username": username,
             "serial": serial,
             "number": number,
-            "script_path": str(cls.script_path()),
+            "engine_module": cls.ENGINE_MODULE,
             "packages": cls._package_status(),
             "missing": missing,
             "optional_missing": optional_missing,
@@ -188,7 +165,6 @@ class EonAdapter:
 
     @classmethod
     def get_auth_status(cls) -> Dict[str, Any]:
-        """Return EON readiness/auth status for the UI."""
         return cls.get_health()
 
     @classmethod
@@ -223,42 +199,27 @@ class EonAdapter:
         }
 
     @classmethod
-    def _require_script(cls):
-        if not cls.script_path().exists():
-            raise FileNotFoundError(
-                f"{cls.SCRIPT_NAME} is missing. Add the EON downloader engine to {CWD}."
-            )
-        auth_path = CWD / "eon_auth.py"
-        if not auth_path.exists():
-            raise FileNotFoundError(
-                f"eon_auth.py is missing. Add the EON auth module to {CWD}."
-            )
+    def _require_engine(cls) -> None:
+        if not cls._engine_importable():
+            raise FileNotFoundError(f"EON engine module '{cls.ENGINE_MODULE}' is not importable.")
 
     @classmethod
-    def _require_ready(cls):
+    def _require_ready(cls) -> None:
         health = cls.get_health()
         if not health["engine_installed"]:
-            missing_scripts = [name for name in cls.SCRIPT_FILES if not (CWD / name).exists()]
-            raise FileNotFoundError(
-                "Missing EON engine files: " + ", ".join(missing_scripts)
-            )
+            raise FileNotFoundError(f"EON engine module '{cls.ENGINE_MODULE}' is not available.")
         if not health.get("engine_download_supported"):
             raise RuntimeError(health.get("error") or "EON engine does not support downloads yet.")
         if not health["authenticated"]:
             raise RuntimeError("EON account/device is not configured.")
         if health["missing"]:
-            raise RuntimeError(
-                "EON environment is incomplete. Missing: " + ", ".join(health["missing"])
-            )
+            raise RuntimeError("EON environment is incomplete. Missing: " + ", ".join(health["missing"]))
 
     @classmethod
-    def _require_engine_supported(cls):
+    def _require_engine_supported(cls) -> None:
         health = cls.get_health()
         if not health["engine_installed"]:
-            missing_scripts = [name for name in cls.SCRIPT_FILES if not (CWD / name).exists()]
-            raise FileNotFoundError(
-                "Missing EON engine files: " + ", ".join(missing_scripts)
-            )
+            raise FileNotFoundError(f"EON engine module '{cls.ENGINE_MODULE}' is not available.")
         if not health.get("engine_download_supported"):
             raise RuntimeError(health.get("error") or "EON engine does not support downloads yet.")
 
@@ -273,26 +234,10 @@ class EonAdapter:
         return re.sub(r"(?i)(--password|-p)\s+\S+", r"\1 ***", text)
 
     @classmethod
-    def _run_engine(cls, args: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
-        cls._require_script()
-        cmd = [sys.executable, str(cls.script_path()), *args]
-        return subprocess.run(
-            cmd,
-            cwd=str(CWD),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-
-    @classmethod
     def save_device(cls, username: str, password: str, serial: str, number: str) -> Dict[str, Any]:
-        """Validate and save EON account/device through the external engine."""
         username = username.strip()
         serial = serial.strip()
         number = number.strip()
-
         if not username or not password or not serial or not number:
             return {"success": False, "error": "Username, password, serial and number are required."}
 
@@ -302,20 +247,28 @@ class EonAdapter:
         )
 
         try:
-            res = cls._run_engine(
-                [
-                    "-u",
-                    username,
-                    "-p",
-                    password,
-                    "--device-serial",
-                    serial,
-                    "--device-number",
-                    number,
-                    "--save-device",
-                ]
-            )
+            cls._require_engine()
+            EONEngine.save_device(username, serial, number)
+            validated = True
+            warning = ""
+            if password:
+                try:
+                    res = EONEngine.api_login(username, password, serial, number)
+                    if not res.get("tokens_saved"):
+                        validated = False
+                        warning = "Device saved, but API login did not persist tokens."
+                except Exception as exc:
+                    validated = False
+                    warning = cls._redact_text(str(exc))
+            _invalidate_health_cache()
+            return {
+                "success": True,
+                "validated": validated,
+                "warning": warning or None,
+                "status": cls.get_health(),
+            }
         except Exception as exc:
+            _invalidate_health_cache()
             return {
                 "success": True,
                 "validated": False,
@@ -323,61 +276,33 @@ class EonAdapter:
                 "status": cls.get_health(),
             }
 
-        if res.returncode != 0:
-            return {
-                "success": True,
-                "validated": False,
-                "warning": cls._redact_text(res.stderr or res.stdout or "EON device was saved locally, but engine validation failed."),
-                "status": cls.get_health(),
-            }
-
-        return {"success": True, "validated": True, "status": cls.get_health()}
-
     @classmethod
     def list_channels(cls) -> List[str]:
-        """List channels via the external EON downloader engine."""
         cls._require_engine_supported()
-        res = cls._run_engine(["--list-channels", "--json"])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to list EON channels."))
-
-        payload = json.loads(res.stdout or "[]")
-        if not isinstance(payload, list):
-            return []
+        channels = EONEngine.list_channels()
         return [
             str(item.get("name") or item.get("title") or item.get("channel") or item)
-            for item in payload
+            for item in channels
             if item
         ]
 
     @classmethod
     def list_episodes(cls, series_id: str) -> List[str]:
-        """List series episodes via the external EON downloader engine."""
         series_id = series_id.strip()
         if not series_id:
             raise ValueError("Series ID is required.")
-
         cls._require_ready()
-        res = cls._run_engine(["--series", series_id, "--list-episodes", "--json"])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to list EON episodes."))
-
-        payload = json.loads(res.stdout or "[]")
-        if not isinstance(payload, list):
-            return []
+        episodes = EONEngine.list_episodes(series_id)
         return [
             str(item.get("title") or item.get("name") or item.get("id") or item)
-            for item in payload
+            for item in episodes
             if item
         ]
 
     @classmethod
     def api_status(cls) -> Dict[str, Any]:
         cls._require_engine_supported()
-        res = cls._run_engine(["--api-status"])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to read EON API status."))
-        return json.loads(res.stdout or "{}")
+        return EONEngine.api_status()
 
     @classmethod
     def api_login(cls, username: str, password: str, serial: str, number: str) -> Dict[str, Any]:
@@ -387,31 +312,16 @@ class EonAdapter:
         if not username or not password or not serial or not number:
             raise ValueError("Username, password, serial and number are required.")
         cls._require_engine_supported()
-        res = cls._run_engine(
-            [
-                "-u",
-                username,
-                "-p",
-                password,
-                "--device-serial",
-                serial,
-                "--device-number",
-                number,
-                "--login-api",
-            ],
-            timeout=60,
-        )
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to run EON API login."))
-        return json.loads(res.stdout or "{}")
+        result = EONEngine.api_login(username, password, serial, number)
+        _invalidate_health_cache()
+        return result
 
     @classmethod
     def refresh_api_token(cls) -> Dict[str, Any]:
         cls._require_engine_supported()
-        res = cls._run_engine(["--refresh-token"], timeout=60)
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to refresh EON API token."))
-        return json.loads(res.stdout or "{}")
+        result = EONEngine.refresh_token()
+        _invalidate_health_cache()
+        return result
 
     @classmethod
     def search_vod(cls, query: str) -> List[Dict[str, Any]]:
@@ -419,11 +329,7 @@ class EonAdapter:
         if not query:
             return []
         cls._require_engine_supported()
-        res = cls._run_engine(["--search", query, "--json"])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to search EON VOD."))
-        payload = json.loads(res.stdout or "[]")
-        return payload if isinstance(payload, list) else []
+        return EONEngine.search(query)
 
     @classmethod
     def get_epg(cls, channel: str) -> List[Dict[str, Any]]:
@@ -431,11 +337,7 @@ class EonAdapter:
         if not channel:
             return []
         cls._require_engine_supported()
-        res = cls._run_engine(["--epg", channel, "--json"])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to fetch EON EPG."))
-        payload = json.loads(res.stdout or "[]")
-        return payload if isinstance(payload, list) else []
+        return EONEngine.epg(channel)
 
     @classmethod
     def get_vod_info(cls, target: str) -> Dict[str, Any]:
@@ -443,11 +345,7 @@ class EonAdapter:
         if not target:
             raise ValueError("VOD target is required.")
         cls._require_engine_supported()
-        res = cls._run_engine(["--vod-info", target])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to fetch EON VOD info."))
-        payload = json.loads(res.stdout or "{}")
-        return payload if isinstance(payload, dict) else {"payload": payload}
+        return EONEngine.vod_info(target)
 
     @staticmethod
     def _normalize_vod_target(target: str) -> str:
@@ -467,7 +365,6 @@ class EonAdapter:
         play: bool = False,
         player_path: str = "",
     ) -> List[str]:
-        """Build a validated command for the external EON downloader engine."""
         mode = mode.strip().lower()
         target = target.strip()
         episodes = episodes.strip()
@@ -483,7 +380,7 @@ class EonAdapter:
 
         cls._require_ready()
 
-        cmd = [sys.executable, str(cls.script_path())]
+        cmd = python_module_cmd(cls.ENGINE_MODULE)
         if mode == "vod":
             cmd += ["--vod", cls._normalize_vod_target(target), "-v", "-o", config.get_output_dir()]
         elif mode == "series":
@@ -496,17 +393,9 @@ class EonAdapter:
                 cmd.append("--play")
                 if player_path.strip():
                     cmd += ["--player", player_path.strip()]
-
         return cmd
 
     @classmethod
     def resolve_stream(cls, target: str, kind: str = "live") -> Dict[str, Any]:
-        """Resolve a stream (live channel or VOD) using the external EON downloader engine."""
         cls._require_engine_supported()
-        res = cls._run_engine(["--resolve-stream", target, "--kind", kind])
-        if res.returncode != 0:
-            raise RuntimeError(cls._redact_text(res.stderr or res.stdout or "Failed to resolve EON stream."))
-        try:
-            return json.loads(res.stdout or "{}")
-        except Exception as e:
-            raise RuntimeError(f"Invalid JSON from resolver: {e}. Output: {res.stdout}")
+        return EONEngine.resolve_stream(target, kind)

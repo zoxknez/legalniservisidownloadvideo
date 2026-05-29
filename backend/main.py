@@ -2,16 +2,24 @@ import os
 import json
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Optional, Any, List
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request, Response
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from pydantic import BaseModel
 
 from backend.config import config, PROJECT_ROOT
 from backend.queue_manager import queue_manager
+from backend.middleware.api_key import ApiKeyMiddleware, is_authorized
+from backend.server_settings import (
+    ensure_api_key,
+    get_api_key,
+    cors_origins,
+    allow_drm_key_export,
+)
 from backend.services.voyo_adapter import VoyoAdapter
 from backend.services.hrti_adapter import HrtiAdapter
 from backend.services.eon_adapter import EonAdapter
@@ -23,26 +31,104 @@ from backend.services.drm_manager import drm_manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Multi-Service Video Downloader API")
 
-# Enable CORS for development (React runs on 5173, FastAPI on 8000)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from backend.credentials_store import migrate_plaintext_config, migrate_legacy_keyring
+
+    api_key = ensure_api_key()
+    if api_key and not os.environ.get("VIDEODOWNLOAD_API_KEY"):
+        logger.info(
+            "API ključ generisan i sačuvan u ~/.videodownload/config.json "
+            "(server.server.api_key). Postavite ga u podešavanjima frontenda ako koristite LAN pristup."
+        )
+    mig = migrate_plaintext_config(config)
+    legacy = migrate_legacy_keyring()
+    if mig.get("migrated") or mig.get("native") or legacy:
+        logger.info(
+            "Lozinke/tokeni premešteni u OS keyring (uklonjeni iz plain-text configa): %s",
+            {**mig, "legacy_keyring": legacy},
+        )
+
+    if not drm_manager.is_ready():
+        try:
+            from backend.wvd_installer import auto_install_wvd
+
+            wvd_result = auto_install_wvd(reload_drm=True)
+            if wvd_result.get("success"):
+                logger.info("device.wvd auto-instaliran pri startu: %s", wvd_result.get("path"))
+        except Exception as exc:
+            logger.debug("WVD auto-instalacija preskočena: %s", exc)
+
+    async def _startup_browser_sync():
+        try:
+            from backend.services.browser_cookies import sync_all_supported_services
+
+            loop = asyncio.get_running_loop()
+            report = await loop.run_in_executor(None, sync_all_supported_services)
+            if any(report.values()):
+                logger.info("Browser sesije sinhronizovane pri startu: %s", report)
+        except Exception as exc:
+            logger.debug("Browser sync pri startu preskočen: %s", exc)
+
+    asyncio.create_task(_startup_browser_sync())
+    logger.info("Initializing background daemons...")
+    scheduler_task = asyncio.create_task(queue_manager.scheduler_daemon_loop())
+    yield
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="Multi-Service Video Downloader API", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ApiKeyMiddleware)
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Initializing background daemons...")
-    asyncio.create_task(queue_manager.scheduler_daemon_loop())
+
+BRIDGE_CORS_PATHS = ("/api/bridge/", "/api/sniffer/detect")
+
+
+@app.middleware("http")
+async def bridge_cors_middleware(request: Request, call_next):
+    """Allow bookmarklets/Tampermonkey from streaming sites to reach localhost bridge."""
+    path = request.url.path
+    if not any(path.startswith(p) for p in BRIDGE_CORS_PATHS):
+        return await call_next(request)
+
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, X-API-Key, Authorization",
+    }
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors_headers)
+
+    response = await call_next(request)
+    for key, value in cors_headers.items():
+        response.headers[key] = value
+    return response
+
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "videodownloadservisi"}
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not is_authorized(websocket):
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
     await queue_manager.register_websocket(websocket)
     try:
         while True:
@@ -132,10 +218,19 @@ async def get_system_status():
 
     metrics = get_system_metrics()
 
+    from backend.credentials_store import all_credential_security_status
+
     return {
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
         "transcode_mode": config.get_transcode_mode(),
+        "server": {
+            "api_key_configured": bool(get_api_key()),
+            "localhost_bypass": os.environ.get("VIDEODOWNLOAD_LOCALHOST_BYPASS", "true").lower()
+            in ("1", "true", "yes", "on"),
+        },
+        "credentials_security": all_credential_security_status(config),
+        "sniffer": config.data.get("sniffer", {"auto_download": True}),
         "services": {
             "voyo":       voyo,
             "hrti":       hrti,
@@ -146,10 +241,18 @@ async def get_system_status():
         "system_metrics": metrics
     }
 
+class SnifferPayload(BaseModel):
+    service: str
+    type: str  # 'manifest' or 'license'
+    url: str
+    headers: Dict[str, str] = None
+    title: str = ""
+
 class ConfigUpdate(BaseModel):
     output_dir: str = None
     transcode_mode: str = None
     binaries: Dict[str, str] = None
+    sniffer: Optional[Dict[str, Any]] = None
 
 @app.post("/api/config")
 def update_config(data: ConfigUpdate):
@@ -160,31 +263,91 @@ def update_config(data: ConfigUpdate):
     if data.binaries:
         for name, path in data.binaries.items():
             config.update_binary_path(name, path)
+    if data.sniffer is not None:
+        config.data.setdefault("sniffer", {}).update(data.sniffer)
+        config.save()
     return {
         "success": True, 
         "output_dir": config.get_output_dir(), 
         "transcode_mode": config.get_transcode_mode(),
-        "binaries": config.data["binaries"]
+        "binaries": config.data["binaries"],
+        "sniffer": config.data.get("sniffer", {}),
     }
-
-class SnifferPayload(BaseModel):
-    service: str
-    type: str  # 'manifest' or 'license'
-    url: str
-    headers: Dict[str, str] = None
-    title: str = ""
 
 @app.post("/api/sniffer/detect")
 async def sniffer_detect(data: SnifferPayload):
     """Receive browser-sniffed resources and broadcast to React clients."""
-    await queue_manager.broadcast_sniffer(
+    from backend.sniffer_service import process_sniffer_event
+
+    return await process_sniffer_event(
+        queue_manager,
         service=data.service,
         sniffer_type=data.type,
         url=data.url,
         headers=data.headers,
-        title=data.title
+        title=data.title,
     )
-    return {"success": True}
+
+
+class BridgeSessionRequest(BaseModel):
+    service: Optional[str] = None
+    session_data: Optional[str] = None
+    batch: Optional[Dict[str, Any]] = None
+    source: str = "bridge"
+    reason: Optional[str] = None
+
+
+@app.post("/api/bridge/session")
+async def bridge_session(req: BridgeSessionRequest):
+    """Tampermonkey / bookmarklet — uvoz sesije bez copy-paste u UI."""
+    from backend.bridge import import_session_payload, imported_service_names
+
+    try:
+        result = import_session_payload(
+            service=req.service,
+            session_data=req.session_data,
+            batch=req.batch,
+            source=req.source or "bridge",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    services = imported_service_names(result)
+    if services:
+        await queue_manager.broadcast_session_import(
+            services=services,
+            message=result.get("message", "Sesija uvezena"),
+            source=req.source or "bridge",
+        )
+    return result
+
+
+@app.post("/api/bridge/sniffer")
+async def bridge_sniffer(data: SnifferPayload):
+    """Alias for Tampermonkey sniffer relay."""
+    from backend.sniffer_service import process_sniffer_event
+
+    return await process_sniffer_event(
+        queue_manager,
+        service=data.service,
+        sniffer_type=data.type,
+        url=data.url,
+        headers=data.headers,
+        title=data.title,
+    )
+
+
+@app.get("/api/bridge/userscript.js")
+def bridge_userscript():
+    """Serve Tampermonkey userscript with configured backend URL."""
+    from backend.bridge import load_userscript
+
+    try:
+        script = load_userscript()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return Response(content=script, media_type="text/javascript; charset=utf-8")
+
 
 class ScheduledRecordingRequest(BaseModel):
     channel_name: str
@@ -240,88 +403,22 @@ class SessionImportRequest(BaseModel):
 @app.post("/api/config/import-session")
 def import_session(req: SessionImportRequest):
     """Import active browser session / token to bypass CAPTCHAs."""
-    service = req.service.strip().lower()
-    data = req.session_data.strip()
+    from backend.session_import import import_session_for_service, try_import_batch
 
+    data = req.session_data.strip()
     if not data:
         raise HTTPException(status_code=400, detail="Podaci o sesiji ne smeju biti prazni.")
 
     try:
-        if service == "voyo":
-            from backend.core.services.voyo.auth import VoyoConfig
-            vcfg = VoyoConfig()
-            token = data
-            if data.startswith("{"):
-                try:
-                    js = json.loads(data)
-                    token = js.get("token") or js.get("secure_streaming_token") or data
-                except:
-                    pass
-            vcfg._cfg["token"] = token
-            vcfg.save()
-            
-            # Sync in-memory cache
-            from backend.services.voyo_adapter import _VOYO_CACHE
-            import time
-            _VOYO_CACHE["token"] = token
-            _VOYO_CACHE["last_check"] = time.time()
-            return {"success": True, "message": "Voyo token uspešno uvezen!"}
+        batch = try_import_batch(data)
+        if batch:
+            return batch
 
-        elif service == "hrti":
-            cfg_path = Path.home() / ".hrti" / "config.json"
-            cfg_path.parent.mkdir(parents=True, exist_ok=True)
-            token = data
-            if data.startswith("{"):
-                try:
-                    js = json.loads(data)
-                    token = js.get("token") or js.get("secure_streaming_token") or data
-                except:
-                    pass
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                json.dump({"token": token}, f, indent=2)
-            return {"success": True, "message": "HRTi token uspešno uvezen!"}
-
-        elif service == "rtsplaneta" or service == "rts":
-            from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaConfig
-            rcfg = RTSPlanetaConfig()
-            token = data
-            if data.startswith("{"):
-                try:
-                    js = json.loads(data)
-                    token = js.get("token") or js.get("secure_streaming_token") or data
-                except:
-                    pass
-            rcfg.config["token"] = token
-            rcfg.config["secure_streaming_token"] = token
-            rcfg.save()
-            return {"success": True, "message": "RTS Planeta token uspešno uvezen!"}
-
-        elif service == "hbomax":
-            token_path = Path.home() / ".hbomax" / "token.json"
-            token_path.parent.mkdir(parents=True, exist_ok=True)
-            if data.startswith("{"):
-                try:
-                    js = json.loads(data)
-                    if "access_token" not in js and "token" in js:
-                        js["access_token"] = js["token"]
-                    if "access_token" in js and isinstance(js["access_token"], str):
-                        js["access_token"] = js["access_token"].replace("Bearer ", "").strip()
-                    with open(token_path, "w", encoding="utf-8") as f:
-                        json.dump(js, f, indent=2)
-                except:
-                    clean_data = data.replace("Bearer ", "").strip()
-                    with open(token_path, "w", encoding="utf-8") as f:
-                        json.dump({"access_token": clean_data}, f, indent=2)
-            else:
-                clean_data = data.replace("Bearer ", "").strip()
-                with open(token_path, "w", encoding="utf-8") as f:
-                    json.dump({"access_token": clean_data}, f, indent=2)
-            config.update_credentials("hbomax", {"token": data})
-            return {"success": True, "message": "HBO Max token uspešno uvezen!"}
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Uvoz sesije nije podržan za servis: {service}")
-
+        service = req.service.strip().lower()
+        result = import_session_for_service(service, data)
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Greška tokom uvoza sesije: {e}")
 
@@ -640,10 +737,13 @@ class HboLoginRequest(BaseModel):
 
 @app.post("/api/hbo/login")
 async def hbo_login(req: HboLoginRequest):
-    script_path = PROJECT_ROOT / "hbomax_downloader.py"
-    if not script_path.exists():
-        config.update_credentials("hbomax", {"token": "mock_token", "market": req.market})
-        return {"success": True, "mock": True}
+    import importlib.util
+    from backend.core.services.runner import HBO_DOWNLOADER
+    if importlib.util.find_spec(HBO_DOWNLOADER) is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"HBO Max engine ({HBO_DOWNLOADER}) nije dostupan.",
+        )
 
     cmd = HboAdapter.make_login_cmd(req.market)
     title = "HBO Max Login Session"
@@ -712,15 +812,58 @@ class SnifferImportRequest(BaseModel):
 @app.post("/api/sniffer/import")
 async def sniffer_import(req: SnifferImportRequest):
     """Import a sniffed resource and broadcast it via WebSocket to the React client."""
+    from backend.sniffer_service import process_sniffer_event
+
     logger.info(f"Imported sniffed resource for {req.service}: {req.type}")
-    await queue_manager.broadcast_sniffer(
+    return await process_sniffer_event(
+        queue_manager,
         service=req.service,
         sniffer_type=req.type,
         url=req.url,
         headers=req.headers,
-        title=req.title or ""
+        title=req.title or "",
     )
-    return {"success": True}
+
+
+class SnifferDownloadRequest(BaseModel):
+    service: str
+    subs: str = "sr,hr,mk,bs,sl"
+
+
+@app.get("/api/sniffer/captures")
+def sniffer_captures():
+    from backend.sniffer_store import sniffer_store
+
+    return {
+        "captures": sniffer_store.list_all(),
+        "auto_download": config.data.get("sniffer", {}).get("auto_download", True),
+    }
+
+
+@app.post("/api/sniffer/download")
+async def sniffer_download(req: SnifferDownloadRequest):
+    """Start download from paired manifest + license for a service."""
+    from backend.sniffer_download import queue_sniffer_download
+    from backend.sniffer_store import sniffer_store
+
+    capture = sniffer_store.get(req.service)
+    if not capture or not capture.is_ready():
+        raise HTTPException(
+            status_code=400,
+            detail="Manifest i/ili license nisu spremni. Pustite video dok je Tampermonkey aktivan.",
+        )
+    try:
+        result = await queue_sniffer_download(queue_manager, capture, subs=req.subs)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    sniffer_store.mark_queued(capture.service, result["task_id"])
+    await queue_manager.broadcast_sniffer_download_queued(
+        service=capture.service,
+        task_id=result["task_id"],
+        title=result["title"],
+        auto=False,
+    )
+    return result
 
 @app.post("/api/config/auto-sync-browser")
 async def auto_sync_browser():
@@ -762,6 +905,60 @@ async def drm_reload():
     await loop.run_in_executor(None, drm_manager.reload)
     report = await loop.run_in_executor(None, drm_manager.get_health_report)
     return {"success": True, "health": report}
+
+
+class WvdBase64InstallRequest(BaseModel):
+    base64: str
+
+
+@app.get("/api/drm/wvd/discover")
+async def wvd_discover():
+    """List valid .wvd files found on disk."""
+    from backend.wvd_installer import discover_wvd_files
+
+    loop = asyncio.get_running_loop()
+    files = await loop.run_in_executor(None, discover_wvd_files)
+    return {"files": files, "canonical": str(Path.home() / ".videodownload" / "device.wvd")}
+
+
+@app.post("/api/drm/wvd/auto-install")
+async def wvd_auto_install():
+    """Copy newest discovered device.wvd to ~/.videodownload/ and reload CDM."""
+    from backend.wvd_installer import auto_install_wvd
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, auto_install_wvd)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Auto-instalacija nije uspela."))
+    health = await loop.run_in_executor(None, drm_manager.get_health_report)
+    return {**result, "health": health}
+
+
+@app.post("/api/drm/wvd/install-base64")
+async def wvd_install_base64(req: WvdBase64InstallRequest):
+    """Install device.wvd from base64 (npr. nakon exporta iz alata)."""
+    from backend.wvd_installer import install_wvd_from_base64
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: install_wvd_from_base64(req.base64))
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Instalacija nije uspela."))
+    health = await loop.run_in_executor(None, drm_manager.get_health_report)
+    return {**result, "health": health}
+
+
+@app.post("/api/drm/wvd/upload")
+async def wvd_upload(file: UploadFile = File(...)):
+    """Upload device.wvd file — validates, installs to canonical path, reloads CDM."""
+    from backend.wvd_installer import install_wvd_bytes
+
+    data = await file.read()
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: install_wvd_bytes(data))
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Upload nije uspeo."))
+    health = await loop.run_in_executor(None, drm_manager.get_health_report)
+    return {**result, "health": health}
 
 @app.post("/api/drm/cache/clear")
 def drm_cache_clear():
@@ -808,6 +1005,11 @@ async def drm_test_keys(req: DrmTestKeysRequest):
     Test Widevine key exchange: fetch MPD, extract all PSSHs, get content keys.
     Returns the decryption keys (kid:key pairs) for diagnostics.
     """
+    if not allow_drm_key_export():
+        raise HTTPException(
+            status_code=403,
+            detail="Izvoz DRM ključeva je onemogućen. Postavite VIDEODOWNLOAD_ALLOW_DRM_KEY_EXPORT=true za dijagnostiku.",
+        )
     if not drm_manager.is_ready():
         raise HTTPException(status_code=503, detail="CDM nije spreman. Dodajte device.wvd fajl.")
 

@@ -29,7 +29,7 @@ import xmltodict
 from yt_dlp import YoutubeDL
 
 # Import our auth module
-from rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
+from .rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
 
 # Disable SSL warnings
 requests.packages.urllib3.disable_warnings()

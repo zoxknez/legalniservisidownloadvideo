@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import base64
 
+from backend.services.tls_client_helper import apply_chrome_fingerprint
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://hrti.hrt.hr/api/api/ott"
@@ -41,27 +43,7 @@ class HRTIAuthState:
     aviion_ref_id: str = ""
 
 
-from requests.adapters import HTTPAdapter
 
-class ChromeTLSAdapter(HTTPAdapter):
-    """Custom HTTPAdapter that forces urllib3 to use a customized SSL Context matching Chrome."""
-    def init_poolmanager(self, *args, **kwargs):
-        import ssl
-        from urllib3.util.ssl_ import create_urllib3_context
-        context = create_urllib3_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.maximum_version = ssl.TLSVersion.TLSv1_3
-        try:
-            context.set_ciphers(
-                "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:"
-                "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:"
-                "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:"
-                "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
-            )
-        except Exception:
-            pass
-        kwargs["ssl_context"] = context
-        return super().init_poolmanager(*args, **kwargs)
 
 class HRTIAuth:
     """
@@ -84,9 +66,7 @@ class HRTIAuth:
 
     def __init__(self, config_path: Optional[str] = None):
         self.session = requests.Session()
-        adapter = ChromeTLSAdapter()
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+        apply_chrome_fingerprint(self.session)
         self.session.headers.update(self.DEFAULT_HEADERS)
         self.state = HRTIAuthState()
         self.config_path = Path(config_path) if config_path else Path.home() / ".hrti" / "config.json"
@@ -123,6 +103,7 @@ class HRTIAuth:
             pass
 
     def save_credentials(self, username: str, password: str):
+        from backend.credentials_store import set_secret
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         cfg = {}
         if self.config_path.exists():
@@ -132,7 +113,7 @@ class HRTIAuth:
             except Exception:
                 pass
         cfg["username"] = username
-        cfg["password"] = password
+        cfg.pop("password", None)
         cfg["device_id"] = self.state.device_id
         with open(self.config_path, "w") as f:
             json.dump(cfg, f, indent=2)
@@ -140,15 +121,18 @@ class HRTIAuth:
             self.config_path.chmod(0o600)
         except Exception:
             pass
+        if password:
+            set_secret("hrti", "password", password)
         logger.info(f"Credentials saved to {self.config_path}")
 
     def get_stored_credentials(self):
+        from backend.credentials_store import get_secret
         if self.config_path.exists():
             try:
                 with open(self.config_path) as f:
                     cfg = json.load(f)
                 u = cfg.get("username", "")
-                p = cfg.get("password", "")
+                p = get_secret("hrti", "password") or cfg.get("password", "")
                 if u and p:
                     return u, p
             except Exception:

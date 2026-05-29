@@ -437,23 +437,29 @@ class VoyoConfig:
             pass
 
     def set_credentials(self, email: str, password: str, device_id: str = ''):
+        from backend.credentials_store import set_secret
         self._cfg.update({
-            'email':     email,
-            'password':  password,
-            'device_id': device_id or str(uuid.uuid4()),
+            'email': email,
+            'device_id': device_id or self._cfg.get('device_id') or str(uuid.uuid4()),
         })
+        self._cfg.pop('password', None)
         self.save()
+        if password:
+            set_secret('voyo', 'password', password)
 
     def get_credentials(self) -> Tuple[str, str, str]:
         """Returns (email, password, device_id)"""
+        from backend.credentials_store import get_secret
+        password = get_secret('voyo', 'password') or self._cfg.get('password', '')
         return (
-            self._cfg.get('email',     ''),
-            self._cfg.get('password',  ''),
+            self._cfg.get('email', ''),
+            password,
             self._cfg.get('device_id', ''),
         )
 
     def has_credentials(self) -> bool:
-        return bool(self._cfg.get('email') and self._cfg.get('password'))
+        email, password, _ = self.get_credentials()
+        return bool(email and password)
 
     def update_device_id(self, device_id: str):
         self._cfg['device_id'] = device_id

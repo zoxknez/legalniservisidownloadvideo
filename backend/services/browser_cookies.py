@@ -258,27 +258,18 @@ def sync_all_supported_services() -> Dict[str, bool]:
 
     # 3. Voyo RS
     voyo_cookies = extracted.get("voyo.rs", [])
-    # Chrome might store Voyo session tokens under specific names.
-    # Note: Voyo primarily uses localStorage, but if there's any cookie-based fallback, we catch it.
     if voyo_cookies:
         cookie_dict = {c["name"]: c["value"] for c in voyo_cookies if c["value"]}
         voyo_token = cookie_dict.get("token") or cookie_dict.get("s")
         if voyo_token:
-            voyo_cfg_path = Path.home() / ".voyo" / "config.json"
-            voyo_cfg_path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                # Keep existing credentials if they exist, only update token
-                cfg = {}
-                if voyo_cfg_path.exists():
-                    with open(voyo_cfg_path) as f:
-                        cfg = json.load(f)
-                cfg["token"] = voyo_token
-                with open(voyo_cfg_path, "w") as f:
-                    json.dump(cfg, f, indent=2)
+                from backend.credentials_store import set_secret
+
+                set_secret("voyo", "token", voyo_token)
                 sync_report["voyo.rs"] = True
-                logger.info("✓ Voyo RS session token auto-synced successfully!")
+                logger.info("✓ Voyo RS session token auto-synced (keyring)!")
             except Exception as e:
-                logger.error(f"Failed to write Voyo config: {e}")
+                logger.error(f"Failed to store Voyo token: {e}")
 
     # 4. HRTi
     hrti_cookies = extracted.get("hrti.hrt.hr", [])
@@ -286,20 +277,14 @@ def sync_all_supported_services() -> Dict[str, bool]:
         cookie_dict = {c["name"]: c["value"] for c in hrti_cookies if c["value"]}
         hrti_token = cookie_dict.get("token") or cookie_dict.get("Authorization")
         if hrti_token:
-            hrti_cfg_path = Path.home() / ".hrti" / "config.json"
-            hrti_cfg_path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                cfg = {}
-                if hrti_cfg_path.exists():
-                    with open(hrti_cfg_path) as f:
-                        cfg = json.load(f)
-                cfg["token"] = hrti_token.replace("Client ", "")
-                with open(hrti_cfg_path, "w") as f:
-                    json.dump(cfg, f, indent=2)
+                from backend.credentials_store import set_secret
+
+                set_secret("hrti", "token", hrti_token.replace("Client ", ""))
                 sync_report["hrti.hrt.hr"] = True
-                logger.info("✓ HRTi session token auto-synced successfully!")
+                logger.info("✓ HRTi session token auto-synced (keyring)!")
             except Exception as e:
-                logger.error(f"Failed to write HRTi config: {e}")
+                logger.error(f"Failed to store HRTi token: {e}")
 
     return sync_report
 

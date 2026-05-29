@@ -11,3 +11,9 @@ temp_user_msg.txt
 extracted_*.txt
 *.db
 *.log
+.env
+.venv/
+venv/
+__pycache__/
+node_modules/
+frontend/dist/

@@ -35,7 +35,17 @@ import requests
 import xmltodict
 from yt_dlp import YoutubeDL
 
-from hrti_auth import HRTIAuth
+from .hrti_auth import HRTIAuth
+
+# Use centralized DRM Manager (shared singleton with key caching, WVD diagnostics, multi-PSSH)
+try:
+    import sys, os
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from backend.services.drm_manager import drm_manager as _drm_manager
+    _USE_CENTRAL_DRM = True
+except ImportError:
+    _USE_CENTRAL_DRM = False
+    _drm_manager = None
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +53,12 @@ LICENSE_URL = "https://lic.drmtoday.com/license-proxy-widevine/cenc/"
 
 
 # ---------------------------------------------------------------------------
-# Widevine CDM wrapper (identical pattern to rtsplaneta)
+# Fallback WidevineCDM (used only if backend DRM Manager is unavailable)
 # ---------------------------------------------------------------------------
 
 class WidevineCDM:
+    """Standalone CDM wrapper used when backend.services.drm_manager is not importable."""
+
     def __init__(self, device_path: Optional[str] = None):
         self.device_path = device_path
         self.cdm = None
@@ -81,7 +93,6 @@ class WidevineCDM:
             from pywidevine.cdm import Cdm
             from pywidevine.device import Device
             from pywidevine.pssh import PSSH
-
             self.PSSH = PSSH
             device_file = self._find_device_file()
             if device_file:
@@ -102,27 +113,28 @@ class WidevineCDM:
         except ImportError as e:
             raise RuntimeError(f"pywidevine not installed: {e}")
 
-    def get_keys(self, pssh_b64: str, license_url: str, headers: dict) -> List[str]:
+    def is_ready(self) -> bool:
+        return self.cdm is not None or self.legacy_mode
+
+    def get_keys(self, pssh_b64: str, license_url: str, headers: dict, service_name: str = "") -> List[str]:
         if self.legacy_mode:
             return self._get_keys_legacy(pssh_b64, license_url, headers)
         return self._get_keys_modern(pssh_b64, license_url, headers)
 
     def _unwrap_license(self, resp: requests.Response) -> bytes:
-        """
-        DRMtoday returns: {"status":"OK","license":"<base64_protobuf>"}
-        Extract and decode the license field.
-        """
         try:
             j = resp.json()
             if j.get("status") == "OK" and "license" in j:
                 return base64.b64decode(j["license"])
-            # Fallback: any known field name
-            for field in ("license", "ckc", "message", "licenseData"):
+            for field in ("license", "ckc", "message", "licenseData",
+                          "license_data", "widevine_license", "LicenseMessage"):
                 if field in j:
-                    return base64.b64decode(j[field])
+                    try:
+                        return base64.b64decode(j[field])
+                    except Exception:
+                        continue
         except Exception:
             pass
-        # Already raw protobuf
         return resp.content
 
     def _get_keys_modern(self, pssh_b64: str, license_url: str, headers: dict) -> List[str]:
@@ -132,17 +144,11 @@ class WidevineCDM:
         session_id = self.cdm.open()
         try:
             challenge = self.cdm.get_license_challenge(session_id, pssh)
-            resp = requests.post(license_url, data=challenge, headers=headers)
+            resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
             resp.raise_for_status()
-
             logger.debug(f"License response: CT={resp.headers.get('Content-Type')} "
-                         f"size={len(resp.content)}B "
-                         f"first_bytes={resp.content[:8].hex()}")
-
+                         f"size={len(resp.content)}B first_bytes={resp.content[:8].hex()}")
             license_bytes = self._unwrap_license(resp)
-            logger.debug(f"Unwrapped license: size={len(license_bytes)}B "
-                         f"first_bytes={license_bytes[:8].hex()}")
-
             self.cdm.parse_license(session_id, license_bytes)
             keys = []
             for key in self.cdm.get_keys(session_id):
@@ -158,7 +164,7 @@ class WidevineCDM:
             try:
                 wvd = WvDecrypt(init_data_b64=pssh_b64.encode(), cert_data_b64=None)
                 challenge = wvd.get_challenge()
-                resp = requests.post(license_url, data=challenge, headers=headers)
+                resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
                 resp.raise_for_status()
                 wvd.update_license(base64.b64encode(resp.content))
                 success, keys = wvd.start_process()
@@ -286,7 +292,13 @@ class HRTIDownloader:
         self.output_dir = Path(output_dir)
         self.temp_dir = Path(temp_dir)
         self.auth = HRTIAuth()
-        self.cdm = WidevineCDM(device_path)
+        # Prefer centralized DRM manager (shared singleton with key caching)
+        if _USE_CENTRAL_DRM and _drm_manager and _drm_manager.is_ready():
+            self.cdm = _drm_manager
+            logger.info("[HRTIDownloader] Using centralized DRM manager (key caching enabled)")
+        else:
+            self.cdm = WidevineCDM(device_path)
+            logger.info("[HRTIDownloader] Using standalone WidevineCDM")
         self.bins = detect_binaries()
         self.workers = workers
 
@@ -329,7 +341,7 @@ class HRTIDownloader:
         license_url: str,
         drm_headers: Dict[str, str],
     ) -> List[str]:
-        """Fetch MPD, extract PSSH, get Widevine decryption keys."""
+        """Fetch MPD, extract all PSSHs, get Widevine decryption keys via DRM Manager."""
         logger.info(f"Fetching MPD: {mpd_url}")
         resp = requests.get(mpd_url, timeout=30)
         resp.raise_for_status()
@@ -342,19 +354,23 @@ class HRTIDownloader:
             abr = streams.get("audio_bitrate", 0)
             logger.info(f"Best streams — video: {vbr//1000}kbps, audio: {abr//1000}kbps")
 
-        pssh = extract_pssh_from_mpd(mpd_text)
-        if not pssh:
-            raise Exception("Could not find Widevine PSSH in MPD")
-        logger.info(f"PSSH: {pssh[:40]}...")
+        lic_headers = {"Content-Type": "application/octet-stream", **drm_headers}
 
-        # License request headers — content-type must NOT be set for raw challenge
-        lic_headers = {
-            "Content-Type": "application/octet-stream",
-            **drm_headers,
-        }
+        # Use multi-PSSH if centralized DRM manager, else single PSSH fallback
+        if _USE_CENTRAL_DRM and _drm_manager and hasattr(_drm_manager, 'extract_all_pssh_from_mpd'):
+            pssh_list = _drm_manager.extract_all_pssh_from_mpd(mpd_text)
+            if not pssh_list:
+                raise Exception("Could not find Widevine PSSH in MPD")
+            logger.info(f"Found {len(pssh_list)} PSSH(s). Fetching keys from DRMtoday...")
+            keys = _drm_manager.get_keys_multi_pssh(pssh_list, license_url, lic_headers, "hrti")
+        else:
+            pssh = extract_pssh_from_mpd(mpd_text)
+            if not pssh:
+                raise Exception("Could not find Widevine PSSH in MPD")
+            logger.info(f"PSSH: {pssh[:40]}...")
+            logger.info("Fetching decryption keys from DRMtoday...")
+            keys = self.cdm.get_keys(pssh, license_url, lic_headers, "hrti")
 
-        logger.info("Fetching decryption keys from DRMtoday...")
-        keys = self.cdm.get_keys(pssh, license_url, lic_headers)
         if not keys:
             raise Exception("No CONTENT keys returned from license server")
         for k in keys:

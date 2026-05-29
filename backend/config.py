@@ -1,10 +1,10 @@
 import json
 import logging
 import shutil
-import platform
 from pathlib import Path
 from typing import Dict, Any
-import keyring
+
+logger = logging.getLogger(__name__)
 
 # Bug 4 Fix: Dynamic project root instead of hardcoded absolute paths
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -17,6 +17,9 @@ DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / "output")
 DEFAULT_CONFIG = {
     "output_dir": DEFAULT_OUTPUT_DIR,
     "transcode_mode": "off",
+    "server": {
+        "api_key": ""
+    },
     "binaries": {
         "ffmpeg": "ffmpeg",
         "mkvmerge": "mkvmerge",
@@ -30,6 +33,9 @@ DEFAULT_CONFIG = {
         "hbomax": {"market": "emea", "token": ""},
         "rtsplaneta": {"email": "", "password": ""},
         "hrti": {"email": "", "password": ""}
+    },
+    "sniffer": {
+        "auto_download": True
     }
 }
 
@@ -90,12 +96,12 @@ class AppConfig:
             print(f"Failed to save config: {e}")
 
     def update_credentials(self, service: str, creds: Dict[str, str]):
-        if service in self.data["credentials"]:
-            self.data["credentials"][service].update(creds)
-            self.save()
+        from backend.credentials_store import save_service_credentials
+        save_service_credentials(service, creds, config_module=self)
 
     def get_credentials(self, service: str) -> Dict[str, str]:
-        return self.data["credentials"].get(service, {})
+        from backend.credentials_store import get_service_credentials
+        return get_service_credentials(service, config_module=self)
 
     def update_binary_path(self, binary_name: str, path: str):
         if binary_name in self.data["binaries"]:
@@ -124,24 +130,11 @@ class AppConfig:
         self.save()
 
     def set_credential(self, service: str, key: str, value: str):
-        """Store a single credential securely using keyring and update JSON cache."""
-        try:
-            keyring.set_password(f"{service}_{key}", "videodownloadservisi", value)
-            # also keep a copy in the json config for fallback/display
-            self.update_credentials(service, {key: value})
-        except Exception as e:
-            logger.error(f"Failed to store credential for {service}:{key}: {e}")
+        """Store a single credential field (secrets go to OS keyring)."""
+        self.update_credentials(service, {key: value})
 
     def get_credential(self, service: str, key: str) -> str:
-        """Retrieve a credential from keyring; fallback to JSON if missing."""
-        try:
-            val = keyring.get_password(f"{service}_{key}", "videodownloadservisi")
-            if val:
-                return val
-        except Exception as e:
-            logger.error(f"Failed to get credential for {service}:{key}: {e}")
-        # fallback to JSON config cache
-        return self.data.get("credentials", {}).get(service, {}).get(key, "")
+        return self.get_credentials(service).get(key, "")
 
     def check_binaries_status(self) -> Dict[str, Any]:
         status = {}

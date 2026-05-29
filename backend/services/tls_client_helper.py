@@ -5,7 +5,7 @@ from urllib3.util.ssl_ import create_urllib3_context
 
 logger = logging.getLogger("TLSClientHelper")
 
-# Chrome 120 standard cipher suites for TLS 1.2 and TLS 1.3
+# Chrome 131 cipher suite order (TLS 1.2 + 1.3)
 CHROME_CIPHERS = (
     "TLS_AES_128_GCM_SHA256:"
     "TLS_AES_256_GCM_SHA384:"
@@ -51,14 +51,26 @@ def apply_chrome_fingerprint(session):
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     
-    # Standard Chrome 120 headers
     session.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         ),
-        "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
     })
+
+
+def apply_curl_cffi_session(impersonate: str = "chrome131"):
+    """
+    Preferred TLS client when curl_cffi is installed (JA3 fingerprint match).
+    Returns a requests-like session or None.
+    """
+    try:
+        from curl_cffi import requests as cffi_requests
+        return cffi_requests.Session(impersonate=impersonate)
+    except ImportError:
+        logger.debug("curl_cffi not installed; using urllib3 ChromeTLSAdapter")
+        return None

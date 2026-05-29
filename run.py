@@ -5,6 +5,17 @@ import subprocess
 import webbrowser
 import socket
 import logging
+from pathlib import Path
+
+# Load optional .env from project root
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Launcher")

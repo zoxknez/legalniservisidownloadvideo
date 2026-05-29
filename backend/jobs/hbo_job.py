@@ -1,0 +1,82 @@
+"""In-process HBO Max download/login jobs."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List
+
+from backend.config import config
+from backend.core.services.hbomax.hbomax_auth import HBOMaxAuth
+from backend.core.services.hbomax.hbomax_downloader import HBOMaxDownloader
+from backend.jobs.inprocess import LogFn, capture_job_output
+
+
+def _parse_subs(raw: str) -> List[str]:
+    subs_raw = (raw or "").strip().lower()
+    if subs_raw in ("none", "no", ""):
+        return ["none"]
+    return [s.strip() for s in subs_raw.split(",") if s.strip()]
+
+
+def _device_path() -> str:
+    wvd = config.check_binaries_status().get("device_wvd", {})
+    path = wvd.get("path", "")
+    if path and Path(path).exists():
+        return path
+    return ""
+
+
+def _build_downloader(market: str, workers: int = 16) -> HBOMaxDownloader:
+    bins = config.check_binaries_status()
+    dl = HBOMaxDownloader(
+        market=market,
+        output_dir=config.get_output_dir(),
+        device_path=_device_path(),
+        workers=workers,
+    )
+    mp4 = bins.get("mp4decrypt", {}).get("path")
+    mkv = bins.get("mkvmerge", {}).get("path")
+    if mp4:
+        dl.mp4decrypt_path = mp4
+    if mkv:
+        dl.mkvmerge_path = mkv
+    return dl
+
+
+def run_hbo_job(action: str, params: Dict[str, Any], log_fn: LogFn) -> bool:
+    market = (params.get("market") or config.get_credentials("hbomax").get("market") or "emea").strip()
+    workers = int(params.get("workers") or 16)
+
+    with capture_job_output(log_fn, ["HBOMaxDownloader", "backend.core.services.hbomax", ""]):
+        if action == "login":
+            config.update_credentials("hbomax", {"market": market})
+            auth = HBOMaxAuth(market=market)
+            auth.login()
+            log_fn("INFO HBO Max login završen — token sačuvan.")
+            return True
+
+        auth = HBOMaxAuth(market=market)
+        if not auth.is_authenticated():
+            raise RuntimeError(
+                "Niste prijavljeni na HBO Max. Pokrenite login iz UI-a prije preuzimanja."
+            )
+
+        dl = _build_downloader(market, workers)
+        wanted_subs = _parse_subs(params.get("subs", "sr,hr,mk,bs,sl"))
+
+        if action == "video":
+            video_id = str(params.get("video_id", "")).strip()
+            if not video_id:
+                raise RuntimeError("video_id je obavezan.")
+            dl.download(video_id, wanted_subs)
+            return True
+
+        if action == "direct":
+            manifest = str(params.get("manifest_url", "")).strip()
+            license_url = str(params.get("license_url", "")).strip()
+            title = str(params.get("title") or "").strip()
+            if not manifest or not license_url:
+                raise RuntimeError("manifest_url i license_url su obavezni.")
+            dl.download_direct(manifest, license_url, title, wanted_subs)
+            return True
+
+        raise RuntimeError(f"Unknown HBO job action: {action}")

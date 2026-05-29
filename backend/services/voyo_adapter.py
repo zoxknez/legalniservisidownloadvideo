@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from pathlib import Path
 
 from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
+from backend.jobs.inprocess import build_job
 from backend.config import config
 
 logger = logging.getLogger(__name__)
@@ -152,29 +153,21 @@ class VoyoAdapter:
 
     @staticmethod
     def make_download_cmd(target: str, mode: str, episodes_range: str = "", resolution: str = "1080p") -> List[str]:
-        """Build command to run voyo_downloader.py."""
-        output_dir = config.get_output_dir()
-        
+        """Queue an in-process Voyo download job."""
         import re
-        is_url = bool(re.match(r"^https?://", target.strip(), re.IGNORECASE))
-        
-        cmd = ["python", "voyo_downloader.py"]
+        target = target.strip()
+        is_url = bool(re.match(r"^https?://", target, re.IGNORECASE))
+        params: Dict[str, Any] = {
+            "target": target,
+            "resolution": resolution,
+            "output_dir": config.get_output_dir(),
+        }
+        if mode == "series":
+            params["episodes"] = episodes_range.strip()
+            return build_job("voyo", "series", params)
         if is_url:
-            cmd.append(target.strip())
-        else:
-            if mode == "series":
-                cmd += ["--series", target.strip()]
-            else:
-                cmd += ["--video", target.strip()]
-                
-        if mode == "series" and episodes_range and episodes_range.strip():
-            cmd += ["--episodes", episodes_range.strip()]
-            
-        cmd += ["-o", output_dir]
-        if resolution:
-            cmd += ["--resolution", resolution]
-            
-        return cmd
+            return build_job("voyo", "url" if mode != "video" else "video", params)
+        return build_job("voyo", "video", params)
 
     @staticmethod
     def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:

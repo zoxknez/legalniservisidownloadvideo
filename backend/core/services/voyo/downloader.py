@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from voyo_auth import VoyoAuth, VoyoConfig
+from .auth import VoyoAuth, VoyoConfig
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',

@@ -416,21 +416,27 @@ class RTSPlanetaConfig:
             pass
     
     def set_credentials(self, username: str, password: str):
-        """Store credentials"""
+        """Store credentials (password in OS keyring only)."""
+        from backend.credentials_store import set_secret
         self.config['username'] = username
-        self.config['password'] = password
+        self.config.pop('password', None)
         self.save()
-    
+        if password:
+            set_secret('rtsplaneta', 'password', password)
+
     def get_credentials(self) -> tuple:
         """Get stored credentials"""
+        from backend.credentials_store import get_secret
+        password = get_secret('rtsplaneta', 'password') or self.config.get('password', '')
         return (
             self.config.get('username', ''),
-            self.config.get('password', '')
+            password,
         )
-    
+
     def has_credentials(self) -> bool:
         """Check if credentials are stored"""
-        return bool(self.config.get('username') and self.config.get('password'))
+        username, password = self.get_credentials()
+        return bool(username and password)
 
 
 # Example usage and test

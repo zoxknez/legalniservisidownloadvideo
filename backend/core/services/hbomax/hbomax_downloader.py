@@ -47,7 +47,7 @@ from urllib.parse import urlparse
 import requests
 import xmltodict
 
-from hbomax_auth import HBOMaxAuth, load_token, save_token
+from .hbomax_auth import HBOMaxAuth, load_token, save_token
 
 try:
     from curl_cffi import requests as cffi_requests

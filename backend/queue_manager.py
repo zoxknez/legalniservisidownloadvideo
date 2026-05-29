@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import uuid
 import time
@@ -24,6 +25,18 @@ DOWNLOAD_TIMEOUT = 3600  # 1 hour
 
 def redact_command(cmd: List[str]) -> str:
     """Redact sensitive information from command."""
+    if cmd and cmd[0] == "@inprocess":
+        try:
+            import json
+            payload = json.loads(cmd[1])
+            params = payload.get("params") or {}
+            safe = dict(params)
+            for key in ("password", "token", "access_token"):
+                if key in safe:
+                    safe[key] = "***"
+            return f"@inprocess {payload.get('service')}:{payload.get('action')} {safe}"
+        except Exception:
+            return "@inprocess [job]"
     redacted = []
     mask_next = False
     for part in cmd:
@@ -331,6 +344,68 @@ class DownloadQueueManager:
         for ws in disconnected:
             self.unregister_websocket(ws)
 
+    async def broadcast_sniffer_ready(self, service: str, capture: Dict):
+        if not self.active_websockets:
+            return
+        payload = {"type": "sniffer_ready", "data": {"service": service, "capture": capture}}
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
+    async def broadcast_sniffer_download_queued(
+        self,
+        service: str,
+        task_id: str,
+        title: str,
+        *,
+        auto: bool = False,
+    ):
+        if not self.active_websockets:
+            return
+        payload = {
+            "type": "sniffer_download_queued",
+            "data": {"service": service, "task_id": task_id, "title": title, "auto": auto},
+        }
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
+    async def broadcast_session_import(
+        self,
+        services: List[str],
+        message: str = "",
+        source: str = "bridge",
+    ):
+        """Notify UI that browser/Tampermonkey imported session tokens."""
+        if not self.active_websockets:
+            return
+        payload = {
+            "type": "session_imported",
+            "data": {
+                "services": services,
+                "message": message,
+                "source": source,
+            },
+        }
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
     async def broadcast_scheduled(self):
         """Broadcast all scheduled recordings to all connected clients."""
         if not self.active_websockets:
@@ -452,16 +527,8 @@ class DownloadQueueManager:
                         logger.error(f"Error terminating process: {e}")
                 
                 # Retrieve output folder for cleanup
-                output_dir = None
-                try:
-                    for idx, part in enumerate(item.cmd):
-                        if part == "-o" and idx + 1 < len(item.cmd):
-                            output_dir = item.cmd[idx + 1]
-                            break
-                except Exception:
-                    pass
-                if not output_dir:
-                    output_dir = config.get_output_dir()
+                from backend.jobs.inprocess import get_output_dir_from_cmd
+                output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
                 
                 # Perform cleanup of temporary fragments
                 clean_temp_files(item.title, output_dir)
@@ -571,13 +638,8 @@ class DownloadQueueManager:
                         trans_mode = config.get_transcode_mode()
                         if trans_mode and trans_mode != "off":
                             from backend.services.transcoder import find_and_transcode_completed
-                            output_dir_val = None
-                            for idx, part in enumerate(item.cmd):
-                                if part == "-o" and idx + 1 < len(item.cmd):
-                                    output_dir_val = item.cmd[idx + 1]
-                                    break
-                            if not output_dir_val:
-                                output_dir_val = config.get_output_dir()
+                            from backend.jobs.inprocess import get_output_dir_from_cmd
+                            output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
                             find_and_transcode_completed(item.title, output_dir_val, trans_mode)
                     except Exception as trans_err:
                         logger.error(f"Failed to initiate automatic transcode: {trans_err}")
@@ -586,36 +648,65 @@ class DownloadQueueManager:
                     item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
                     
                     # Clean up partial leftovers on final failure
-                    output_dir = None
-                    try:
-                        for idx, part in enumerate(item.cmd):
-                            if part == "-o" and idx + 1 < len(item.cmd):
-                                output_dir = item.cmd[idx + 1]
-                                break
-                    except Exception:
-                        pass
-                    if not output_dir:
-                        output_dir = config.get_output_dir()
+                    from backend.jobs.inprocess import get_output_dir_from_cmd
+                    output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
                     clean_temp_files(item.title, output_dir)
                     
             self.db.save_download(item)
 
         await self.broadcast_state()
 
+    async def _run_inprocess_job(self, item: DownloadItem) -> bool:
+        """Run a Python in-process download job (Voyo, HBO Max, …)."""
+        from backend.jobs.inprocess import execute_job, parse_job
+
+        loop = asyncio.get_running_loop()
+        payload = parse_job(item.cmd)
+        last_broadcast = time.monotonic()
+        broadcast_interval = 0.3
+
+        def log_line(line: str) -> None:
+            nonlocal last_broadcast
+            scrubbed = redact_log_line(line)
+            item.logs.append(scrubbed)
+            self._parse_progress(scrubbed, item)
+            now = time.monotonic()
+            if now - last_broadcast >= broadcast_interval:
+                asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+                last_broadcast = now
+
+        def run_sync() -> bool:
+            try:
+                return execute_job(payload, log_line)
+            except Exception as exc:
+                log_line(f"ERROR {exc}")
+                logger.exception("In-process job failed")
+                return False
+
+        return await loop.run_in_executor(None, run_sync)
+
     async def _run_download_process(self, item: DownloadItem) -> bool:
         """Execute the download command and return success status."""
         try:
-            # Dynamically replace 'python' command with the current active python interpreter (sys.executable)
-            # This is extremely robust for systems with custom virtualenvs, conda, or multiple path listings.
+            from backend.jobs.inprocess import is_inprocess_job, get_output_dir_from_cmd
+
+            if is_inprocess_job(item.cmd):
+                return await self._run_inprocess_job(item)
+
             cmd = list(item.cmd)
             if cmd and cmd[0] == "python":
                 cmd[0] = sys.executable
+
+            env = os.environ.copy()
+            root = str(PROJECT_ROOT)
+            env["PYTHONPATH"] = root + os.pathsep + env.get("PYTHONPATH", "")
 
             item.process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                cwd=str(PROJECT_ROOT)
+                cwd=root,
+                env=env,
             )
 
             last_broadcast = time.monotonic()

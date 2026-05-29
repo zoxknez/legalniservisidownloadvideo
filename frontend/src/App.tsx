@@ -43,6 +43,20 @@ import {
   AlertTriangle,
   Database
 } from "lucide-react";
+import {
+  apiFetch,
+  buildWebSocketUrl,
+  getStoredApiKey,
+  setStoredApiKey,
+} from "./lib/api";
+import {
+  CredentialsSecurityPanel,
+  WvdInstallerPanel,
+  SessionConsoleScriptHint,
+  type CredentialsSecurityMap,
+} from "./components/SecurityPanels";
+import { ALL_SESSIONS_BOOKMARKLET, ALL_SESSIONS_CLIPBOARD_BOOKMARKLET } from "./lib/sessionConsoleScripts";
+import { USERSCRIPT_INSTALL_URL, fetchUserscriptText } from "./lib/bridge";
 
 // Interface definitions
 interface BinaryStatus {
@@ -86,6 +100,8 @@ interface AppStatus {
   binaries: Record<string, BinaryStatus>;
   output_dir: string;
   transcode_mode?: string;
+  sniffer?: { auto_download?: boolean };
+  credentials_security?: CredentialsSecurityMap;
   services: Record<string, ServiceStatus>;
   system_metrics?: {
     disk: { total: number; used: number; free: number; percent: number };
@@ -461,7 +477,7 @@ function DrmPanel() {
   const fetchHealth = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/drm/health");
+      const r = await apiFetch("/api/drm/health");
       const d = await r.json();
       setHealth(d);
     } catch { /* ignore */ }
@@ -473,7 +489,7 @@ function DrmPanel() {
   const handleReload = async () => {
     setReloading(true);
     try {
-      const r = await fetch("/api/drm/reload", { method: "POST" });
+      const r = await apiFetch("/api/drm/reload", { method: "POST" });
       const d = await r.json();
       if (d.health) setHealth(d.health);
     } catch { /* ignore */ }
@@ -483,7 +499,7 @@ function DrmPanel() {
   const handleClearCache = async () => {
     setClearing(true);
     try {
-      await fetch("/api/drm/cache/clear", { method: "POST" });
+      await apiFetch("/api/drm/cache/clear", { method: "POST" });
       await fetchHealth();
     } catch { /* ignore */ }
     setClearing(false);
@@ -494,7 +510,7 @@ function DrmPanel() {
     setTesting(true);
     setTestResult(null);
     try {
-      const r = await fetch("/api/drm/test-keys", {
+      const r = await apiFetch("/api/drm/test-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mpd_url: testMpdUrl, license_url: testLicUrl, service: testService })
@@ -516,7 +532,7 @@ function DrmPanel() {
     setPrefetching(true);
     setPrefetchMsg(null);
     try {
-      const r = await fetch("/api/drm/prefetch-cert", {
+      const r = await apiFetch("/api/drm/prefetch-cert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service: prefetchService, license_url: prefetchLicUrl })
@@ -881,13 +897,22 @@ export default function App() {
   }>>({});
   const [latestSniffed, setLatestSniffed] = useState<{
     service: string;
-    type: 'manifest' | 'license';
+    type: 'manifest' | 'license' | 'ready';
     url: string;
     headers?: Record<string, string>;
     title?: string;
   } | null>(null);
   const [showSnifferToast, setShowSnifferToast] = useState<boolean>(false);
   const [snifferScriptCopied, setSnifferScriptCopied] = useState<boolean>(false);
+  const [userscriptPreview, setUserscriptPreview] = useState<string>("");
+  const [snifferAutoDownload, setSnifferAutoDownload] = useState<boolean>(true);
+  const [snifferReady, setSnifferReady] = useState<Record<string, {
+    manifest_url?: string;
+    license_url?: string;
+    title?: string;
+    ready?: boolean;
+  }>>({});
+  const [snifferDownloading, setSnifferDownloading] = useState<string | null>(null);
 
   // IPTV Scheduler Form State
   const [scheduledTasks, setScheduledTasks] = useState<any[]>([]);
@@ -1018,7 +1043,7 @@ export default function App() {
     setSmartData(null);
     setSmartSelectedEpisodes([]);
     try {
-      const res = await fetch(`${getApiHost()}/api/smart-detect?url=${encodeURIComponent(val)}`);
+      const res = await apiFetch(`/api/smart-detect?url=${encodeURIComponent(val)}`);
       const data = await res.json();
       if (res.ok) {
         setSmartData(data);
@@ -1083,7 +1108,7 @@ export default function App() {
       }
       
       if (smartData.service === "voyo") {
-        res = await fetch(`${getApiHost()}/api/voyo/download`, {
+        res = await apiFetch(`/api/voyo/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1099,7 +1124,7 @@ export default function App() {
           const selectedEps = smartData.episodes.filter((ep: any) => smartSelectedEpisodes.includes(ep.id));
           let allOk = true;
           for (const ep of selectedEps) {
-            const r = await fetch(`${getApiHost()}/api/hrti/download`, {
+            const r = await apiFetch(`/api/hrti/download`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ ref_id: ep.id, title: ep.title, workers: 16 })
@@ -1116,7 +1141,7 @@ export default function App() {
           if (!data) return;
           return;
         }
-        res = await fetch(`${getApiHost()}/api/hrti/download`, {
+        res = await apiFetch(`/api/hrti/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1126,7 +1151,7 @@ export default function App() {
           })
         });
       } else if (smartData.service === "eon") {
-        res = await fetch(`${getApiHost()}/api/eon/download`, {
+        res = await apiFetch(`/api/eon/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1138,7 +1163,7 @@ export default function App() {
       } else if (smartData.service === "rts" || smartData.service === "rtsplaneta") {
         const start = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[0]) : undefined;
         const end = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[1]) : undefined;
-        res = await fetch(`${getApiHost()}/api/rts/download`, {
+        res = await apiFetch(`/api/rts/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1149,7 +1174,7 @@ export default function App() {
           })
         });
       } else if (smartData.service === "hbomax") {
-        res = await fetch(`${getApiHost()}/api/hbo/download`, {
+        res = await apiFetch(`/api/hbo/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1158,7 +1183,7 @@ export default function App() {
           })
         });
       } else if (smartData.service === "ytdlp") {
-        res = await fetch(`${getApiHost()}/api/ytdlp/download`, {
+        res = await apiFetch(`/api/ytdlp/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1197,7 +1222,7 @@ export default function App() {
     }
     setImportLoading(true);
     try {
-      const res = await fetch(`${getApiHost()}/api/config/import-session`, {
+      const res = await apiFetch(`/api/config/import-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1207,7 +1232,10 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok) {
-        showToast(data.message || "Sesija uspešno uvezena!", "success");
+        const msg = data.batch && data.imported?.length
+          ? `${data.message}: ${data.imported.map((x: { service: string }) => x.service).join(", ")}`
+          : data.message || "Sesija uspešno uvezena!";
+        showToast(msg, "success");
         setImportSessionData("");
         fetchStatus();
       } else {
@@ -1240,15 +1268,60 @@ export default function App() {
       if (item.title) setHboDirectTitle(item.title);
       setActiveTab("hbo");
       showToast("⚡ HBO Max Bypass polja popunjena!", "success");
-    } else if (service === "voyo") {
-      showToast("✓ Voyo resursi detektovani!", "info");
+    } else if (service === "eon") {
+      setEonTarget(item.manifestUrl || "");
+      setActiveTab("eon");
+      showToast("⚡ EON manifest URL postavljen — proverite license u sniffer panelu.", "info");
+    } else {
+      showToast(`✓ ${service} resursi detektovani u snifferu.`, "info");
     }
     setShowSnifferToast(false);
   };
 
+  const downloadSnifferCapture = async (service: string, auto = false) => {
+    setSnifferDownloading(service);
+    try {
+      const res = await apiFetch("/api/sniffer/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(
+          auto
+            ? `⚡ Auto-preuzimanje pokrenuto: ${data.title || service}`
+            : `Preuzimanje pokrenuto: ${data.title || service}`,
+          "success"
+        );
+        setShowSnifferToast(false);
+      } else {
+        showToast(data.detail || "Sniffer download nije uspeo.", "error");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setSnifferDownloading(null);
+    }
+  };
+
+  const saveSnifferAutoDownload = async (enabled: boolean) => {
+    setSnifferAutoDownload(enabled);
+    try {
+      await apiFetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sniffer: { auto_download: enabled } }),
+      });
+      showToast(enabled ? "Auto-preuzimanje sniffera uključeno." : "Auto-preuzimanje sniffera isključeno.", "info");
+    } catch {
+      showToast("Greška pri čuvanju sniffer podešavanja.", "error");
+    }
+  };
+
   const fetchScheduledRecordings = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/scheduler/list`);
+      const res = await apiFetch(`/api/scheduler/list`);
       if (res.ok) {
         const data = await res.json();
         setScheduledTasks(data);
@@ -1260,7 +1333,7 @@ export default function App() {
 
   const scheduleEonRecording = async (channelName: string, title: string, startTime: string, durationMinutes: number) => {
     try {
-      const res = await fetch(`${getApiHost()}/api/scheduler/schedule`, {
+      const res = await apiFetch(`/api/scheduler/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1282,13 +1355,12 @@ export default function App() {
     }
   };
 
-  const getApiHost = () =>
-    window.location.hostname === "localhost" ? "http://localhost:8000" : "";
+  const [apiKeyInput, setApiKeyInput] = useState(getStoredApiKey);
 
   // Fetch Status and Settings on Load
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/status`);
+      const res = await apiFetch("/api/status");
       if (res.ok) {
         const data: AppStatus = await res.json();
         setStatus(data);
@@ -1301,6 +1373,9 @@ export default function App() {
           paths[name] = info.path;
         }
         setBinariesPaths(paths);
+        if (data.sniffer?.auto_download !== undefined) {
+          setSnifferAutoDownload(Boolean(data.sniffer.auto_download));
+        }
       }
     } catch (e) {
       console.error("Failed to fetch system status:", e);
@@ -1309,7 +1384,7 @@ export default function App() {
 
   const fetchTranscodeDiagnostics = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/transcoder/diagnose`);
+      const res = await apiFetch(`/api/transcoder/diagnose`);
       if (res.ok) {
         const data = await res.json();
         setTranscodeDiagnostics(data);
@@ -1323,6 +1398,9 @@ export default function App() {
     fetchStatus();
     fetchScheduledRecordings();
     fetchTranscodeDiagnostics();
+    fetchUserscriptText()
+      .then(setUserscriptPreview)
+      .catch(() => setUserscriptPreview(""));
   }, []);
 
   useEffect(() => {
@@ -1342,9 +1420,7 @@ export default function App() {
   useEffect(() => {
     let ws: WebSocket;
     const connect = () => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.hostname === "localhost" ? "localhost:8000" : window.location.host;
-      ws = new WebSocket(`${protocol}//${host}/ws`);
+      ws = new WebSocket(buildWebSocketUrl());
 
       ws.onmessage = (event) => {
         try {
@@ -1374,6 +1450,40 @@ export default function App() {
             });
             setLatestSniffed({ service, type, url, headers, title });
             setShowSnifferToast(true);
+          } else if (payload.type === "sniffer_ready") {
+            const { service, capture } = payload.data || {};
+            if (service && capture) {
+              setSnifferReady(prev => ({ ...prev, [service]: capture }));
+              setSniffedItems(prev => ({
+                ...prev,
+                [service]: {
+                  manifestUrl: capture.manifest_url || prev[service]?.manifestUrl,
+                  licenseUrl: capture.license_url || prev[service]?.licenseUrl,
+                  headers: capture.headers || prev[service]?.headers,
+                  title: capture.title || prev[service]?.title,
+                },
+              }));
+              setLatestSniffed({
+                service,
+                type: "ready",
+                url: capture.manifest_url || "",
+                headers: capture.headers,
+                title: capture.title,
+              });
+              setShowSnifferToast(true);
+            }
+          } else if (payload.type === "sniffer_download_queued") {
+            const { title, auto } = payload.data || {};
+            showToast(
+              auto ? `⚡ Auto-preuzimanje: ${title}` : `Preuzimanje u redu: ${title}`,
+              "success"
+            );
+            setShowSnifferToast(false);
+          } else if (payload.type === "session_imported") {
+            const { services, message } = payload.data || {};
+            const names = Array.isArray(services) ? services.join(", ") : "";
+            showToast(message || `Sesija uvezena: ${names}`, "success");
+            fetchStatus();
           } else if (payload.type === "scheduled_update") {
             setScheduledTasks(payload.data);
           }
@@ -1420,7 +1530,7 @@ export default function App() {
   const handleAutoSyncBrowser = async () => {
     setAutoSyncLoading(true);
     try {
-      const res = await fetch(`${getApiHost()}/api/config/auto-sync-browser`, {
+      const res = await apiFetch(`/api/config/auto-sync-browser`, {
         method: "POST"
       });
       const data = await res.json();
@@ -1447,7 +1557,7 @@ export default function App() {
 
   const handleSaveConfig = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/config`, {
+      const res = await apiFetch(`/api/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -1471,7 +1581,7 @@ export default function App() {
 
   const handleSaveDeviceWvdPath = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/config`, {
+      const res = await apiFetch(`/api/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ binaries: { device_wvd: binariesPaths.device_wvd || "" } })
@@ -1490,7 +1600,7 @@ export default function App() {
 
   const submitLogin = async (service: string, body: any) => {
     try {
-      const res = await fetch(`${getApiHost()}/api/${service}/login`, {
+      const res = await apiFetch(`/api/${service}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -1519,7 +1629,7 @@ export default function App() {
       let seriesId = voyoTarget.trim();
       const m = seriesId.match(/_(\d+)\.html|Series_(\d+)/i);
       if (m) seriesId = m[1] || m[2];
-      const res = await fetch(`${getApiHost()}/api/voyo/series/${seriesId}`);
+      const res = await apiFetch(`/api/voyo/series/${seriesId}`);
       const data = await res.json();
       if (res.ok) {
         setVoyoSeriesData(data);
@@ -1548,7 +1658,7 @@ export default function App() {
         epRange = indices.join(",");
       }
 
-      const res = await fetch(`${getApiHost()}/api/voyo/download`, {
+      const res = await apiFetch(`/api/voyo/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target: voyoTarget, mode: voyoMode, episodes: epRange, resolution: voyoRes })
@@ -1568,7 +1678,7 @@ export default function App() {
   // HRTi specific
   const fetchHrtiCategories = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/hrti/categories`);
+      const res = await apiFetch(`/api/hrti/categories`);
       if (res.ok) {
         const data = await res.json();
         setHrtiCats(data);
@@ -1584,7 +1694,7 @@ export default function App() {
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries(null);
     try {
-      const res = await fetch(`${getApiHost()}/api/hrti/category-items?category=${cat}&page=${page}`);
+      const res = await apiFetch(`/api/hrti/category-items?category=${cat}&page=${page}`);
       if (res.ok) {
         const data = await res.json();
         setCatItems(data.items);
@@ -1600,7 +1710,7 @@ export default function App() {
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries(null);
     try {
-      const res = await fetch(`${getApiHost()}/api/hrti/search?query=${encodeURIComponent(hrtiSearchQuery)}`);
+      const res = await apiFetch(`/api/hrti/search?query=${encodeURIComponent(hrtiSearchQuery)}`);
       if (res.ok) {
         const data = await res.json();
         setCatItems(data.items);
@@ -1615,7 +1725,7 @@ export default function App() {
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries({ id: uuid, title });
     try {
-      const res = await fetch(`${getApiHost()}/api/hrti/series/${uuid}`);
+      const res = await apiFetch(`/api/hrti/series/${uuid}`);
       if (res.ok) {
         const data = await res.json();
         setCatItems(data.items);
@@ -1635,7 +1745,7 @@ export default function App() {
   const confirmHrtiDownload = async () => {
     if (!hrtiModal) return;
     try {
-      const res = await fetch(`${getApiHost()}/api/hrti/download`, {
+      const res = await apiFetch(`/api/hrti/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ref_id: hrtiModal.refId, title: hrtiModalTitle || hrtiModal.title, workers: hrtiDownloadWorkers })
@@ -1656,7 +1766,7 @@ export default function App() {
   // EON specific
   const fetchEonChannels = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/channels`);
+      const res = await apiFetch(`/api/eon/channels`);
       const data = await res.json().catch(() => null);
       if (res.ok) {
         setEonChannels(Array.isArray(data) ? data : []);
@@ -1671,7 +1781,7 @@ export default function App() {
 
   const startEonDownload = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/download`, {
+      const res = await apiFetch(`/api/eon/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1694,7 +1804,7 @@ export default function App() {
   const searchEonVod = async () => {
     if (!eonSearchQuery.trim()) return;
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/search?query=${encodeURIComponent(eonSearchQuery.trim())}`);
+      const res = await apiFetch(`/api/eon/search?query=${encodeURIComponent(eonSearchQuery.trim())}`);
       const data = await res.json().catch(() => null);
       if (res.ok) {
         setEonSearchResults(Array.isArray(data) ? data : []);
@@ -1712,7 +1822,7 @@ export default function App() {
   const fetchEonEpg = async () => {
     if (!eonTarget) return;
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/epg?channel=${encodeURIComponent(eonTarget)}`);
+      const res = await apiFetch(`/api/eon/epg?channel=${encodeURIComponent(eonTarget)}`);
       const data = await res.json().catch(() => null);
       if (res.ok) {
         setEonEpgItems(Array.isArray(data) ? data : []);
@@ -1729,7 +1839,7 @@ export default function App() {
 
   const initEonCatalogs = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/catalogs/init`, { method: "POST" });
+      const res = await apiFetch(`/api/eon/catalogs/init`, { method: "POST" });
       const data = await res.json().catch(() => null);
       if (res.ok) {
         const created = data?.created?.length ?? 0;
@@ -1749,7 +1859,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/api-login`, {
+      const res = await apiFetch(`/api/eon/api-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: eonUsername, password: eonPassword, serial: eonSerial, number: eonNumber })
@@ -1768,7 +1878,7 @@ export default function App() {
 
   const refreshEonApiToken = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/eon/refresh-token`, { method: "POST" });
+      const res = await apiFetch(`/api/eon/refresh-token`, { method: "POST" });
       const data = await res.json().catch(() => null);
       if (res.ok) {
         showToast(data?.tokens_saved ? "EON API token je osvežen." : "Refresh je prošao, ali token nije pronađen u odgovoru.", data?.tokens_saved ? "success" : "info");
@@ -1784,7 +1894,7 @@ export default function App() {
   // RTS specific
   const startRtsDownload = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/rts/download`, {
+      const res = await apiFetch(`/api/rts/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1808,7 +1918,7 @@ export default function App() {
   // HBO specific
   const startHboLogin = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/hbo/login`, {
+      const res = await apiFetch(`/api/hbo/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ market: hboMarket })
@@ -1825,7 +1935,7 @@ export default function App() {
 
   const startHboDownload = async () => {
     try {
-      const res = await fetch(`${getApiHost()}/api/hbo/download`, {
+      const res = await apiFetch(`/api/hbo/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_id: hboTarget, subs: hboSubs })
@@ -1847,7 +1957,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch(`${getApiHost()}/api/hbo/download-direct`, {
+      const res = await apiFetch(`/api/hbo/download-direct`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1874,7 +1984,7 @@ export default function App() {
   // Queue actions
   const cancelDownloadTask = async (id: string) => {
     try {
-      await fetch(`${getApiHost()}/api/queue/cancel`, {
+      await apiFetch(`/api/queue/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
@@ -1885,7 +1995,7 @@ export default function App() {
 
   const retryDownloadTask = async (id: string) => {
     try {
-      const res = await fetch(`${getApiHost()}/api/queue/retry`, {
+      const res = await apiFetch(`/api/queue/retry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
@@ -1903,7 +2013,7 @@ export default function App() {
 
   const clearCompletedQueue = async () => {
     try {
-      await fetch(`${getApiHost()}/api/queue/clear`, { method: "POST" });
+      await apiFetch(`/api/queue/clear`, { method: "POST" });
       showToast("Očišćen red preuzimanja!");
       setConfirmClear(false);
     } catch (e) { console.error(e); }
@@ -1983,17 +2093,52 @@ export default function App() {
 
           <div className="text-xs bg-white/[0.03] border border-white/[0.06] rounded-lg p-3 flex flex-col gap-1.5 font-mono break-all text-text-secondary">
             <div>
-              <span className="text-text-muted">Tip:</span> <span className="text-white font-bold">{latestSniffed.type === "manifest" ? "📄 Manifest (.mpd/.m3u8)" : "🔑 Widevine License"}</span>
+              <span className="text-text-muted">Tip:</span>{" "}
+              <span className="text-white font-bold">
+                {latestSniffed.type === "ready"
+                  ? "✅ Manifest + License spremni"
+                  : latestSniffed.type === "manifest"
+                    ? "📄 Manifest (.mpd/.m3u8)"
+                    : "🔑 Widevine License"}
+              </span>
             </div>
-            <div className="line-clamp-2 max-h-12 overflow-hidden text-[11px]">
-              <span className="text-text-muted">URL:</span> {latestSniffed.url}
-            </div>
+            {sniffedItems[latestSniffed.service]?.manifestUrl && (
+              <div className="line-clamp-2 text-[11px]">
+                <span className="text-text-muted">MPD:</span> {sniffedItems[latestSniffed.service]?.manifestUrl}
+              </div>
+            )}
+            {sniffedItems[latestSniffed.service]?.licenseUrl && (
+              <div className="line-clamp-2 text-[11px]">
+                <span className="text-text-muted">Lic:</span> {sniffedItems[latestSniffed.service]?.licenseUrl}
+              </div>
+            )}
+            {!sniffedItems[latestSniffed.service]?.manifestUrl && (
+              <div className="line-clamp-2 max-h-12 overflow-hidden text-[11px]">
+                <span className="text-text-muted">URL:</span> {latestSniffed.url}
+              </div>
+            )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            {(snifferReady[latestSniffed.service]?.ready ||
+              (sniffedItems[latestSniffed.service]?.manifestUrl &&
+                sniffedItems[latestSniffed.service]?.licenseUrl)) && (
+              <button
+                onClick={() => downloadSnifferCapture(latestSniffed.service)}
+                disabled={snifferDownloading === latestSniffed.service}
+                className="flex-1 py-2 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg min-w-[140px]"
+              >
+                {snifferDownloading === latestSniffed.service ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                Preuzmi odmah
+              </button>
+            )}
             <button
               onClick={() => applySniffedResource(latestSniffed.service)}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-all shadow-lg hover:shadow-xl ${
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-all shadow-lg hover:shadow-xl min-w-[120px] ${
                 latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20" :
                 latestSniffed.service === "voyo" ? "bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 shadow-orange-500/20" :
                 latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 shadow-rose-500/20" :
@@ -2001,7 +2146,7 @@ export default function App() {
                 latestSniffed.service === "hrti" ? "bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 shadow-cyan-500/20" : "bg-indigo-600"
               }`}
             >
-              <Zap className="w-3.5 h-3.5" /> Popuni Bypass Polja
+              <Zap className="w-3.5 h-3.5" /> Popuni polja
             </button>
             <button
               onClick={() => setShowSnifferToast(false)}
@@ -3831,7 +3976,7 @@ export default function App() {
                           <button
                             onClick={async () => {
                               try {
-                                const res = await fetch(`${getApiHost()}/api/scheduler/cancel`, {
+                                const res = await apiFetch(`/api/scheduler/cancel`, {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({ id: task.id })
@@ -4523,24 +4668,36 @@ export default function App() {
 
                   {/* Right: Bookmarklets */}
                   <div className="flex flex-col gap-3">
-                    <h4 className="font-bold text-xs text-purple-300 tracking-wider uppercase">Alternativa: 1-Klik Bookmarkleti (100% Pouzdano)</h4>
+                    <h4 className="font-bold text-xs text-purple-300 tracking-wider uppercase">1-Klik Bookmarkleti (direktno u app)</h4>
                     <p className="text-xs text-text-secondary leading-relaxed">
-                      Prevucite ove linkove u vaš Bookmark bar u pretraživaču. Kliknite ih dok ste na sajtu servisa za prenos sesije ili snifovanje linkova:
+                      Prevucite link u Bookmark bar. Klik na sajtu servisa šalje sesiju na{" "}
+                      <code className="font-mono bg-white/10 px-1 rounded">127.0.0.1:8000</code> — bez copy-paste.
+                      Aplikacija mora biti pokrenuta (<code className="font-mono">python run.py</code>).
                     </p>
                     
                     <div className="flex flex-col gap-2.5">
                       <a
-                        href="javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),customerId:localStorage.getItem('customerId'),eon:sessionStorage.getItem('token')||document.cookie};navigator.clipboard.writeText(JSON.stringify(d));alert('⚡ Sesija kopirana u clipboard! Otvorite tab Postavke -> Uvoz sesije u aplikaciji i samo nalepite (Ctrl+V).');})();"
-                        onClick={() => {
-                          // Drag and drop is supported, but copy on click is a great backup!
-                          navigator.clipboard.writeText("javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),customerId:localStorage.getItem('customerId'),eon:sessionStorage.getItem('token')||document.cookie};navigator.clipboard.writeText(JSON.stringify(d));alert('⚡ Sesija kopirana u clipboard! Otvorite tab Postavke -> Uvoz sesije u aplikaciji i samo nalepite (Ctrl+V).');})();");
-                          showToast("Bookmarklet kopiran u clipboard! Možete ga zalepiti kao adresu novog bookmark-a.", "success");
+                        href={ALL_SESSIONS_BOOKMARKLET}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigator.clipboard.writeText(ALL_SESSIONS_BOOKMARKLET);
+                          showToast("Bookmarklet kopiran — dodajte kao bookmark URL ili prevucite na traku.", "success");
                         }}
                         className="bookmarklet-btn block p-3 text-center rounded-lg text-xs font-bold text-white border border-dashed border-indigo-500/30 hover:border-indigo-400 hover:bg-indigo-500/10 transition-all cursor-grab active:cursor-grabbing"
                         title="Kliknite da kopirate kod ili prevucite na Bookmark bar"
                       >
-                        🖱️ Prevucite / Kopirajte: ⚡ Kopiraj Sve Sesije
+                        🖱️ ⚡ Pošalji sesiju u app (automatski)
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(ALL_SESSIONS_CLIPBOARD_BOOKMARKLET.replace(/^javascript:/, "javascript:"));
+                          showToast("Fallback bookmarklet (clipboard JSON) kopiran.", "info");
+                        }}
+                        className="text-[10px] text-text-muted underline self-start"
+                      >
+                        Alternativa: samo kopiraj JSON u clipboard
+                      </button>
                       
                       <a
                         href="javascript:(function(){const m=window.location.href;const req={service:'hbomax',type:'manifest',url:m,title:document.title};fetch('http://127.0.0.1:8000/api/sniffer/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)}).then(r=>r.ok?alert('⚡ Link uspešno snifovan i poslat u downloader!'):alert('Greška pri komunikaciji sa serverom.'));})();"
@@ -4557,6 +4714,17 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              <CredentialsSecurityPanel credentialsSecurity={status?.credentials_security} />
+
+              <WvdInstallerPanel
+                deviceFound={deviceWvdInfo?.found}
+                onInstalled={() => {
+                  fetchStatus();
+                  fetchTranscodeDiagnostics();
+                }}
+                showToast={showToast}
+              />
 
               {/* F3: Services Authentication Status Overview */}
               {status && (
@@ -4606,6 +4774,31 @@ export default function App() {
                     style={{"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"} as any}
                   />
                   <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
+                </div>
+
+                <div>
+                  <label>API ključ (LAN / udaljeni pristup)</label>
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    placeholder="Iz ~/.videodownload/config.json (server.api_key)"
+                    className="input-premium font-mono text-xs"
+                    style={{"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"} as any}
+                  />
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-bold text-indigo-400 hover:text-indigo-300"
+                    onClick={() => {
+                      setStoredApiKey(apiKeyInput);
+                      showToast("API ključ sačuvan u pregledaču.", "success");
+                    }}
+                  >
+                    Sačuvaj API ključ lokalno
+                  </button>
+                  <p className="text-[10px] text-text-muted mt-1.5">
+                    Na localhost-u ključ obično nije potreban. Potreban je ako server slušate na LAN-u.
+                  </p>
                 </div>
 
                 <div className="mt-2 border-t border-white/[0.04] pt-4">
@@ -4754,28 +4947,12 @@ export default function App() {
                   možete se ulogovati normalno u vašem brauzeru, kopirati token ili sesiju (npr. preko EditThisCookie ekstenzije) i uvesti ga ovde.
                 </p>
 
-                {importService === "hbomax" && (
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-6 flex flex-col gap-3">
-                    <div className="font-extrabold text-amber-400 flex items-center gap-2 text-sm">
-                      <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-                      Najbrži način za HBO Max (Magično kopiranje u 1 sekundi)
-                    </div>
-                    <p className="text-xs text-text-secondary leading-relaxed m-0">
-                      Najnovije verzije pretraživača (Google Chrome, Edge) imaju novu naprednu zaštitu (v20 Application-Bound Encryption) koja blokira spoljne programe da direktno čitaju njihove fajlove.
-                      Zato smo napravili <strong>magičnu skriptu od jedne sekunde</strong> koja sama pronalazi i kopira Vaš token!
-                    </p>
-                    <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-xs text-text-secondary m-0 leading-normal">
-                      <li>Otvorite tab u pretraživaču gde gledate <strong>Max</strong> (ili hbomax.com).</li>
-                      <li>Pritisnite <strong>F12</strong> (ili desni klik -&gt; <em>Ispitaj / Inspect</em>) i kliknite na karticu <strong>Console</strong> (Konzola).</li>
-                      <li>Nalepite liniju koda ispod i pritisnite <strong>Enter</strong>:</li>
-                    </ol>
-                    <div className="relative">
-                      <pre className="p-3.5 bg-black/60 rounded border border-glass font-mono text-[10px] text-amber-300 overflow-x-auto select-all cursor-pointer m-0">
-                        {`copy(JSON.stringify(JSON.parse(localStorage.getItem('token') || '{}'), null, 2)); console.log('Uspelo! HBO Max podaci su kopirani u clipboard!');`}
-                      </pre>
-                    </div>
-                  </div>
-                )}
+                <SessionConsoleScriptHint service={importService} />
+
+                <p className="text-[11px] text-indigo-300/90 m-0">
+                  Konzola skripte sada šalju token <strong>direktno u app</strong> (fetch → bridge). Bookmarklet iznad radi isto bez F12.
+                  Ručni paste u polje ispod je i dalje podržan.
+                </p>
 
                 <div className="flex flex-col gap-4">
                   <div>
@@ -4830,59 +5007,78 @@ export default function App() {
               <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-cyan-card glow-card-premium">
                 <h3 className="font-extrabold text-xl text-cyan-400 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-cyan-400 animate-pulse" />
-                  Automatski DevTools Sniffer Proxy
+                  Tampermonkey Bridge v2 (Sesije + Sniffer)
                 </h3>
                 <p className="text-sm text-text-secondary leading-relaxed m-0">
-                  Otklonite potrebu za ručnim otvaranjem F12 konzole i kopiranjem linkova! Instalirajte našu <strong>Tampermonkey skriptu</strong> koja automatski detektuje <strong>MPEG-DASH (.mpd)</strong> i <strong>Widevine License</strong> linkove tokom normalne reprodukcije videa u brauzeru, i bezbedno ih šalje direktno u aplikaciju u realnom vremenu.
+                  Instalirajte skriptu jednom — ona <strong>automatski šalje sesije</strong> u aplikaciju (bez F12 i copy-paste)
+                  i snifuje <strong>.mpd / license</strong> URL-ove tokom gledanja.
+                  Kada su oba spremna, preuzimanje može krenuti <strong>automatski</strong>.
                 </p>
+
+                <label className="flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={snifferAutoDownload}
+                    onChange={(e) => saveSnifferAutoDownload(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-500"
+                  />
+                  <span className="text-sm text-white font-semibold">
+                    Auto-preuzimanje kad sniffer uhvati manifest + license
+                  </span>
+                </label>
 
                 <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-6 flex flex-col gap-3">
                   <div className="font-extrabold text-cyan-400 flex items-center gap-2 text-sm">
                     <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
-                    Uputstvo za instalaciju (Svega 30 sekundi):
+                    Instalacija (~30 sekundi)
                   </div>
                   <ol className="list-decimal pl-5 flex flex-col gap-2 text-xs text-text-secondary m-0 leading-relaxed">
-                    <li>Instalirajte brauzer ekstenziju <strong>Tampermonkey</strong> ili <strong>Violentmonkey</strong> iz Chrome Web Prodavnice.</li>
-                    <li>Kliknite na ikonicu ekstenzije i odaberite <strong>"Create a new script"</strong> (Kreiraj novu skriptu).</li>
-                    <li>Obrišite sav podrazumevani kod, kopirajte skriptu ispod i sačuvajte je (<strong>Ctrl + S</strong>).</li>
-                    <li>Otvorite platformu u novom tabu (npr. <code className="font-mono bg-white/10 px-1 rounded">max.com</code>, <code className="font-mono bg-white/10 px-1 rounded">voyo.rs</code>, itd.) i pustite bilo koji video. Resursi će se odmah pojaviti na vašem ekranu u obliku obaveštenja!</li>
+                    <li>Instalirajte <strong>Tampermonkey</strong> ili <strong>Violentmonkey</strong>.</li>
+                    <li>
+                      Otvorite{" "}
+                      <a href={USERSCRIPT_INSTALL_URL} target="_blank" rel="noreferrer" className="text-cyan-300 underline font-mono">
+                        {USERSCRIPT_INSTALL_URL}
+                      </a>{" "}
+                      — Tampermonkey će ponuditi instalaciju (ili kopirajte kod ispod).
+                    </li>
+                    <li>Pokrenite <code className="font-mono bg-white/10 px-1 rounded">python run.py</code> i otvorite bilo koji servis — sesija se šalje sama.</li>
                   </ol>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Tampermonkey User-Script Kod:</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const scriptText = `// ==UserScript==\\n// @name         o0o0o0o-downloader DevTools Sniffer Proxy\\n// @namespace    http://tampermonkey.net/\\n// @version      1.0\\n// @description  Automated Widevine and HLS stream URL sniffer for Voyo, EON, HRTi, RTS and HBO Max.\\n// @author       Antigravity\\n// @match        *://*.max.com/*\\n// @match        *://*.voyo.rs/*\\n// @match        *://*.voyo.si/*\\n// @match        *://*.rtsplaneta.rs/*\\n// @match        *://*.hrt.hr/*\\n// @match        *://*.eon.tv/*\\n// @match        *://*.hbomax.com/*\\n// @grant        GM_xmlhttpRequest\\n// @connect      localhost\\n// @run-at       document-start\\n// ==/UserScript==\\n\\n(function() {\\n    'use strict';\\n    console.log("🚀 o0o0o0o-downloader Sniffer Proxy active!");\\n    const BACKEND_URL = "http://localhost:8000/api/sniffer/detect";\\n\\n    function getService() {\\n        const host = window.location.hostname;\\n        if (host.includes("max.com") || host.includes("hbomax.com")) return "hbomax";\\n        if (host.includes("voyo.rs") || host.includes("voyo.si")) return "voyo";\\n        if (host.includes("rtsplaneta")) return "rtsplaneta";\\n        if (host.includes("hrt.hr")) return "hrti";\\n        if (host.includes("eon.tv")) return "eon";\\n        return "unknown";\\n    }\\n\\n    function sendToBackend(type, url, headers = {}) {\\n        const service = getService();\\n        console.log(\\\`[Sniffer] Intercepted \\\${service} \\\${type}:\\\`, url);\\n        const cleanHeaders = {};\\n        const keepHeaders = ['authorization', 'x-dt-custom-data', 'x-ax-drm-message', 'drm-token'];\\n        for (const [key, value] of Object.entries(headers)) {\\n            if (keepHeaders.includes(key.toLowerCase())) {\\n                cleanHeaders[key] = value;\\n            }\\n        }\\n\\n        GM_xmlhttpRequest({\\n            method: "POST",\\n            url: BACKEND_URL,\\n            headers: {\\n                "Content-Type": "application/json"\\n            },\\n            data: JSON.stringify({\\n                service: service,\\n                type: type,\\n                url: url,\\n                headers: cleanHeaders,\\n                title: document.title || ""\\n            }),\\n            onload: function(response) {\\n                console.log("[Sniffer] Relayed successfully:", response.responseText);\\n            },\\n            onerror: function(err) {\\n                console.error("[Sniffer] Relay failed:", err);\\n            }\\n        });\\n    }\\n\\n    const originalFetch = window.fetch;\\n    window.fetch = async function(...args) {\\n        const url = typeof args[0] === 'string' ? args[0] : (args[0] instanceof URL ? args[0].href : (args[0] ? args[0].url : ''));\\n        const options = args[1] || {};\\n        if (url) {\\n            const lowUrl = url.toLowerCase();\\n            if (lowUrl.includes(".mpd") || lowUrl.includes(".m3u8") || lowUrl.includes("/manifest")) {\\n                sendToBackend("manifest", url);\\n            } else if (lowUrl.includes("widevine") || lowUrl.includes("license") || lowUrl.includes("/drm") || lowUrl.includes("challenge")) {\\n                const headers = options.headers || {};\\n                sendToBackend("license", url, headers);\\n            }\\n        }\\n        return originalFetch.apply(this, args);\\n    };\\n\\n    const originalOpen = XMLHttpRequest.prototype.open;\\n    const originalSend = XMLHttpRequest.prototype.send;\\n    const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;\\n\\n    XMLHttpRequest.prototype.open = function(method, url, ...rest) {\\n        this._url = url;\\n        this._headers = {};\\n        return originalOpen.apply(this, [method, url, ...rest]);\\n    };\\n\\n    XMLHttpRequest.prototype.setRequestHeader = function(header, value) {\\n        this._headers[header] = value;\\n        return originalSetRequestHeader.apply(this, [header, value]);\\n    };\\n\\n    XMLHttpRequest.prototype.send = function(body) {\\n        const url = this._url;\\n        if (url) {\\n            const lowUrl = url.toLowerCase();\\n            if (lowUrl.includes(".mpd") || lowUrl.includes(".m3u8") || lowUrl.includes("/manifest")) {\\n                sendToBackend("manifest", url);\\n            } else if (lowUrl.includes("widevine") || lowUrl.includes("license") || lowUrl.includes("/drm") || lowUrl.includes("challenge")) {\\n                sendToBackend("license", url, this._headers);\\n            }\\n        }\\n        return originalSend.apply(this, [body]);\\n    };\\n})();`;
-                        navigator.clipboard.writeText(scriptText);
-                        setSnifferScriptCopied(true);
-                        setTimeout(() => setSnifferScriptCopied(false), 2000);
-                      }}
-                      className="btn btn-premium-secondary gap-1.5 py-1 px-3 text-xs"
-                      style={{
-                        "--btn-grad-start": "#06b6d4",
-                        "--btn-grad-end": "#0d9488",
-                        "--btn-glow": "rgba(6,182,212,0.15)",
-                        "--btn-glow-hover": "rgba(6,182,212,0.3)"
-                      } as any}
-                    >
-                      {snifferScriptCopied ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" /> Kopirano!
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" /> Kopiraj Skriptu
-                        </>
-                      )}
-                    </button>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-bold text-white">Userscript (serviran sa backend-a):</span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const text = userscriptPreview || (await fetchUserscriptText());
+                            await navigator.clipboard.writeText(text);
+                            setSnifferScriptCopied(true);
+                            setTimeout(() => setSnifferScriptCopied(false), 2000);
+                          } catch {
+                            showToast("Nije moguće učitati skriptu — pokrenite backend.", "error");
+                          }
+                        }}
+                        className="btn btn-premium-secondary gap-1.5 py-1 px-3 text-xs"
+                      >
+                        {snifferScriptCopied ? <><Check className="w-3.5 h-3.5" /> Kopirano!</> : <><Copy className="w-3.5 h-3.5" /> Kopiraj skriptu</>}
+                      </button>
+                      <a
+                        href={USERSCRIPT_INSTALL_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-premium-primary gap-1.5 py-1 px-3 text-xs no-underline"
+                      >
+                        Otvori za instalaciju
+                      </a>
+                    </div>
                   </div>
                   <textarea
                     readOnly
-                    value={`// ==UserScript==\\n// @name         o0o0o0o-downloader DevTools Sniffer Proxy\\n// @namespace    http://tampermonkey.net/\\n// @version      1.0\\n// @match        *://*.max.com/*\\n// @match        *://*.voyo.rs/*\\n// @match        *://*.voyo.si/*\\n// @match        *://*.rtsplaneta.rs/*\\n// @match        *://*.hrt.hr/*\\n// @match        *://*.eon.tv/*\\n// @match        *://*.hbomax.com/*\\n// @grant        GM_xmlhttpRequest\\n// @connect      localhost\\n// @run-at       document-start\\n// ==/UserScript==\\n\\n(function() {\\n    'use strict';\\n    // ... (ostatak koda je spreman za kopiranje preko dugmeta iznad)\\n})();`}
-                    className="input-premium font-mono text-[10px] bg-[#0d0e12]/80 h-28 resize-none"
+                    value={userscriptPreview || "// Učitava se sa /api/bridge/userscript.js ..."}
+                    className="input-premium font-mono text-[10px] bg-[#0d0e12]/80 h-32 resize-none"
                     style={{ border: "1px solid rgba(6,182,212,0.2)" }}
                   />
                 </div>

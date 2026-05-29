@@ -1,0 +1,40 @@
+[project]
+name = "videodownloadservisi"
+version = "2.1.0"
+description = "Multi-service video downloader with FastAPI backend and React UI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn[standard]>=0.32.0,<1.0",
+    "pydantic>=2.9.0,<3.0",
+    "python-multipart>=0.0.12",
+    "requests>=2.32.0",
+    "aiohttp>=3.10.0",
+    "curl_cffi>=0.7.0",
+    "pywidevine>=1.8.0",
+    "pycryptodome>=3.20.0",
+    "xmltodict>=0.13.0",
+    "yt-dlp>=2024.12.0",
+    "browser-cookie3>=0.19.1",
+    "psutil>=6.0.0",
+    "keyring>=25.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
