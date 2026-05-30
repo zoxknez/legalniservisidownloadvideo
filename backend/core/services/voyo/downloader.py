@@ -4,8 +4,8 @@ Voyo.rs Downloader
 Downloads HLS streams from voyo.rs (AES-128, handled by yt-dlp).
 
 Output filename format:
-  Series : ShowTitle.S01E03.1080p.WEB-DL-CrnaBerza.mkv
-  Movie  : MovieTitle.2019.1080p.WEB-DL-CrnaBerza.mkv
+  Series : ShowTitle.S01E03.1080p.WEB-DL-VOYO.mkv
+  Movie  : MovieTitle.2019.1080p.WEB-DL-VOYO.mkv
 
 Stream format:
   HLS (.m3u8) from vod.rtlrs-api.com, AES-128 per-segment keys.
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 requests.packages.urllib3.disable_warnings()
 
-RELEASE_GROUP = 'CrnaBerza'
+RELEASE_GROUP = 'VOYO'
 
 
 # ── Tool detection ────────────────────────────────────────────────────────────
@@ -452,6 +452,13 @@ def _parse_id(url: str) -> Optional[int]:
     s = url.strip()
     if s.isdigit():
         return int(s)
+    from urllib.parse import urlparse, parse_qs
+    qs = parse_qs(urlparse(s).query)
+    if 'id' in qs:
+        try:
+            return int(qs['id'][0])
+        except (ValueError, IndexError):
+            pass
     m = re.search(r'_(\d+)(?:\.html)?(?:\?|$|/)', s)
     if m:
         return int(m.group(1))

@@ -8,6 +8,7 @@ import logging
 import sqlite3
 import json
 import threading
+from enum import Enum
 from typing import Dict, Any, List, Set, Optional
 from fastapi import WebSocket
 from pathlib import Path
@@ -17,6 +18,27 @@ from backend.config import config, PROJECT_ROOT
 logger = logging.getLogger(__name__)
 
 SENSITIVE_CLI_FLAGS = {"-p", "--password", "--pass", "--token", "--access-token", "--refresh-token"}
+
+
+class DownloadStatus(str, Enum):
+    PENDING = "pending"
+    DOWNLOADING = "downloading"
+    FINISHED = "finished"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    @staticmethod
+    def can_transition(current: "DownloadStatus", target: "DownloadStatus") -> bool:
+        return target in _VALID_TRANSITIONS.get(current, set())
+
+
+_VALID_TRANSITIONS: Dict[DownloadStatus, Set[DownloadStatus]] = {
+    DownloadStatus.PENDING: {DownloadStatus.DOWNLOADING, DownloadStatus.CANCELLED},
+    DownloadStatus.DOWNLOADING: {DownloadStatus.FINISHED, DownloadStatus.FAILED, DownloadStatus.CANCELLED},
+    DownloadStatus.FAILED: {DownloadStatus.PENDING},
+    DownloadStatus.FINISHED: {DownloadStatus.PENDING},
+    DownloadStatus.CANCELLED: {DownloadStatus.PENDING},
+}
 
 # Queue manager configuration
 MAX_CONCURRENT_DOWNLOADS = 2
@@ -233,7 +255,7 @@ class DownloadItem:
         self.service = service
         self.title = title
         self.cmd = cmd
-        self.status = "pending"  # pending, downloading, finished, failed, cancelled
+        self.status: str = DownloadStatus.PENDING
         self.progress = 0.0
         self.speed = ""
         self.eta = ""
@@ -300,8 +322,8 @@ class DownloadQueueManager:
             for item in self.items.values():
                 if item.status not in ("pending", "downloading"):
                     continue
-                if item.status == "downloading":
-                    item.status = "pending"
+                if item.status == DownloadStatus.DOWNLOADING:
+                    item.status = DownloadStatus.PENDING
                     item.progress = 0.0
                     item.speed = ""
                     item.eta = ""
@@ -547,15 +569,27 @@ class DownloadQueueManager:
             await asyncio.sleep(10)
 
 
+    def _job_fingerprint(self, service: str, cmd: List[str]) -> str:
+        """Stable hash of (service, normalized_cmd) for dedup."""
+        import hashlib
+        normalized = json.dumps([service] + [a for a in cmd if a not in SENSITIVE_CLI_FLAGS], sort_keys=False)
+        return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
     async def add_download(self, service: str, title: str, cmd: List[str]) -> str:
-        """Add a new download to the queue."""
+        """Add a new download to the queue. Rejects duplicates that are already active."""
+        fingerprint = self._job_fingerprint(service, cmd)
         async with self.lock:
+            for existing in self.items.values():
+                if existing.status in (DownloadStatus.PENDING, DownloadStatus.DOWNLOADING):
+                    if self._job_fingerprint(existing.service, existing.cmd) == fingerprint:
+                        logger.info("Duplicate download rejected: %s (%s)", title, service)
+                        return existing.id
+
             item = DownloadItem(service, title, cmd)
             self.items[item.id] = item
-            logger.info(f"Added download: {title} ({service})")
+            logger.info("Added download: %s (%s)", title, service)
             self.db.save_download(item)
             
-        # Start download in background
         asyncio.create_task(self._process_download(item.id))
         await self.broadcast_state()
         return item.id
@@ -566,8 +600,8 @@ class DownloadQueueManager:
             item = self.items.get(item_id)
             if not item:
                 return
-            if item.status in ("pending", "downloading"):
-                item.status = "cancelled"
+            if item.status in (DownloadStatus.PENDING, DownloadStatus.DOWNLOADING):
+                item.status = DownloadStatus.CANCELLED
                 item.logs.append("\n[Download cancelled by user]")
                 item.cancel_event.set()
                 if item.process:
@@ -594,8 +628,8 @@ class DownloadQueueManager:
             item = self.items.get(item_id)
             if not item:
                 return False
-            if item.status in ("failed", "cancelled", "finished"):
-                item.status = "pending"
+            if item.status in (DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.FINISHED):
+                item.status = DownloadStatus.PENDING
                 item.progress = 0.0
                 item.speed = ""
                 item.eta = ""
@@ -613,14 +647,14 @@ class DownloadQueueManager:
     async def clear_completed(self):
         """Clear finished/failed/cancelled downloads."""
         async with self.lock:
-            to_remove = [k for k, v in self.items.items() if v.status in ("finished", "failed", "cancelled")]
+            to_remove = [k for k, v in self.items.items() if v.status in (DownloadStatus.FINISHED, DownloadStatus.FAILED, DownloadStatus.CANCELLED)]
             for k in to_remove:
                 self.db.delete_download(k)
                 del self.items[k]
         await self.broadcast_state()
 
     def _parse_progress(self, line: str, item: DownloadItem):
-        """Extract progress, speed, and ETA from output line."""
+        """Extract progress, speed, and ETA from output lines (yt-dlp, aria2, ffmpeg)."""
         pct_match = re.search(r"(\d+(?:\.\d+)?)%", line)
         if pct_match:
             try:
@@ -632,20 +666,40 @@ class DownloadQueueManager:
         if speed_match:
             item.speed = speed_match.group(1).strip()
 
+        ffmpeg_speed = re.search(r"speed=\s*([\d.]+)x", line)
+        if ffmpeg_speed:
+            item.speed = f"{ffmpeg_speed.group(1)}x"
+
         eta_match = re.search(r"(?:[eE][tT][aA]=?|\bETA\b\s+)(\d{2}:\d{2}(?::\d{2})?|\d+[smh])", line)
         if eta_match:
             item.eta = eta_match.group(1).strip()
 
+        ffmpeg_time = re.search(r"time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", line)
+        ffmpeg_dur = re.search(r"Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)", line)
+        if ffmpeg_dur:
+            item._ffmpeg_duration = ffmpeg_dur.group(1)
+        if ffmpeg_time and hasattr(item, "_ffmpeg_duration") and item._ffmpeg_duration:
+            try:
+                def _ts_seconds(ts: str) -> float:
+                    parts = ts.split(":")
+                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                cur = _ts_seconds(ffmpeg_time.group(1))
+                total = _ts_seconds(item._ffmpeg_duration)
+                if total > 0:
+                    item.progress = min(round((cur / total) * 100, 1), 99.9)
+            except (ValueError, IndexError):
+                pass
+
     async def _wait_for_slot(self, item: DownloadItem) -> bool:
         """Wait until a download slot is available. Returns False if cancelled while waiting."""
         while self.running_count >= MAX_CONCURRENT_DOWNLOADS:
-            if item.status == "cancelled" or item.cancel_event.is_set():
+            if item.status == DownloadStatus.CANCELLED or item.cancel_event.is_set():
                 return False
             await asyncio.sleep(0.5)
         return True
 
     def _is_cancelled(self, item: DownloadItem) -> bool:
-        return item.status == "cancelled" or item.cancel_event.is_set()
+        return item.status == DownloadStatus.CANCELLED or item.cancel_event.is_set()
 
     async def _process_download(self, item_id: str):
         """Process a single download with retry logic and rate limiting."""
@@ -654,14 +708,14 @@ class DownloadQueueManager:
             return
         if self._is_cancelled(item):
             async with self.lock:
-                item.status = "cancelled"
+                item.status = DownloadStatus.CANCELLED
                 self.db.save_download(item)
             await self.broadcast_state()
             return
 
         if not await self._wait_for_slot(item):
             async with self.lock:
-                item.status = "cancelled"
+                item.status = DownloadStatus.CANCELLED
                 self.db.save_download(item)
             await self.broadcast_state()
             return
@@ -675,12 +729,16 @@ class DownloadQueueManager:
                 if self._is_cancelled(item):
                     break
                 async with self.lock:
-                    item.status = "downloading"
+                    item.status = DownloadStatus.DOWNLOADING
                     item.logs.append(f"\n[Attempt {item.retry_count + 1}/{MAX_RETRIES}]")
                     item.logs.append(f"[Command]: {redact_command(item.cmd)}\n")
                     await self.broadcast_state()
 
                 try:
+                    from backend.utils.rate_limiter import upstream_limiter
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, upstream_limiter.wait, item.service
+                    )
                     success = await self._run_download_process(item)
                     if self._is_cancelled(item):
                         break
@@ -702,12 +760,12 @@ class DownloadQueueManager:
         # Final status update
         async with self.lock:
             if self._is_cancelled(item):
-                item.status = "cancelled"
+                item.status = DownloadStatus.CANCELLED
                 self.db.save_download(item)
                 await self.broadcast_state()
                 return
             if item.retry_count < MAX_RETRIES and success:
-                item.status = "finished"
+                item.status = DownloadStatus.FINISHED
                 item.progress = 100.0
                 item.logs.append("\n[✓ Download completed successfully!]")
 
@@ -751,7 +809,7 @@ class DownloadQueueManager:
                 except Exception as trans_err:
                     logger.error(f"Failed to initiate automatic transcode: {trans_err}")
             else:
-                item.status = "failed"
+                item.status = DownloadStatus.FAILED
                 item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
 
                 from backend.jobs.inprocess import get_output_dir_from_cmd

@@ -3,6 +3,7 @@ import { apiFetch, getStoredApiKey, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { AppStatus, TranscodeDiagnostics } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
+import { useActionGuard } from "../useActionGuard";
 
 export interface UseAppConfigOptions {
   showToast: ShowToastFn;
@@ -219,6 +220,9 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     }
   }, [showToast]);
 
+  const [guardedSaveConfig, savingConfig] = useActionGuard(handleSaveConfig);
+  const [guardedSubmitLogin, submittingLogin] = useActionGuard(submitLogin);
+
   return {
     status,
     setStatus,
@@ -248,9 +252,11 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     fetchTranscodeDiagnostics,
     handleImportSession,
     handleAutoSyncBrowser,
-    handleSaveConfig,
+    handleSaveConfig: guardedSaveConfig,
+    savingConfig,
     handleSaveDeviceWvdPath,
-    submitLogin,
+    submitLogin: guardedSubmitLogin,
+    submittingLogin,
     openOutputFolder,
   };
 }

@@ -96,7 +96,7 @@ describe("useDownloadQueue", () => {
       method: "POST",
       body: JSON.stringify({ id: "task-42" }),
     }));
-    expect(showToast).toHaveBeenCalledWith("Slanje zahteva za otkazivanje...", "info");
+    expect(showToast).toHaveBeenCalledWith("Preuzimanje otkazano.", "info");
   });
 
   it("shows success toast when retry succeeds", async () => {

@@ -57,10 +57,29 @@ class RtsAdapter:
             if not video_list:
                 raise ValueError("Video podaci nisu pronađeni na RTS API-ju.")
             video = video_list[0]
+
+            raw_title = video.get("title", f"RTS Video {video_id}")
+            if isinstance(raw_title, dict):
+                raw_title = (
+                    raw_title.get("title_long")
+                    or raw_title.get("title_medium")
+                    or raw_title.get("original_title")
+                    or f"RTS Video {video_id}"
+                )
+
+            raw_desc = video.get("description", "")
+            if isinstance(raw_desc, dict):
+                raw_desc = (
+                    raw_desc.get("summary_medium")
+                    or raw_desc.get("summary_short")
+                    or raw_desc.get("summary_long")
+                    or ""
+                )
+
             return {
                 "success": True,
-                "title": video.get("title", f"RTS Video {video_id}"),
-                "description": video.get("description", ""),
+                "title": raw_title,
+                "description": raw_desc,
                 "thumbnail": video.get("poster", ""),
             }
         except Exception as exc:

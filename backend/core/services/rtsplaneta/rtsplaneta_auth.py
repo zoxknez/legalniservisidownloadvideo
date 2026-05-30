@@ -50,6 +50,8 @@ class ChromeTLSAdapter(HTTPAdapter):
         context = create_urllib3_context()
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.maximum_version = ssl.TLSVersion.TLSv1_3
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         try:
             context.set_ciphers(
                 "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:"
@@ -117,7 +119,9 @@ class RTSPlanetaAuth:
         """
         self.session = create_session_with_retries()
         self.session.headers.update(self.DEFAULT_HEADERS)
-        self.session.verify = False  # RTSPlaneta SSL issues
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        self.session.verify = False  # RTSPlaneta's SSL certificates are unreliable
         
         self.state = AuthState()
         self.config = {}

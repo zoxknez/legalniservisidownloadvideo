@@ -103,10 +103,18 @@ def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> T
     temp_db_path = Path(temp_dir) / f"temp_cookies_{os.getpid()}.db"
     
     try:
-        # On Windows, command interpreter 'copy' handles open/locked files gracefully with shared read flags
         import subprocess
-        cmd = f'copy /y "{db_path}" "{temp_db_path}"'
-        subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import sys
+        if sys.platform == "win32":
+            subprocess.run(
+                ["cmd", "/c", "copy", "/y", str(db_path), str(temp_db_path)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.run(
+                ["cp", "--", str(db_path), str(temp_db_path)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
         
         # Fallback to shutil.copyfile if copy command failed or file wasn't created
         if not temp_db_path.exists():

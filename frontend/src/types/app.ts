@@ -1,7 +1,10 @@
-// Interface definitions
 import type { CredentialsSecurityMap } from "../components/SecurityPanels";
 
 export type ToastType = "success" | "error" | "info";
+
+export type ServiceName = "voyo" | "hrti" | "eon" | "rts" | "hbo" | "hbomax" | "yt-dlp";
+
+export type DownloadStatus = "pending" | "downloading" | "finished" | "failed" | "cancelled";
 
 export interface BinaryStatus {
   found: boolean;
@@ -58,7 +61,7 @@ export interface DownloadTask {
   id: string;
   service: string;
   title: string;
-  status: "pending" | "downloading" | "finished" | "failed" | "cancelled";
+  status: DownloadStatus;
   progress: number;
   speed: string;
   eta: string;
@@ -81,9 +84,16 @@ export interface VoyoEpisode {
   has_subs: boolean;
 }
 
+export interface VoyoSeason {
+  season: number;
+  episodes: VoyoEpisode[];
+}
+
 export interface VoyoSeriesInfo {
   title: string;
   description: string;
+  nbSeasons?: number;
+  seasons?: VoyoSeason[];
   episodes: VoyoEpisode[];
 }
 
@@ -203,4 +213,3 @@ export interface DrmHealth {
   pywidevine_version: string | null;
   recommendations: string[];
 }
-

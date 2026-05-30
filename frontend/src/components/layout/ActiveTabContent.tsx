@@ -1,5 +1,4 @@
 import { lazy, Suspense } from "react";
-import { Loader2 } from "lucide-react";
 
 const DashboardTab = lazy(() =>
   import("../tabs/DashboardTab").then((m) => ({ default: m.DashboardTab })),
@@ -34,9 +33,12 @@ const DrmPanel = lazy(() =>
 
 function TabLoadingFallback() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3 text-text-secondary">
-      <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-      <span className="text-xs font-semibold tracking-wide uppercase">Učitavanje…</span>
+    <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 text-text-secondary">
+      <div className="skeleton skeleton-circle" style={{ width: 48, height: 48 }} />
+      <div className="flex flex-col gap-2 items-center">
+        <div className="skeleton skeleton-text" style={{ width: 120 }} />
+        <div className="skeleton skeleton-text-sm" style={{ width: 80 }} />
+      </div>
     </div>
   );
 }
@@ -44,16 +46,18 @@ function TabLoadingFallback() {
 export function ActiveTabContent({ activeTab }: { activeTab: string }) {
   return (
     <Suspense fallback={<TabLoadingFallback />}>
-      {activeTab === "dashboard" && <DashboardTab />}
-      {activeTab === "voyo" && <VoyoTab />}
-      {activeTab === "hrti" && <HrtiTab />}
-      {activeTab === "eon" && <EonTab />}
-      {activeTab === "rts" && <RtsTab />}
-      {activeTab === "hbo" && <HboTab />}
-      {activeTab === "iptv" && <IptvTab />}
-      {activeTab === "drm" && <DrmPanel />}
-      {activeTab === "settings" && <SettingsTab />}
-      {activeTab === "about" && <AboutTab />}
+      <div key={activeTab} className="tab-content-enter">
+        {activeTab === "dashboard" && <DashboardTab />}
+        {activeTab === "voyo" && <VoyoTab />}
+        {activeTab === "hrti" && <HrtiTab />}
+        {activeTab === "eon" && <EonTab />}
+        {activeTab === "rts" && <RtsTab />}
+        {activeTab === "hbo" && <HboTab />}
+        {activeTab === "iptv" && <IptvTab />}
+        {activeTab === "drm" && <DrmPanel />}
+        {activeTab === "settings" && <SettingsTab />}
+        {activeTab === "about" && <AboutTab />}
+      </div>
     </Suspense>
   );
 }

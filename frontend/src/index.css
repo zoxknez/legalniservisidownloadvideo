@@ -1,4 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import './styles/animations.css';
+@import './styles/skeleton.css';
+@import './styles/progress.css';
+@import './styles/empty-states.css';
+@import './styles/responsive.css';
+@import './styles/drag-drop.css';
 
 :root {
   --bg-primary: #0a0b10;
@@ -7,11 +13,11 @@
   --border-glass: rgba(255, 255, 255, 0.06);
   --border-glass-active: rgba(99, 102, 241, 0.25);
   
-  --primary: #6366f1; /* Indigo */
+  --primary: #6366f1;
   --primary-hover: #4f46e5;
   --primary-glow: rgba(99, 102, 241, 0.15);
   
-  --secondary: #10b981; /* Emerald */
+  --secondary: #10b981;
   --secondary-glow: rgba(16, 185, 129, 0.15);
   
   --text-primary: #f3f4f6;
@@ -37,6 +43,27 @@
   --transition-fast: 0.15s ease;
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  /* Spacing scale (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
 }
 
 * {
@@ -933,6 +960,13 @@ select option {
 .custom-select-option.selected:hover {
   background: rgba(99, 102, 241, 0.2);
   color: #ffffff;
+}
+
+.custom-select-option.highlighted {
+  background: rgba(99, 102, 241, 0.12);
+  color: #ffffff;
+  outline: 1px solid rgba(99, 102, 241, 0.3);
+  outline-offset: -1px;
 }
 
 .custom-select-search-wrap {
@@ -2389,7 +2423,6 @@ textarea {
 .bottom-1\.5 {
   bottom: 6px !important;
 }
-
 
 
 

@@ -49,15 +49,16 @@ export function useDownloadQueue({ showToast }: UseDownloadQueueOptions) {
 
   const cancelDownloadTask = useCallback(
     async (id: string) => {
+      setDownloads(prev => prev.map(d => d.id === id ? { ...d, status: "cancelled" as const } : d));
       try {
         await apiFetch(`/api/queue/cancel`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id }),
         });
-        showToast("Slanje zahteva za otkazivanje...", "info");
-      } catch (e) {
-        console.error(e);
+        showToast("Preuzimanje otkazano.", "info");
+      } catch {
+        showToast("Greška pri otkazivanju.", "error");
       }
     },
     [showToast],
@@ -85,12 +86,14 @@ export function useDownloadQueue({ showToast }: UseDownloadQueueOptions) {
   );
 
   const clearCompletedQueue = useCallback(async () => {
+    const terminalStatuses = new Set(["finished", "failed", "cancelled"]);
+    setDownloads(prev => prev.filter(d => !terminalStatuses.has(d.status)));
+    setConfirmClear(false);
     try {
       await apiFetch(`/api/queue/clear`, { method: "POST" });
       showToast("Očišćen red preuzimanja!");
-      setConfirmClear(false);
-    } catch (e) {
-      console.error(e);
+    } catch {
+      showToast("Greška pri čišćenju reda.", "error");
     }
   }, [showToast]);
 

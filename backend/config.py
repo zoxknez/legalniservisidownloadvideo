@@ -64,12 +64,27 @@ class AppConfig:
             if not path.exists():
                 continue
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
+                raw = path.read_text(encoding="utf-8")
+                loaded = json.loads(raw)
+                if not isinstance(loaded, dict):
+                    logger.warning("Config at %s is not a JSON object, using defaults.", path)
+                    continue
                 self.config_file = path
                 return self._merge_defaults(loaded)
-            except Exception:
-                pass
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "Corrupt config at %s (line %d, col %d): %s — using defaults.",
+                    path, e.lineno, e.colno, e.msg,
+                )
+                backup = path.with_suffix(".json.bak")
+                try:
+                    import shutil as _shutil
+                    _shutil.copy2(path, backup)
+                    logger.info("Backed up corrupt config to %s", backup)
+                except OSError:
+                    pass
+            except Exception as e:
+                logger.error("Failed to load config from %s: %s", path, e)
         return json.loads(json.dumps(DEFAULT_CONFIG))
 
     def _write(self, path: Path):

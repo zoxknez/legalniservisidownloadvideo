@@ -294,27 +294,34 @@ def api_request(endpoint_name: str, extra: Optional[Dict[str, Any]] = None, requ
         return response.text
 
 
+import threading
+
+_token_lock = threading.Lock()
+
+
 def login_api(username: str, password: str, serial: str, number: str) -> Dict[str, Any]:
-    save_device_profile(username, serial, number)
-    payload = api_request(
-        "login",
-        {
-            "username": username,
-            "password": password,
-            "device_serial": serial,
-            "device_number": number,
-        },
-        require_auth=False,
-    )
-    tokens = extract_tokens(payload)
-    if tokens:
-        save_token_profile(tokens)
-    return {"payload": payload, "tokens_saved": bool(tokens), "token_status": token_status()}
+    with _token_lock:
+        save_device_profile(username, serial, number)
+        payload = api_request(
+            "login",
+            {
+                "username": username,
+                "password": password,
+                "device_serial": serial,
+                "device_number": number,
+            },
+            require_auth=False,
+        )
+        tokens = extract_tokens(payload)
+        if tokens:
+            save_token_profile(tokens)
+        return {"payload": payload, "tokens_saved": bool(tokens), "token_status": token_status()}
 
 
 def refresh_api_token() -> Dict[str, Any]:
-    payload = api_request("refresh", {}, require_auth=False)
-    tokens = extract_tokens(payload)
-    if tokens:
-        save_token_profile(tokens)
-    return {"payload": payload, "tokens_saved": bool(tokens), "token_status": token_status()}
+    with _token_lock:
+        payload = api_request("refresh", {}, require_auth=False)
+        tokens = extract_tokens(payload)
+        if tokens:
+            save_token_profile(tokens)
+        return {"payload": payload, "tokens_saved": bool(tokens), "token_status": token_status()}

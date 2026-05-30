@@ -236,17 +236,26 @@ def get_transcode_diagnostics() -> Dict[str, Any]:
     gpu_name = "Generički Video Procesor"
     try:
         if platform.system() == "Windows":
-            out = subprocess.check_output("wmic path win32_VideoController get name", shell=True, text=True)
+            out = subprocess.check_output(
+                ["wmic", "path", "win32_VideoController", "get", "name"],
+                text=True, timeout=10,
+            )
             lines = [line.strip() for line in out.splitlines() if line.strip() and "Name" not in line]
             if lines:
                 gpu_name = lines[0]
         elif platform.system() == "Darwin":
-            out = subprocess.check_output("sysctl -n machdep.cpu.brand_string", shell=True, text=True)
+            out = subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                text=True, timeout=10,
+            )
             gpu_name = out.strip()
         elif platform.system() == "Linux":
             try:
-                out = subprocess.check_output("lspci | grep -i vga", shell=True, text=True)
-                gpu_name = out.split(":")[-1].strip()
+                lspci = subprocess.check_output(["lspci"], text=True, timeout=10)
+                for line in lspci.splitlines():
+                    if "vga" in line.lower():
+                        gpu_name = line.split(":")[-1].strip()
+                        break
             except Exception:
                 gpu_name = "Linux Video Controller"
     except Exception:

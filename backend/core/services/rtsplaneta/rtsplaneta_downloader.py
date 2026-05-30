@@ -443,59 +443,86 @@ class RTSPlanetaDownloader:
         }
     
     def download_manifest_info(self, mpd_url: str) -> Dict[str, Any]:
-        """Download and parse MPD manifest using yt-dlp"""
-        opts = {
-            'writeinfojson': True,
-            'skip_download': True,
-            'outtmpl': str(self.temp_dir / 'media'),
-            'quiet': True,
-            'no_warnings': True,
-            'allow_unplayable_formats': True,  # Allow DRM protected content
-            'ignoreerrors': False,
-        }
-        
-        with YoutubeDL(opts) as ydl:
-            ydl.download([mpd_url])
-        
-        info_file = self.temp_dir / 'media.info.json'
-        with open(info_file) as f:
-            return json.load(f)
-    
+        """Download and parse MPD manifest XML directly."""
+        resp = requests.get(mpd_url, verify=False, timeout=30)
+        resp.raise_for_status()
+        return xmltodict.parse(resp.text)
+
     def get_best_formats(self, manifest_data: Dict) -> Dict[str, List[str]]:
-        """Extract best quality audio and video fragment URLs"""
-        fragment_urls = defaultdict(lambda: defaultdict(list))
-        
-        for fmt in manifest_data.get('formats', []):
-            format_id = fmt.get('format_id', '')
-            base_url = fmt.get('fragment_base_url', '')
-            
-            if not format_id or not base_url:
-                continue
-            
-            parts = format_id.split('-')
-            if len(parts) >= 3:
-                stream_type = parts[1]
-                quality_id = parts[0].replace('f', '')
-                
-                for frag in fmt.get('fragments', []):
-                    try:
-                        url = urllib.parse.urljoin(base_url, frag['path'])
-                        fragment_urls[stream_type][quality_id].append(url)
-                    except (KeyError, ValueError):
-                        continue
-        
-        result = {'video': [], 'audio': []}
-        
-        if 'v1' in fragment_urls:
-            best_vid_id = sorted(fragment_urls['v1'].keys(), key=int)[-1]
-            result['video'] = fragment_urls['v1'][best_vid_id]
-            logger.info(f"Selected video quality: {best_vid_id}")
-        
-        if 'a1' in fragment_urls:
-            best_aud_id = sorted(fragment_urls['a1'].keys(), key=int)[-1]
-            result['audio'] = fragment_urls['a1'][best_aud_id]
-            logger.info(f"Selected audio quality: {best_aud_id}")
-        
+        """Build fragment URLs from the parsed MPD XML."""
+        result: Dict[str, List[str]] = {'video': [], 'audio': []}
+        mpd = manifest_data.get('MPD', {})
+        period = mpd.get('Period', {})
+        adaptation_sets = period.get('AdaptationSet', [])
+        if isinstance(adaptation_sets, dict):
+            adaptation_sets = [adaptation_sets]
+
+        video_reps: List[Dict] = []
+        audio_reps: List[Dict] = []
+
+        for aset in adaptation_sets:
+            seg_tpl = aset.get('SegmentTemplate', {})
+            media_tpl = seg_tpl.get('@media', '')
+            init_tpl = seg_tpl.get('@initialization', '')
+            start_number = int(seg_tpl.get('@startNumber', '1'))
+            timeline = seg_tpl.get('SegmentTimeline', {})
+
+            segments_s = timeline.get('S', [])
+            if isinstance(segments_s, dict):
+                segments_s = [segments_s]
+            num_segments = 0
+            for s in segments_s:
+                repeat = int(s.get('@r', '0'))
+                num_segments += 1 + repeat
+
+            reps = aset.get('Representation', [])
+            if isinstance(reps, dict):
+                reps = [reps]
+
+            for rep in reps:
+                rep_id = rep.get('@id', '')
+                bandwidth = int(rep.get('@bandwidth', '0'))
+                mime = rep.get('@mimeType', aset.get('@mimeType', ''))
+
+                seg_tpl_rep = rep.get('SegmentTemplate', seg_tpl)
+                media_tpl_r = seg_tpl_rep.get('@media', media_tpl)
+                init_tpl_r = seg_tpl_rep.get('@initialization', init_tpl)
+
+                entry = {
+                    'rep_id': rep_id,
+                    'bandwidth': bandwidth,
+                    'media_tpl': media_tpl_r,
+                    'init_tpl': init_tpl_r,
+                    'start_number': start_number,
+                    'num_segments': num_segments,
+                }
+
+                if 'video' in mime:
+                    video_reps.append(entry)
+                elif 'audio' in mime:
+                    audio_reps.append(entry)
+
+        def build_urls(entry: Dict) -> List[str]:
+            urls = []
+            init_url = entry['init_tpl'].replace('$RepresentationID$', entry['rep_id'])
+            urls.append(init_url)
+            for i in range(entry['num_segments']):
+                seg_url = entry['media_tpl'].replace(
+                    '$RepresentationID$', entry['rep_id']
+                ).replace('$Number$', str(entry['start_number'] + i))
+                urls.append(seg_url)
+            return urls
+
+        if video_reps:
+            best_video = max(video_reps, key=lambda r: r['bandwidth'])
+            result['video'] = build_urls(best_video)
+            logger.info(f"Selected video: {best_video['rep_id']} ({best_video['bandwidth']} bps, {best_video['num_segments']} segments)")
+
+        if audio_reps:
+            best_audio = max(audio_reps, key=lambda r: r['bandwidth'])
+            result['audio'] = build_urls(best_audio)
+            logger.info(f"Selected audio: {best_audio['rep_id']} ({best_audio['bandwidth']} bps, {best_audio['num_segments']} segments)")
+
         return result
     
     def download_fragments(self, urls: List[str], output_dir: Path):
@@ -538,71 +565,94 @@ class RTSPlanetaDownloader:
                 with open(f, 'rb') as in_fd:
                     shutil.copyfileobj(in_fd, out_fd)
     
-    def extract_pssh(self, mpd_url: str) -> str:
-        """Extract PSSH from MPD manifest"""
-        response = requests.get(mpd_url, verify=False)
-        mpd_data = xmltodict.parse(response.text)
-        
-        pssh = None
-        
-        # Navigate MPD structure to find PSSH
+    def extract_pssh_from_mpd(self, mpd_url: str) -> Optional[str]:
+        """Try to extract PSSH from MPD manifest ContentProtection elements."""
         try:
+            response = requests.get(mpd_url, verify=False, timeout=15)
+            mpd_data = xmltodict.parse(response.text)
+
             period = mpd_data['MPD']['Period']
             adaptations = period.get('AdaptationSet', [])
             if not isinstance(adaptations, list):
                 adaptations = [adaptations]
-            
+
             for adaptation in adaptations:
-                # Check ContentProtection at AdaptationSet level
                 protections = adaptation.get('ContentProtection', [])
                 if not isinstance(protections, list):
                     protections = [protections]
-                
+
                 for prot in protections:
                     scheme = prot.get('@schemeIdUri', '').lower()
                     if 'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed' in scheme:
                         pssh = prot.get('cenc:pssh') or prot.get('pssh')
                         if pssh:
-                            return pssh
-                
-                # Also check Representation level
+                            return pssh.strip()
+
                 reps = adaptation.get('Representation', [])
                 if not isinstance(reps, list):
                     reps = [reps]
-                
                 for rep in reps:
                     protections = rep.get('ContentProtection', [])
                     if not isinstance(protections, list):
                         protections = [protections]
-                    
                     for prot in protections:
                         scheme = prot.get('@schemeIdUri', '').lower()
                         if 'edef8ba9-79d6-4ace-a3c8-27dcd51d21ed' in scheme:
                             pssh = prot.get('cenc:pssh') or prot.get('pssh')
                             if pssh:
-                                return pssh
-                                
-        except (KeyError, TypeError) as e:
-            logger.error(f"Failed to parse MPD for PSSH: {e}")
-            raise
-        
+                                return pssh.strip()
+        except Exception as e:
+            logger.warning(f"Could not extract PSSH from MPD: {e}")
+
+        return None
+
+    @staticmethod
+    def extract_pssh_from_mp4(file_path: Path) -> Optional[str]:
+        """Extract Widevine PSSH box from an MP4/M4A init segment."""
+        WIDEVINE_SYSTEM_ID = b'\xed\xef\x8b\xa9\x79\xd6\x4a\xce\xa3\xc8\x27\xdc\xd5\x1d\x21\xed'
+        try:
+            data = file_path.read_bytes()
+            offset = 0
+            while offset < len(data) - 8:
+                box_size = int.from_bytes(data[offset:offset + 4], 'big')
+                box_type = data[offset + 4:offset + 8]
+                if box_size < 8:
+                    break
+                if box_type == b'pssh':
+                    system_id = data[offset + 12:offset + 28]
+                    if system_id == WIDEVINE_SYSTEM_ID:
+                        pssh_box = data[offset:offset + box_size]
+                        return base64.b64encode(pssh_box).decode()
+                offset += box_size
+        except Exception as e:
+            logger.warning(f"Could not extract PSSH from {file_path}: {e}")
+        return None
+
+    def get_decryption_keys(self, mpd_url: str, license_url: str,
+                            enc_video: Path = None, enc_audio: Path = None) -> List[str]:
+        """Get Widevine decryption keys (tries MPD first, then encrypted files)."""
+        pssh = self.extract_pssh_from_mpd(mpd_url)
+
+        if not pssh and enc_video:
+            logger.info("PSSH not in MPD, extracting from encrypted video...")
+            pssh = self.extract_pssh_from_mp4(enc_video)
+
+        if not pssh and enc_audio:
+            logger.info("PSSH not in video, trying encrypted audio...")
+            pssh = self.extract_pssh_from_mp4(enc_audio)
+
         if not pssh:
-            raise ValueError("Could not find PSSH in MPD manifest")
-        
-        return pssh
-    
-    def get_decryption_keys(self, mpd_url: str, license_url: str) -> List[str]:
-        """Get Widevine decryption keys"""
-        pssh = self.extract_pssh(mpd_url)
+            raise ValueError("Could not find PSSH in MPD or encrypted files")
+
         logger.info(f"Found PSSH: {pssh[:40]}...")
-        
+
         headers = {
             'Accept': '*/*',
             'Origin': 'https://rtsplaneta.rs',
             'Referer': 'https://rtsplaneta.rs/',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
-        
+
         return self.cdm.get_keys(pssh, license_url, headers)
     
     def decrypt_media(self, input_file: Path, output_file: Path, keys: List[str]):
@@ -630,8 +680,44 @@ class RTSPlanetaDownloader:
         logger.info(f"Fixing container: {input_file.name}")
         subprocess.run(cmd, check=True, capture_output=True)
     
+    @staticmethod
+    def _is_encrypted(mp4_path: Path) -> bool:
+        """Check if an MP4 file uses encrypted sample entries (encv/enca)."""
+        try:
+            data = mp4_path.read_bytes()
+            offset = 0
+            while offset < len(data) - 8:
+                box_size = int.from_bytes(data[offset:offset + 4], 'big')
+                box_type = data[offset + 4:offset + 8]
+                if box_size < 8:
+                    break
+                if box_type == b'moov':
+                    chunk = data[offset:offset + box_size]
+                    if b'encv' in chunk or b'enca' in chunk:
+                        return True
+                    return False
+                offset += box_size
+        except Exception:
+            pass
+        return False
+
+    def _mux_with_ffmpeg(self, video_file: Path, audio_file: Path, output_file: Path):
+        """Mux video and audio into MKV using ffmpeg."""
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            self.binaries['ffmpeg'],
+            '-y',
+            '-i', str(video_file),
+            '-i', str(audio_file),
+            '-c', 'copy',
+            '-movflags', '+faststart',
+            str(output_file),
+        ]
+        logger.info(f"Muxing to: {output_file.name}")
+        subprocess.run(cmd, check=True, capture_output=True)
+
     def mux_to_mkv(self, video_file: Path, audio_file: Path, output_file: Path):
-        """Mux video and audio into MKV container"""
+        """Mux video and audio into MKV container using mkvmerge"""
         cmd = [
             self.binaries['mkvmerge'],
             '--ui-language', 'en',
@@ -668,6 +754,53 @@ class RTSPlanetaDownloader:
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
     
+    def _download_streams_ytdlp(self, mpd_url: str) -> tuple:
+        """Download encrypted video/audio streams via yt-dlp (handles CDN redirects)."""
+        enc_video = self.temp_dir / 'encrypted_video.mp4'
+        enc_audio = self.temp_dir / 'encrypted_audio.m4a'
+
+        opts_video = {
+            'quiet': True,
+            'no_warnings': True,
+            'allow_unplayable_formats': True,
+            'format': 'bestvideo',
+            'outtmpl': str(enc_video),
+            'fixup': 'never',
+        }
+        opts_audio = {
+            'quiet': True,
+            'no_warnings': True,
+            'allow_unplayable_formats': True,
+            'format': 'bestaudio',
+            'outtmpl': str(enc_audio),
+            'fixup': 'never',
+        }
+
+        logger.info("Downloading encrypted video stream...")
+        with YoutubeDL(opts_video) as ydl:
+            ydl.download([mpd_url])
+
+        logger.info("Downloading encrypted audio stream...")
+        with YoutubeDL(opts_audio) as ydl:
+            ydl.download([mpd_url])
+
+        # yt-dlp may append format id to filename
+        if not enc_video.exists():
+            for p in self.temp_dir.glob('encrypted_video*'):
+                enc_video = p
+                break
+        if not enc_audio.exists():
+            for p in self.temp_dir.glob('encrypted_audio*'):
+                enc_audio = p
+                break
+
+        if not enc_video.exists() or not enc_audio.exists():
+            raise ValueError("yt-dlp failed to download streams")
+
+        logger.info(f"Encrypted video: {enc_video.name} ({enc_video.stat().st_size} bytes)")
+        logger.info(f"Encrypted audio: {enc_audio.name} ({enc_audio.stat().st_size} bytes)")
+        return enc_video, enc_audio
+
     def download(self, url: str) -> Path:
         """
         Main download method.
@@ -678,80 +811,58 @@ class RTSPlanetaDownloader:
         Returns:
             Path to downloaded MKV file
         """
-        # Extract video ID
         video_id = self.extract_video_id(url)
         logger.info(f"Video ID: {video_id}")
-        
-        # Get video info
+
         video_info = self.get_video_info(video_id)
         title = video_info.get('video', [{}])[0].get('title', {}).get('title_long', f'video_{video_id}')
         logger.info(f"Title: {title}")
-        
-        # Get streaming info
+
         mpd_info = self.get_mpd_info(video_id)
         mpd_url = mpd_info['mpd_url']
         license_url = mpd_info['license_url']
-        
+
         logger.info(f"MPD URL: {mpd_url[:80]}...")
         logger.info(f"License URL: {license_url}")
-        
-        # Ensure temp directories exist
+
         self._setup_directories()
-        
-        # Download and parse manifest
-        manifest = self.download_manifest_info(mpd_url)
-        
-        # Get best quality fragment URLs
-        fragments = self.get_best_formats(manifest)
-        
-        if not fragments['video'] or not fragments['audio']:
-            raise ValueError("Could not find video/audio streams")
-        
-        # Download fragments
-        audio_dir = self.temp_dir / 'audio'
-        video_dir = self.temp_dir / 'video'
-        
-        logger.info("Downloading audio fragments...")
-        self.download_fragments(fragments['audio'], audio_dir)
-        
-        logger.info("Downloading video fragments...")
-        self.download_fragments(fragments['video'], video_dir)
-        
-        # Merge fragments
-        enc_audio = self.temp_dir / 'encrypted_audio.mp4'
-        enc_video = self.temp_dir / 'encrypted_video.mp4'
-        
-        self.merge_fragments(audio_dir, enc_audio)
-        self.merge_fragments(video_dir, enc_video)
-        
-        # Get decryption keys
-        logger.info("Fetching Widevine keys...")
-        keys = self.get_decryption_keys(mpd_url, license_url)
-        logger.info(f"Got {len(keys)} decryption key(s)")
-        
-        # Decrypt
-        dec_audio = self.temp_dir / 'decrypted_audio.mp4'
-        dec_video = self.temp_dir / 'decrypted_video.mp4'
-        
-        self.decrypt_media(enc_audio, dec_audio, keys)
-        self.decrypt_media(enc_video, dec_video, keys)
-        
-        # Fix containers
-        fixed_audio = self.temp_dir / 'audio.aac'
-        fixed_video = self.temp_dir / 'video.h264'
-        
-        self.fix_media_container(dec_audio, fixed_audio)
-        self.fix_media_container(dec_video, fixed_video)
-        
-        # Mux to MKV
+
+        # Use yt-dlp to download streams (handles CDN redirects properly)
+        enc_video, enc_audio = self._download_streams_ytdlp(mpd_url)
+
+        # Check if content is actually encrypted (codec == encv/enca)
+        encrypted = self._is_encrypted(enc_video)
+
+        if encrypted:
+            logger.info("Content is DRM-encrypted, fetching keys...")
+            keys = self.get_decryption_keys(mpd_url, license_url, enc_video, enc_audio)
+            logger.info(f"Got {len(keys)} decryption key(s)")
+
+            dec_audio = self.temp_dir / 'decrypted_audio.mp4'
+            dec_video = self.temp_dir / 'decrypted_video.mp4'
+
+            self.decrypt_media(enc_video, dec_video, keys)
+            self.decrypt_media(enc_audio, dec_audio, keys)
+
+            fixed_audio = self.temp_dir / 'audio.aac'
+            fixed_video = self.temp_dir / 'video.h264'
+
+            self.fix_media_container(dec_audio, fixed_audio)
+            self.fix_media_container(dec_video, fixed_video)
+        else:
+            logger.info("Content is NOT encrypted, skipping decryption")
+            fixed_video = enc_video
+            fixed_audio = enc_audio
+
+        # Mux to MKV using ffmpeg
         safe_title = self.sanitize_filename(title)
         output_file = self.output_dir / f"{safe_title}.WEB-DL.mkv"
-        
-        self.mux_to_mkv(fixed_video, fixed_audio, output_file)
-        
+
+        self._mux_with_ffmpeg(fixed_video, fixed_audio, output_file)
+
         # Cleanup
         self.cleanup()
-        
+
         logger.info(f"Download complete: {output_file}")
         return output_file
 

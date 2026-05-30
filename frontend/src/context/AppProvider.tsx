@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import type { AppContextValue } from "../types/app-context";
 import { ComposeSliceProviders } from "./ComposeSliceProviders";
 import { flattenAppStore, type AppStore } from "./appStore";
@@ -13,7 +13,39 @@ import { useSniffer } from "../hooks/domains/useSniffer";
 import { useDownloadQueue } from "../hooks/domains/useDownloadQueue";
 import { useAppConfig } from "../hooks/domains/useAppConfig";
 
+type BootState = "loading" | "ready" | "error";
+
+function BootLoader({ state, error, onRetry }: { state: BootState; error: string; onRetry: () => void }) {
+  if (state === "loading") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-6" style={{ background: "var(--bg-primary)" }}>
+        <div className="flex flex-col gap-4 w-80">
+          <div className="skeleton" style={{ height: 40, borderRadius: 12 }} />
+          <div className="skeleton" style={{ height: 20, width: "60%", borderRadius: 8 }} />
+          <div className="skeleton" style={{ height: 200, borderRadius: 12 }} />
+          <div className="skeleton" style={{ height: 16, width: "80%", borderRadius: 8 }} />
+        </div>
+      </div>
+    );
+  }
+  if (state === "error") {
+    return (
+      <div className="error-overlay" style={{ background: "var(--bg-primary)", minHeight: "100vh" }}>
+        <svg className="error-overlay-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+        <h2 className="error-overlay-title">Server nije dostupan</h2>
+        <p className="error-overlay-message">{error || "Nije moguće uspostaviti vezu sa backend serverom. Proverite da li je server pokrenut."}</p>
+        <button className="error-overlay-retry" onClick={onRetry}>Ponovi povezivanje</button>
+      </div>
+    );
+  }
+  return null;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [bootState, setBootState] = useState<BootState>("loading");
+  const [bootError, setBootError] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(
     null,
@@ -62,12 +94,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribeStatusLoaded and setSnifferAutoDownload are stable
   }, [config.subscribeStatusLoaded, sniffer.setSnifferAutoDownload]);
 
-  useEffect(() => {
-    void config.fetchStatus();
-    void queue.fetchScheduledRecordings();
-    void config.fetchTranscodeDiagnostics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial bootstrap once on mount
+  const bootstrap = useCallback(async () => {
+    setBootState("loading");
+    setBootError("");
+    try {
+      await config.fetchStatus();
+      setBootState("ready");
+      void queue.fetchScheduledRecordings();
+      void config.fetchTranscodeDiagnostics();
+    } catch (e) {
+      setBootState("error");
+      setBootError(e instanceof Error ? e.message : "Nepoznata greška");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs
   }, []);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
 
   useDownloadWebSocket({
     selectedTaskRef: queue.selectedTaskRef,
@@ -105,6 +149,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   flattenAppStore(store) satisfies AppContextValue;
+
+  if (bootState !== "ready") {
+    return <BootLoader state={bootState} error={bootError} onRetry={bootstrap} />;
+  }
 
   return <ComposeSliceProviders store={store}>{children}</ComposeSliceProviders>;
 }

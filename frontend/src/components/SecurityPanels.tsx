@@ -134,6 +134,7 @@ export function WvdInstallerPanel({
   const [uploading, setUploading] = useState(false);
   const [b64, setB64] = useState("");
   const [discovered, setDiscovered] = useState<{ path: string; size: number; is_canonical?: boolean }[]>([]);
+  const [dragOver, setDragOver] = useState(false);
 
   const refreshDiscover = useCallback(async () => {
     setDiscovering(true);
@@ -232,6 +233,27 @@ export function WvdInstallerPanel({
         <code className="font-mono text-violet-300">~/.videodownload/device.wvd</code> i učitati CDM.
         Ako ste iz alata dobili <strong className="text-white">base64</strong> dump, nalepite ga ispod.
       </p>
+
+      <div
+        className={`drop-zone ${dragOver ? "drag-over" : ""}`}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const file = e.dataTransfer.files[0];
+          if (file?.name.endsWith(".wvd")) {
+            runUpload(file);
+          } else if (file) {
+            showToast("Samo .wvd fajlovi su dozvoljeni.", "error");
+          }
+        }}
+      >
+        <Upload className="drop-zone-icon" />
+        <p className="drop-zone-label">Prevuci .wvd fajl ovde</p>
+        <p className="drop-zone-hint">ili koristi dugmad ispod</p>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <button

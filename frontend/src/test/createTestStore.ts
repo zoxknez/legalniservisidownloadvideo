@@ -78,8 +78,10 @@ function configSlice(overrides: Partial<AppConfigSlice> = {}): AppConfigSlice {
     handleImportSession: noopAsync,
     handleAutoSyncBrowser: noopAsync,
     handleSaveConfig: noopAsync,
+    savingConfig: false,
     handleSaveDeviceWvdPath: noopAsync,
     submitLogin: noopAsync,
+    submittingLogin: false,
     openOutputFolder: noopAsync,
     ...overrides,
   };

@@ -43,9 +43,9 @@ export function AppSidebar() {
             onMouseEnter={() => prefetchTab(tab.id)}
             onFocus={() => prefetchTab(tab.id)}
             style={active ? {boxShadow: `0 4px 14px ${tab.activeGlow}`} : {}}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
+            className={`sidebar-nav-btn w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200 ${
               active
-                ? `${tab.activeBg} text-white`
+                ? `${tab.activeBg} text-white active`
                 : "text-text-secondary hover:bg-white/[0.03] hover:text-white"
             }`}
           >

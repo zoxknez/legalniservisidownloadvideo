@@ -1,5 +1,5 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { buildWebSocketUrl } from "../lib/api";
+import { apiFetch, buildWebSocketUrl } from "../lib/api";
 import type {
   DownloadTask,
   ScheduledTask,
@@ -25,7 +25,9 @@ interface UseDownloadWebSocketOptions {
   fetchStatus: () => Promise<void>;
 }
 
-/** Single persistent WebSocket for queue, sniffer, transcode, and scheduler events. */
+const MAX_RECONNECT_DELAY = 30_000;
+const HEARTBEAT_INTERVAL = 30_000;
+
 export function useDownloadWebSocket({
   selectedTaskRef,
   setConnected,
@@ -50,118 +52,164 @@ export function useDownloadWebSocket({
   useEffect(() => {
     let ws: WebSocket | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    let attempt = 0;
+    let disposed = false;
+
+    const clearHeartbeat = () => {
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = undefined;
+      }
+    };
+
+    const syncStateOnReconnect = async () => {
+      try {
+        const res = await apiFetch("/api/queue", { timeoutMs: 5000 });
+        if (res.ok) {
+          const queue = (await res.json()) as DownloadTask[];
+          setDownloads(queue);
+        }
+      } catch {
+        /* best effort */
+      }
+    };
 
     const connect = () => {
+      if (disposed) return;
       ws = new WebSocket(buildWebSocketUrl());
 
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data as string) as {
-            type: string;
-            data?: unknown;
-          };
+      ws.onopen = () => {
+        setConnected(true);
+        attempt = 0;
 
-          if (payload.type === "queue_update") {
-            const queue = payload.data as DownloadTask[];
-            setDownloads(queue);
-            const current = selectedTaskRef.current;
-            if (current) {
-              const updated = queue.find((d) => d.id === current.id);
-              if (updated) setSelectedTask(updated);
-            }
-          } else if (payload.type === "sniffer_update") {
-            const { service, type, url, headers, title } = payload.data as SnifferCapture;
-            setSniffedItems((prev) => {
-              const current = prev[service] || {};
-              const updated = { ...current };
-              if (type === "manifest") {
-                updated.manifestUrl = url;
-                if (title) updated.title = title;
-              } else if (type === "license") {
-                updated.licenseUrl = url;
-                if (headers) updated.headers = headers;
-              }
-              return { ...prev, [service]: updated };
-            });
-            setLatestSniffed({ service, type, url, headers, title });
-            setShowSnifferToast(true);
-          } else if (payload.type === "sniffer_ready") {
-            const { service, capture } = (payload.data || {}) as {
-              service?: string;
-              capture?: SnifferReadyEntry & {
-                manifest_url?: string;
-                license_url?: string;
-                headers?: Record<string, string>;
-              };
-            };
-            if (service && capture) {
-              setSnifferReady((prev) => ({ ...prev, [service]: capture }));
-              setSniffedItems((prev) => ({
-                ...prev,
-                [service]: {
-                  manifestUrl: capture.manifest_url || prev[service]?.manifestUrl,
-                  licenseUrl: capture.license_url || prev[service]?.licenseUrl,
-                  headers: capture.headers || prev[service]?.headers,
-                  title: capture.title || prev[service]?.title,
-                },
-              }));
-              setLatestSniffed({
-                service,
-                type: "ready",
-                url: capture.manifest_url || "",
-                headers: capture.headers,
-                title: capture.title,
-              });
-              setShowSnifferToast(true);
-            }
-          } else if (payload.type === "sniffer_download_queued") {
-            const { title, auto } = (payload.data || {}) as { title?: string; auto?: boolean };
-            showToastRef.current(
-              auto ? `⚡ Auto-preuzimanje: ${title}` : `Preuzimanje u redu: ${title}`,
-              "success",
-            );
-            setShowSnifferToast(false);
-          } else if (payload.type === "transcode_update") {
-            const { title, status, detail } = (payload.data || {}) as {
-              title?: string;
-              status?: string;
-              detail?: string;
-            };
-            if (status === "started") {
-              showToastRef.current(`🎬 Kompresija u toku: ${title || detail}`, "info");
-            } else if (status === "finished") {
-              showToastRef.current(`✓ Kompresija završena: ${title}`, "success");
-            } else if (status === "failed") {
-              showToastRef.current(`Kompresija nije uspela: ${title}`, "error");
-            }
-          } else if (payload.type === "session_imported") {
-            const { services, message } = (payload.data || {}) as {
-              services?: string[];
-              message?: string;
-            };
-            const names = Array.isArray(services) ? services.join(", ") : "";
-            showToastRef.current(message || `Sesija uvezena: ${names}`, "success");
-            void fetchStatusRef.current();
-          } else if (payload.type === "scheduled_update") {
-            setScheduledTasks(payload.data as ScheduledTask[]);
+        clearHeartbeat();
+        heartbeatTimer = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send("ping");
           }
-        } catch (e) {
-          console.error("Failed to parse WS payload:", e);
+        }, HEARTBEAT_INTERVAL);
+
+        if (attempt === 0) return;
+        void syncStateOnReconnect();
+      };
+
+      ws.onmessage = (event) => {
+        if (event.data === "pong") return;
+
+        let payload: { type: string; data?: unknown };
+        try {
+          payload = JSON.parse(event.data as string);
+        } catch {
+          console.warn("Malformed WS message:", event.data);
+          return;
         }
+
+        if (payload.type === "queue_update") {
+          const queue = payload.data as DownloadTask[];
+          setDownloads(queue);
+          const current = selectedTaskRef.current;
+          if (current) {
+            const updated = queue.find((d) => d.id === current.id);
+            if (updated) setSelectedTask(updated);
+          }
+        } else if (payload.type === "sniffer_update") {
+          const { service, type, url, headers, title } = payload.data as SnifferCapture;
+          setSniffedItems((prev) => {
+            const current = prev[service] || {};
+            const updated = { ...current };
+            if (type === "manifest") {
+              updated.manifestUrl = url;
+              if (title) updated.title = title;
+            } else if (type === "license") {
+              updated.licenseUrl = url;
+              if (headers) updated.headers = headers;
+            }
+            return { ...prev, [service]: updated };
+          });
+          setLatestSniffed({ service, type, url, headers, title });
+          setShowSnifferToast(true);
+        } else if (payload.type === "sniffer_ready") {
+          const { service, capture } = (payload.data || {}) as {
+            service?: string;
+            capture?: SnifferReadyEntry & {
+              manifest_url?: string;
+              license_url?: string;
+              headers?: Record<string, string>;
+            };
+          };
+          if (service && capture) {
+            setSnifferReady((prev) => ({ ...prev, [service]: capture }));
+            setSniffedItems((prev) => ({
+              ...prev,
+              [service]: {
+                manifestUrl: capture.manifest_url || prev[service]?.manifestUrl,
+                licenseUrl: capture.license_url || prev[service]?.licenseUrl,
+                headers: capture.headers || prev[service]?.headers,
+                title: capture.title || prev[service]?.title,
+              },
+            }));
+            setLatestSniffed({
+              service,
+              type: "ready",
+              url: capture.manifest_url || "",
+              headers: capture.headers,
+              title: capture.title,
+            });
+            setShowSnifferToast(true);
+          }
+        } else if (payload.type === "sniffer_download_queued") {
+          const { title, auto } = (payload.data || {}) as { title?: string; auto?: boolean };
+          showToastRef.current(
+            auto ? `⚡ Auto-preuzimanje: ${title}` : `Preuzimanje u redu: ${title}`,
+            "success",
+          );
+          setShowSnifferToast(false);
+        } else if (payload.type === "transcode_update") {
+          const { title, status, detail } = (payload.data || {}) as {
+            title?: string;
+            status?: string;
+            detail?: string;
+          };
+          if (status === "started") {
+            showToastRef.current(`🎬 Kompresija u toku: ${title || detail}`, "info");
+          } else if (status === "finished") {
+            showToastRef.current(`✓ Kompresija završena: ${title}`, "success");
+          } else if (status === "failed") {
+            showToastRef.current(`Kompresija nije uspela: ${title}`, "error");
+          }
+        } else if (payload.type === "session_imported") {
+          const { services, message } = (payload.data || {}) as {
+            services?: string[];
+            message?: string;
+          };
+          const names = Array.isArray(services) ? services.join(", ") : "";
+          showToastRef.current(message || `Sesija uvezena: ${names}`, "success");
+          void fetchStatusRef.current();
+        } else if (payload.type === "scheduled_update") {
+          setScheduledTasks(payload.data as ScheduledTask[]);
+        }
+      };
+
+      ws.onerror = () => {
+        console.warn("WebSocket error — will reconnect on close");
       };
 
       ws.onclose = () => {
         setConnected(false);
-        reconnectTimer = setTimeout(connect, 3000);
-      };
+        clearHeartbeat();
+        if (disposed) return;
 
-      ws.onopen = () => {
-        setConnected(true);
+        const delay = Math.min(1000 * 2 ** attempt, MAX_RECONNECT_DELAY);
+        attempt++;
+        reconnectTimer = setTimeout(connect, delay);
       };
     };
 
     connect();
     return () => {
+      disposed = true;
+      clearHeartbeat();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       ws?.close();
     };

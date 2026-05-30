@@ -1,4 +1,5 @@
 const API_KEY_STORAGE = "videodownload_api_key";
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export function getApiHost(): string {
   if (typeof window === "undefined") return "";
@@ -38,7 +39,6 @@ export function buildApiHeaders(extra?: HeadersInit): Headers {
   return headers;
 }
 
-/** Resolve path to full URL (respects dev proxy and production same-origin). */
 export function resolveApiUrl(path: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     return path;
@@ -62,15 +62,22 @@ export function buildWebSocketUrl(path = "/ws"): string {
   return `${protocol}//${host}${path}${qs}`;
 }
 
-export async function apiFetch(
-  path: string,
-  init?: RequestInit
-): Promise<Response> {
-  const headers = buildApiHeaders(init?.headers);
-  return fetch(resolveApiUrl(path), { ...init, headers });
+export interface ApiFetchOptions extends RequestInit {
+  timeoutMs?: number;
 }
 
-/** Parse FastAPI error detail from a failed response. */
+export async function apiFetch(
+  path: string,
+  init?: ApiFetchOptions,
+): Promise<Response> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchInit } = init ?? {};
+  const headers = buildApiHeaders(fetchInit.headers);
+  const signal = fetchInit.signal
+    ? fetchInit.signal
+    : AbortSignal.timeout(timeoutMs);
+  return fetch(resolveApiUrl(path), { ...fetchInit, headers, signal });
+}
+
 export async function parseApiError(res: Response, fallback = "Greška na serveru"): Promise<string> {
   try {
     const data = await res.json();
