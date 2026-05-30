@@ -4,6 +4,22 @@ Lokalna aplikacija za preuzimanje video sadržaja s podržanih streaming servisa
 
 ## Brzi start
 
+**Jedna komanda (preporučeno):**
+
+```powershell
+# Windows
+.\scripts\setup.ps1
+python run.py
+```
+
+```bash
+# Linux / macOS
+chmod +x scripts/setup.sh && ./scripts/setup.sh
+python run.py
+```
+
+Ili ručno korak po korak:
+
 ### 1. Python zavisnosti
 
 ```bash
@@ -116,8 +132,12 @@ Instalacija (alternativa): `pip install -e ".[dev]"` koristi `pyproject.toml`.
 ## Testovi
 
 ```bash
-pytest
+pip install -e ".[dev]"
+python -m pytest tests/ -q
+cd frontend && npm test
 ```
+
+Vidi [CONTRIBUTING.md](CONTRIBUTING.md) za PR workflow.
 
 ## Pravna napomena
 

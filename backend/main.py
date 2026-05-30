@@ -31,6 +31,12 @@ async def lifespan(app: FastAPI):
             "API ključ generisan i sačuvan u ~/.videodownload/config.json "
             "(server.server.api_key). Postavite ga u podešavanjima frontenda ako koristite LAN pristup."
         )
+    from backend.bootstrap_local_files import ensure_local_templates
+
+    created = ensure_local_templates(PROJECT_ROOT)
+    if created:
+        logger.info("EON šabloni kopirani u root: %s", ", ".join(created))
+
     mig = migrate_plaintext_config(config)
     legacy = migrate_legacy_keyring()
     if mig.get("migrated") or mig.get("native") or legacy:

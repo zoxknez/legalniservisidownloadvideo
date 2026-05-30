@@ -50,6 +50,15 @@ frontend/src/
 - `device.wvd`, `eon_*.json` (osim `*.example.json`)
 - `scratch/`, `output/`, `temp/`, `*.bak`
 
+## Lokalni šabloni (EON)
+
+Pri startu servera, ako nedostaju `eon_*.json` u root-u, kopiraju se iz `eon_*.example.json` (`backend/bootstrap_local_files.py`).
+
+## Setup skripte
+
+- `scripts/setup.ps1` — Windows
+- `scripts/setup.sh` — Linux / macOS
+
 ## Testovi
 
 ```bash
