@@ -25,7 +25,18 @@ Instalirajte i dodajte u PATH (ili u Podešavanjima u UI):
 | aria2c | Opcioni brži download |
 | device.wvd | Widevine CDM (L3 na PC-u) |
 
-### 3. Pokretanje
+### 3. Frontend build (UI za `python run.py`)
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+Build upisuje fajlove u `backend/static/` (nije u Git-u). `run.py` pokušava build automatski ako `index.html` nedostaje.
+
+### 4. Pokretanje
 
 ```bash
 python run.py
@@ -33,15 +44,14 @@ python run.py
 
 Otvara se `http://127.0.0.1:8000` (samo lokalno).
 
-### 4. Frontend (razvoj)
+### 5. Frontend (razvoj sa hot-reload)
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Vite proxy prosljeđuje `/api` i `/ws` na port 8000.
+Vite proxy prosljeđuje `/api` i `/ws` na port **8000** (backend mora biti pokrenut).
 
 ## Sigurnost
 
@@ -91,11 +101,15 @@ Kopirajte `.env.example` u `.env` po potrebi.
 backend/                    FastAPI API, red, DRM manager
 backend/core/services/      Kanonski engine po servisu (jedan izvor istine)
 backend/services/*_adapter.py  Most ka API-ju
-frontend/                   React + Vite UI
-*.py (root)                 Shim launcheri → python -m backend.core.services...
+backend/static/             Generisani UI (npm run build) — nije u Git-u
+frontend/                   React + Vite izvor
+binaries/                   Opciono mesto za device.wvd (vidi README u folderu)
+userscripts/                Tampermonkey bridge
+tests/                      pytest
+*.py (root)                 Shim launcheri → backend.core.services.*
 ```
 
-Detalji: [backend/core/services/SERVICES.md](backend/core/services/SERVICES.md)
+Detalji: [backend/core/services/SERVICES.md](backend/core/services/SERVICES.md) · [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)
 
 Instalacija (alternativa): `pip install -e ".[dev]"` koristi `pyproject.toml`.
 

@@ -28,10 +28,45 @@ def is_port_open(host, port):
         except socket.error:
             return False
 
+def ensure_frontend_built(project_root: Path) -> None:
+    """Vite build outputs to backend/static; build once if missing after fresh clone."""
+    index = project_root / "backend" / "static" / "index.html"
+    if index.exists():
+        return
+    frontend = project_root / "frontend"
+    pkg = frontend / "package.json"
+    if not pkg.exists():
+        logger.warning("Frontend nije pronađen — API će raditi bez UI.")
+        return
+    if not (frontend / "node_modules").exists():
+        logger.warning(
+            "UI nije izgrađen. Prvo pokrenite: cd frontend && npm install && npm run build"
+        )
+        return
+    logger.info("Frontend build nedostaje — pokrećem npm run build...")
+    try:
+        subprocess.run(
+            ["npm", "run", "build"],
+            cwd=str(frontend),
+            check=True,
+            shell=os.name == "nt",
+        )
+        if index.exists():
+            logger.info("Frontend uspešno izgrađen u backend/static.")
+        else:
+            logger.warning("Build je završen ali backend/static/index.html još ne postoji.")
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        logger.warning("Automatski frontend build nije uspeo: %s", exc)
+        logger.warning("Ručno: cd frontend && npm run build")
+
+
 def main():
     host = "127.0.0.1"
     port = 8000
-    
+    project_root = Path(__file__).resolve().parent
+
+    ensure_frontend_built(project_root)
+
     logger.info("Starting Multi-Service Video Downloader API Server...")
     
     # Run uvicorn as a subprocess in the root directory
@@ -44,7 +79,7 @@ def main():
     
     process = None
     try:
-        process = subprocess.Popen(cmd, cwd=os.path.dirname(os.path.abspath(__file__)))
+        process = subprocess.Popen(cmd, cwd=str(project_root))
         
         # Wait until port is open (max 10 seconds)
         logger.info("Waiting for server to spin up...")

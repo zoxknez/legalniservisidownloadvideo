@@ -1,19 +1,37 @@
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+
+# Local app data
 .videodownload/
 output/
 temp/
+
+# Scratch / agent artifacts
 scratch/
-scratch_*.py
-scratch_*.txt
-scratch_*.json
+scratch_*
 temp_user_msg.txt
 extracted_*.txt
-*.db
-*.db-shm
-*.db-wal
-*.log
+cat_struct.json
+
+# Built frontend (vite outDir → backend/static)
+backend/static/assets/
+backend/static/index.html
+
+# Widevine CDM (user-provided; install via Settings or binaries/)
+device.wvd
+**/device.wvd
+*.wvd
+
+# EON local config (templates: eon_*.example.json stay in repo)
+eon_api.json
+eon_channels.json
+eon_epg.json
+eon_series.json
+eon_vod.json
+
+# Env & deps
 .env
 .venv/
 venv/
@@ -21,3 +39,12 @@ node_modules/
 frontend/dist/
 frontend/lint-out.txt
 lint-out.txt
+
+# DB / logs
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editor backups
+*.bak

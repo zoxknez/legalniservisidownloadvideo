@@ -20,7 +20,7 @@ def test_hrti_auth_false_when_only_email_in_config(tmp_path):
         status = HrtiAdapter.get_auth_status()
         assert status["authenticated"] is False
         assert status["email"] == "user@hrti.hr"
-        assert "keyring" in status.get("error", "").lower()
+        assert "lozinka" in status.get("error", "").lower()
 
 
 def test_hrti_auth_true_when_keyring_has_password():

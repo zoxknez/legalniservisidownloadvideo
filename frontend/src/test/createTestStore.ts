@@ -80,7 +80,7 @@ function configSlice(overrides: Partial<AppConfigSlice> = {}): AppConfigSlice {
     handleSaveConfig: noopAsync,
     savingConfig: false,
     handleSaveDeviceWvdPath: noopAsync,
-    handleClearCredentials: noopAsync,
+    handleClearCredentials: async () => false,
     clearingService: null,
     handleSaveApiKeyToServer: noopAsync,
     savingApiKey: false,
@@ -144,10 +144,11 @@ function voyoSlice(overrides: Partial<VoyoSlice> = {}): VoyoSlice {
     setSelectedVoyoEpisodes: noop,
     voyoEpisodesRange: "",
     setVoyoEpisodesRange: noop,
+    voyoSubmitting: false,
     searchVoyoSeries: noopAsync,
     startVoyoDownload: noopAsync,
     ...overrides,
-  };
+  } as VoyoSlice;
 }
 
 function hrtiSlice(overrides: Partial<HrtiSlice> = {}): HrtiSlice {
@@ -183,10 +184,11 @@ function hrtiSlice(overrides: Partial<HrtiSlice> = {}): HrtiSlice {
     fetchHrtiCategoryItems: noopAsync,
     searchHrti: noopAsync,
     fetchHrtiSeriesEpisodes: noopAsync,
+    hrtiSubmitting: false,
     startHrtiDownload: noopAsync,
     confirmHrtiDownload: noopAsync,
     ...overrides,
-  };
+  } as HrtiSlice;
 }
 
 function eonSlice(overrides: Partial<EonSlice> = {}): EonSlice {
@@ -236,9 +238,10 @@ function eonSlice(overrides: Partial<EonSlice> = {}): EonSlice {
     initEonCatalogs: noopAsync,
     loginEonApi: noopAsync,
     refreshEonApiToken: noopAsync,
+    eonSubmitting: false,
     scheduleEonRecording: noopAsync,
     ...overrides,
-  };
+  } as EonSlice;
 }
 
 function rtsSlice(overrides: Partial<RtsSlice> = {}): RtsSlice {
@@ -261,15 +264,16 @@ function rtsSlice(overrides: Partial<RtsSlice> = {}): RtsSlice {
     setRtsVideoInfo: noop,
     rtsInfoLoading: false,
     setRtsInfoLoading: noop,
+    rtsSubmitting: false,
     fetchRtsVideoInfo: noopAsync,
     startRtsDownload: noopAsync,
     ...overrides,
-  };
+  } as RtsSlice;
 }
 
 function hboSlice(overrides: Partial<HboSlice> = {}): HboSlice {
   return {
-    hboMarket: "hr",
+    hboMarket: "emea",
     setHboMarket: noop,
     hboTarget: "",
     setHboTarget: noop,
@@ -285,11 +289,14 @@ function hboSlice(overrides: Partial<HboSlice> = {}): HboSlice {
     setHboDirectTitle: noop,
     hboDirectSubs: "hr",
     setHboDirectSubs: noop,
+    hboSubmitting: false,
+    hboAuth: null,
+    refreshAuth: noop,
     startHboLogin: noopAsync,
     startHboDownload: noopAsync,
     startHboDirectDownload: noopAsync,
     ...overrides,
-  };
+  } as HboSlice;
 }
 
 function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboardSlice {
@@ -310,6 +317,12 @@ function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboar
     setSmartSubs: noop,
     smartRtsVerbose: false,
     setSmartRtsVerbose: noop,
+    smartRtsStartEp: "",
+    setSmartRtsStartEp: noop,
+    smartRtsEndEp: "",
+    setSmartRtsEndEp: noop,
+    smartSubmitting: false,
+    debouncedDetect: noop,
     smartAudioOnly: false,
     setSmartAudioOnly: noop,
     smartUseAria2: false,
@@ -317,7 +330,7 @@ function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboar
     handleSmartDetect: noopAsync,
     startSmartDownload: noopAsync,
     ...overrides,
-  };
+  } as SmartDashboardSlice;
 }
 
 function snifferSlice(overrides: Partial<SnifferSlice> = {}): SnifferSlice {
