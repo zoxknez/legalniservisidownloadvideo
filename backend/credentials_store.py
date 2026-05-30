@@ -238,3 +238,123 @@ def all_credential_security_status(config_module) -> Dict[str, Any]:
         service: credential_security_status(service, config_module)
         for service in SENSITIVE_FIELDS
     }
+
+
+SERVICE_ALIASES = {
+    "rts": "rtsplaneta",
+    "hbo": "hbomax",
+    "max": "hbomax",
+}
+
+_PUBLIC_METADATA_CLEAR = {
+    "voyo": ("email",),
+    "hrti": ("email",),
+    "rtsplaneta": ("email", "username"),
+    "eon": ("username", "serial", "number"),
+    "hbomax": ("market",),
+}
+
+
+def _normalize_service(service: str) -> str:
+    key = (service or "").strip().lower()
+    return SERVICE_ALIASES.get(key, key)
+
+
+def clear_service_credentials(service: str, config_module) -> Dict[str, Any]:
+    """
+    Remove secrets from OS keyring, clear public metadata in config.json,
+    and reset native service files / adapter caches where applicable.
+    """
+    service = _normalize_service(service)
+    if service not in SENSITIVE_FIELDS:
+        raise ValueError(f"Nepoznat servis: {service}")
+
+    cleared_secrets: List[str] = []
+    for field in SENSITIVE_FIELDS.get(service, []):
+        if has_secret(service, field):
+            cleared_secrets.append(field)
+        delete_secret(service, field)
+
+    creds = config_module.data.setdefault("credentials", {}).setdefault(service, {})
+    if not isinstance(creds, dict):
+        creds = {}
+        config_module.data["credentials"][service] = creds
+    for key in _PUBLIC_METADATA_CLEAR.get(service, ()):
+        creds[key] = ""
+    config_module.save()
+
+    native_cleared: List[str] = []
+    native_path = _NATIVE_CONFIG_PATHS.get(service)
+    if native_path and native_path.exists():
+        try:
+            with open(native_path, "r", encoding="utf-8") as f:
+                native = json.load(f)
+        except Exception:
+            native = {}
+        changed = False
+        for field in SENSITIVE_FIELDS.get(service, []):
+            for fkey in (field, "pass" if field == "password" else field):
+                if native.get(fkey):
+                    native[fkey] = ""
+                    changed = True
+        for tfield in _NATIVE_TOKEN_FIELDS:
+            if native.get(tfield):
+                native[tfield] = ""
+                changed = True
+        if service == "eon" and native.get("cookies"):
+            native["cookies"] = {}
+            changed = True
+        if changed:
+            with open(native_path, "w", encoding="utf-8") as f:
+                json.dump(native, f, indent=2)
+            try:
+                native_path.chmod(0o600)
+            except OSError:
+                pass
+            native_cleared.append(str(native_path))
+
+    if service == "hbomax":
+        token_path = Path.home() / ".hbomax" / "token.json"
+        if token_path.exists():
+            try:
+                token_path.unlink()
+                native_cleared.append(str(token_path))
+            except OSError as exc:
+                logger.warning("Could not remove HBO token file: %s", exc)
+
+    if service == "eon":
+        eon_cfg = Path.home() / ".eon" / "config.json"
+        if eon_cfg.exists():
+            try:
+                with open(eon_cfg, "r", encoding="utf-8") as f:
+                    eon_native = json.load(f)
+            except Exception:
+                eon_native = {}
+            if eon_native.get("cookies"):
+                eon_native["cookies"] = {}
+                with open(eon_cfg, "w", encoding="utf-8") as f:
+                    json.dump(eon_native, f, indent=2)
+                native_cleared.append(str(eon_cfg))
+
+    if service == "voyo":
+        try:
+            from backend.services import voyo_adapter
+
+            voyo_adapter._VOYO_CACHE.clear()
+        except Exception:
+            pass
+
+    if service == "eon":
+        try:
+            from backend.services.eon_adapter import _invalidate_health_cache
+
+            _invalidate_health_cache()
+        except Exception:
+            pass
+
+    return {
+        "service": service,
+        "cleared_secrets": cleared_secrets,
+        "native_cleared": native_cleared,
+        "message": f"Kredencijali za {service} su obrisani.",
+    }

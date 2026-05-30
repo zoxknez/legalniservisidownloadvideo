@@ -16,16 +16,18 @@ export const SERVICE_META = [
 
 // Queue service helpers
 export const QUEUE_SERVICE_PILL_CLASS: Record<string, string> = {
-  voyo:    "queue-pill-voyo",
-  hrti:    "queue-pill-hrti",
-  eon:     "queue-pill-eon",
-  rts:     "queue-pill-rts",
-  hbomax:  "queue-pill-hbomax",
+  voyo:       "queue-pill-voyo",
+  hrti:       "queue-pill-hrti",
+  eon:        "queue-pill-eon",
+  rts:        "queue-pill-rts",
+  rtsplaneta: "queue-pill-rts",
+  hbomax:     "queue-pill-hbomax",
 };
 export const QUEUE_CARD_BORDER_CLASS: Record<string, string> = {
-  voyo:   "queue-card-voyo",
-  hrti:   "queue-card-hrti",
-  eon:    "queue-card-eon",
-  rts:    "queue-card-rts",
-  hbomax: "queue-card-hbomax",
+  voyo:       "queue-card-voyo",
+  hrti:       "queue-card-hrti",
+  eon:        "queue-card-eon",
+  rts:        "queue-card-rts",
+  rtsplaneta: "queue-card-rts",
+  hbomax:     "queue-card-hbomax",
 };

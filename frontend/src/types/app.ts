@@ -38,17 +38,33 @@ export interface ServiceStatus {
   error?: string;
   serial?: string;
   number?: string;
+  market?: string;
+  token_path?: string;
   script_path?: string;
   missing?: string[];
   optional_missing?: string[];
+}
+
+export interface DrmStatusSummary {
+  cdm_ready: boolean;
+  legacy_mode: boolean;
+  wvd_file: string | null;
+  security_level_name?: string;
+  key_cache_alive?: number;
 }
 
 export interface AppStatus {
   binaries: Record<string, BinaryStatus>;
   output_dir: string;
   transcode_mode?: string;
+  browser_sync_supported?: boolean;
+  server?: {
+    api_key_configured?: boolean;
+    localhost_bypass?: boolean;
+  };
   sniffer?: { auto_download?: boolean };
   credentials_security?: CredentialsSecurityMap;
+  drm?: DrmStatusSummary;
   services: Record<string, ServiceStatus>;
   system_metrics?: {
     disk: { total: number; used: number; free: number; percent: number };
@@ -70,7 +86,7 @@ export interface DownloadTask {
 
 export interface HrtiItem {
   id: string;
-  type: string;
+  type: "movie" | "series" | "episode";
   title: string;
 }
 
@@ -90,6 +106,7 @@ export interface VoyoSeason {
 }
 
 export interface VoyoSeriesInfo {
+  success?: boolean;
   title: string;
   description: string;
   nbSeasons?: number;
@@ -117,7 +134,7 @@ export interface ScheduledTask {
 }
 
 export interface SmartEpisode {
-  id: number;
+  id: number | string;
   title?: string;
   season?: number;
   episode?: number;

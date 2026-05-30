@@ -68,6 +68,17 @@ def run_hbo_job(
             log_fn("INFO HBO Max login završen — token sačuvan.")
             return True
 
+        if action == "direct":
+            dl = _build_downloader(market, workers)
+            wanted_subs = _parse_subs(params.get("subs", "sr,hr,mk,bs,sl"))
+            manifest = str(params.get("manifest_url", "")).strip()
+            license_url = str(params.get("license_url", "")).strip()
+            title = str(params.get("title") or "").strip()
+            if not manifest or not license_url:
+                raise RuntimeError("manifest_url i license_url su obavezni.")
+            dl.download_direct(manifest, license_url, title, wanted_subs)
+            return True
+
         auth = HBOMaxAuth(market=market)
         if not auth.is_authenticated():
             raise RuntimeError(
@@ -82,15 +93,6 @@ def run_hbo_job(
             if not video_id:
                 raise RuntimeError("video_id je obavezan.")
             dl.download(video_id, wanted_subs)
-            return True
-
-        if action == "direct":
-            manifest = str(params.get("manifest_url", "")).strip()
-            license_url = str(params.get("license_url", "")).strip()
-            title = str(params.get("title") or "").strip()
-            if not manifest or not license_url:
-                raise RuntimeError("manifest_url i license_url su obavezni.")
-            dl.download_direct(manifest, license_url, title, wanted_subs)
             return True
 
         raise RuntimeError(f"Unknown HBO job action: {action}")

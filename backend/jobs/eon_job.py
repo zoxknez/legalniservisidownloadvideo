@@ -56,27 +56,32 @@ def run_eon_job(
 
     with capture_job_output(log_fn, ["backend.core.services.eon", ""]):
         args = _base_args(params)
+        args.cancel_event = cancel_event
 
         if action == "vod":
             args.vod = str(params.get("target") or "").strip()
             if not args.vod:
                 raise RuntimeError("EON VOD target is required.")
+            _check_cancelled(cancel_event)
             code = handle_vod_download(args)
         elif action == "series":
             args.series = str(params.get("target") or "").strip()
             args.episodes = str(params.get("episodes") or "").strip()
             if not args.series:
                 raise RuntimeError("EON series target is required.")
+            _check_cancelled(cancel_event)
             code = handle_series(args)
         elif action == "live":
             args.channel = str(params.get("target") or "").strip()
             args.duration = int(params.get("duration") or 60)
             if not args.channel:
                 raise RuntimeError("EON live channel is required.")
+            _check_cancelled(cancel_event)
             code = handle_live_download(args)
         else:
             raise RuntimeError(f"Unknown EON job action: {action}")
 
+        _check_cancelled(cancel_event)
         if code != 0:
             raise RuntimeError(f"EON download failed with exit code {code}")
         return True

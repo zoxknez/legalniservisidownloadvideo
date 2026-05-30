@@ -545,7 +545,7 @@ class DownloadQueueManager:
                             cmd = EonAdapter.make_download_cmd(
                                 mode="live",
                                 target=item["channel_name"],
-                                duration=item["duration"],
+                                duration=item["duration"] * 60,
                                 play=False
                             )
                             task_id = await self.add_download(

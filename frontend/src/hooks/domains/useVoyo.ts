@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { SmartEpisode, VoyoSeriesInfo } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
@@ -20,9 +20,10 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
   const [voyoSearching, setVoyoSearching] = useState(false);
   const [selectedVoyoEpisodes, setSelectedVoyoEpisodes] = useState<number[]>([]);
   const [voyoEpisodesRange, setVoyoEpisodesRange] = useState("");
+  const [voyoSubmitting, setVoyoSubmitting] = useState(false);
 
   const searchVoyoSeries = useCallback(async () => {
-    if (!voyoTarget) return;
+    if (!voyoTarget.trim()) return;
     setVoyoSearching(true);
     setVoyoSeriesData(null);
     try {
@@ -34,18 +35,21 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
       const data = await res.json();
       if (res.ok && data.success) {
         setVoyoSeriesData(data);
-        setSelectedVoyoEpisodes(data.episodes.map((e: SmartEpisode) => e.id));
+        setSelectedVoyoEpisodes(data.episodes?.map((e: SmartEpisode) => e.id) ?? []);
       } else {
-        showToast(data.detail || "Neuspešno učitavanje serije", "error");
+        const msg = data.detail || "Neuspešno učitavanje serije";
+        showToast(msg, "error");
       }
     } catch (e: unknown) {
-      showToast(errorMessage(e, "Greška na serveru"), "error");
+      showToast(errorMessage(e, "Greška pri pretrazi"), "error");
     } finally {
       setVoyoSearching(false);
     }
   }, [showToast, voyoTarget]);
 
   const startVoyoDownload = useCallback(async () => {
+    if (voyoSubmitting || !voyoTarget.trim()) return;
+    setVoyoSubmitting(true);
     try {
       if (voyoMode === "series" && voyoSeriesData) {
         const ids = selectedVoyoEpisodes.filter((id) =>
@@ -59,7 +63,7 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            target: voyoTarget,
+            target: voyoTarget.trim(),
             mode: "series",
             video_ids: ids,
             resolution: voyoRes,
@@ -71,14 +75,15 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
           setVoyoTarget("");
           setVoyoSeriesData(null);
         } else {
-          showToast("Greška pri slanju zahteva", "error");
+          const msg = await parseApiError(res, "Greška pri slanju zahteva");
+          showToast(msg, "error");
         }
       } else {
         const res = await apiFetch(`/api/voyo/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            target: voyoTarget,
+            target: voyoTarget.trim(),
             mode: voyoMode,
             resolution: voyoRes,
           }),
@@ -88,17 +93,21 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
           setVoyoTarget("");
           setVoyoSeriesData(null);
         } else {
-          showToast("Greška pri slanju zahteva", "error");
+          const msg = await parseApiError(res, "Greška pri slanju zahteva");
+          showToast(msg, "error");
         }
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setVoyoSubmitting(false);
     }
   }, [
     showToast,
     voyoMode,
     voyoRes,
     voyoSeriesData,
+    voyoSubmitting,
     voyoTarget,
     selectedVoyoEpisodes,
   ]);
@@ -124,6 +133,7 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
     setSelectedVoyoEpisodes,
     voyoEpisodesRange,
     setVoyoEpisodesRange,
+    voyoSubmitting,
     searchVoyoSeries,
     startVoyoDownload,
   };

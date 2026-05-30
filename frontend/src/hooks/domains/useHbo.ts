@@ -1,7 +1,25 @@
-import { useCallback, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { ShowToastFn } from "../domainTypes";
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+function extractHboVideoId(raw: string): string {
+  const trimmed = raw.trim();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(trimmed) && !trimmed.includes("/")) {
+    return trimmed;
+  }
+  const uuids = trimmed.match(UUID_RE);
+  if (uuids?.length) return uuids[uuids.length - 1];
+  return trimmed;
+}
+
+export interface HboAuthStatus {
+  authenticated: boolean;
+  market: string;
+  token_path: string;
+}
 
 export interface UseHboOptions {
   showToast: ShowToastFn;
@@ -16,8 +34,26 @@ export function useHbo({ showToast }: UseHboOptions) {
   const [hboLicenseUrl, setHboLicenseUrl] = useState("");
   const [hboDirectTitle, setHboDirectTitle] = useState("");
   const [hboDirectSubs, setHboDirectSubs] = useState("sr,hr,mk,bs,sl");
+  const [hboSubmitting, setHboSubmitting] = useState(false);
+  const [hboAuth, setHboAuth] = useState<HboAuthStatus | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/hbo/status")
+      .then((r) => r.json())
+      .then((data) => setHboAuth(data))
+      .catch(() => {});
+  }, []);
+
+  const refreshAuth = useCallback(() => {
+    apiFetch("/api/hbo/status")
+      .then((r) => r.json())
+      .then((data) => setHboAuth(data))
+      .catch(() => {});
+  }, []);
 
   const startHboLogin = useCallback(async () => {
+    if (hboSubmitting) return;
+    setHboSubmitting(true);
     try {
       const res = await apiFetch(`/api/hbo/login`, {
         method: "POST",
@@ -25,38 +61,43 @@ export function useHbo({ showToast }: UseHboOptions) {
         body: JSON.stringify({ market: hboMarket }),
       });
       if (res.ok) {
-        showToast("Pokrenuta HBO Max prijava! Otvorite terminal/logs da vidite kod.");
+        showToast("Pokrenuta HBO Max prijava! Otvorite Logs da vidite kod.");
       } else {
-        showToast("Neuspešno pokretanje prijave", "error");
+        showToast(await parseApiError(res, "Neuspešno pokretanje prijave"), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setHboSubmitting(false);
     }
-  }, [hboMarket, showToast]);
+  }, [hboMarket, hboSubmitting, showToast]);
 
   const startHboDownload = useCallback(async () => {
+    const id = extractHboVideoId(hboTarget);
+    if (!id || hboSubmitting) return;
+    setHboSubmitting(true);
     try {
       const res = await apiFetch(`/api/hbo/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: hboTarget, subs: hboSubs }),
+        body: JSON.stringify({ video_id: id, subs: hboSubs, market: hboMarket }),
       });
       if (res.ok) {
         showToast("HBO Max preuzimanje pokrenuto!");
         setHboTarget("");
       } else {
-        showToast("Greška pri slanju zadatka", "error");
+        showToast(await parseApiError(res, "Greška pri slanju zadatka"), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setHboSubmitting(false);
     }
-  }, [hboSubs, hboTarget, showToast]);
+  }, [hboMarket, hboSubs, hboSubmitting, hboTarget, showToast]);
 
   const startHboDirectDownload = useCallback(async () => {
-    if (!hboManifestUrl.trim() || !hboLicenseUrl.trim()) {
-      showToast("Unesite i Manifest URL i License URL", "error");
-      return;
-    }
+    if (!hboManifestUrl.trim() || !hboLicenseUrl.trim() || hboSubmitting) return;
+    setHboSubmitting(true);
     try {
       const res = await apiFetch(`/api/hbo/download-direct`, {
         method: "POST",
@@ -69,18 +110,34 @@ export function useHbo({ showToast }: UseHboOptions) {
         }),
       });
       if (res.ok) {
-        showToast("HBO Max Direct preuzimanje pokrenuto! ✓");
+        showToast("HBO Max Direct preuzimanje pokrenuto!");
         setHboManifestUrl("");
         setHboLicenseUrl("");
         setHboDirectTitle("");
       } else {
-        const err = await res.json().catch(() => ({}));
-        showToast(err?.detail || "Greška pri slanju zadatka", "error");
+        showToast(await parseApiError(res, "Greška pri slanju zadatka"), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setHboSubmitting(false);
     }
-  }, [hboDirectSubs, hboDirectTitle, hboLicenseUrl, hboManifestUrl, showToast]);
+  }, [hboDirectSubs, hboDirectTitle, hboLicenseUrl, hboManifestUrl, hboSubmitting, showToast]);
+
+  const pasteHboTarget = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const trimmed = text.trim();
+      if (trimmed) {
+        setHboTarget(trimmed);
+        showToast("Link zalepljen!", "success");
+      } else {
+        showToast("Clipboard je prazan.", "error");
+      }
+    } catch {
+      showToast("Dozvola za clipboard nije odobrena.", "error");
+    }
+  }, [showToast]);
 
   return {
     hboMarket,
@@ -99,6 +156,10 @@ export function useHbo({ showToast }: UseHboOptions) {
     setHboDirectTitle,
     hboDirectSubs,
     setHboDirectSubs,
+    hboSubmitting,
+    hboAuth,
+    refreshAuth,
+    pasteHboTarget,
     startHboLogin,
     startHboDownload,
     startHboDirectDownload,

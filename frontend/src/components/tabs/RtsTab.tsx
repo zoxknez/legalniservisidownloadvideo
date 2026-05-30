@@ -18,6 +18,7 @@ export function RtsTab() {
     rtsEndEp,
     rtsInfoLoading,
     rtsStartEp,
+    rtsSubmitting,
     rtsTarget,
     rtsVerbose,
     rtsVideoInfo,
@@ -39,9 +40,11 @@ export function RtsTab() {
           <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
             <Radio className="w-6 h-6 text-rose-500" /> RTS Planeta
           </h2>
-          <span className="badge flex items-center gap-1.5 bg-rose-500/10 border-rose-500/30 text-rose-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
-            <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
-          </span>
+          {status?.services.rtsplaneta.authenticated && (
+            <span className="badge flex items-center gap-1.5 bg-rose-500/10 border-rose-500/30 text-rose-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+              <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+            </span>
+          )}
         </div>
         <p className="text-text-secondary text-sm">Preuzmite filmove i epizode serija sa RTS Planeta platforme. Podržava Widevine L3 dekripciju.</p>
         <p className="text-xs text-text-muted mt-1.5">Primeri linkova: <code className="font-mono text-rose-400 bg-white/[0.04] px-1.5 py-0.5 rounded">rtsplaneta.rs/sr_lat/serial/...</code> ili <code className="font-mono text-rose-400 bg-white/[0.04] px-1.5 py-0.5 rounded">.../film/...</code></p>
@@ -61,6 +64,7 @@ export function RtsTab() {
               value={rtsTarget}
               onChange={(e) => setRtsTarget(e.target.value)}
               onBlur={(e) => fetchRtsVideoInfo(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startRtsDownload()}
               className="input-premium pl-11"
               style={cssVars({"--focused-border": "#f43f5e", "--focused-glow": "rgba(244,63,94,0.25)"})}
             />
@@ -129,7 +133,7 @@ export function RtsTab() {
 
         <button
           onClick={startRtsDownload}
-          disabled={!rtsTarget}
+          disabled={!rtsTarget.trim() || rtsSubmitting}
           className="btn btn-premium-primary w-full py-4 text-white font-bold"
           style={cssVars({
             "--btn-grad-start": "#f43f5e",
@@ -138,8 +142,11 @@ export function RtsTab() {
             "--btn-glow-hover": "rgba(244,63,94,0.45)"
           })}
         >
-          <Download className="w-5 h-5" />
-          Započni Preuzimanje
+          {rtsSubmitting ? (
+            <><Loader2 className="w-5 h-5 animate-spin" /> Slanje...</>
+          ) : (
+            <><Download className="w-5 h-5" /> Započni Preuzimanje</>
+          )}
         </button>
       </div>
 

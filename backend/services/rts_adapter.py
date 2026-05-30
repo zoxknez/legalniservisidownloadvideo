@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from typing import Any, Dict, List
 
 from backend.config import config
@@ -7,7 +6,6 @@ from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaAuth, RTS
 from backend.jobs.inprocess import build_job
 
 logger = logging.getLogger(__name__)
-CWD = Path(__file__).parent.parent.parent.resolve()
 
 
 class RtsAdapter:
@@ -15,19 +13,25 @@ class RtsAdapter:
     def get_auth_status() -> Dict[str, Any]:
         creds = config.get_credentials("rtsplaneta")
         email = creds.get("email", "")
+        token = (creds.get("token") or creds.get("secure_streaming_token") or "").strip()
         password = creds.get("password", "")
+        if token:
+            return {"authenticated": True, "email": email or "(sesija iz pretraživača)"}
         if email and password:
             return {"authenticated": True, "email": email}
-        return {"authenticated": False, "email": email, "error": "No credentials stored"}
+        return {"authenticated": False, "email": email, "error": "Nema sačuvanih kredencijala ili sesije"}
 
     @staticmethod
     def save_credentials(email: str, password: str) -> Dict[str, Any]:
         try:
+            auth = RTSPlanetaAuth()
+            auth.login(email, password)
             config.update_credentials("rtsplaneta", {"email": email, "password": password})
             cfg = RTSPlanetaConfig()
             cfg.set_credentials(email, password)
-            return {"success": True}
+            return {"success": True, "email": email}
         except Exception as exc:
+            logger.error("RTS save_credentials failed: %s", exc)
             return {"success": False, "error": str(exc)}
 
     @staticmethod
@@ -37,6 +41,9 @@ class RtsAdapter:
         end_ep: int = None,
         verbose: bool = False,
     ) -> List[str]:
+        target_url = target_url.strip()
+        if not target_url:
+            raise ValueError("RTS target URL je obavezan.")
         params: Dict[str, Any] = {
             "target_url": target_url,
             "output_dir": config.get_output_dir(),

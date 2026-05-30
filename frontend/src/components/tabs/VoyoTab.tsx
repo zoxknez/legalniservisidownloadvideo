@@ -143,6 +143,7 @@ export function VoyoTab() {
     voyoRes,
     voyoSearching,
     voyoSeriesData,
+    voyoSubmitting,
     voyoTarget,
   } = useVoyoTab();
   return (
@@ -156,11 +157,13 @@ export function VoyoTab() {
           <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
             <Tv className="w-6 h-6 text-orange-500" /> Voyo RS
           </h2>
-          <span className="badge flex items-center gap-1.5 bg-orange-500/10 border-orange-500/30 text-orange-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
-            <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
-          </span>
+          {status?.services.voyo.authenticated && (
+            <span className="badge flex items-center gap-1.5 bg-orange-500/10 border-orange-500/30 text-orange-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+              <Lock className="w-3.5 h-3.5" /> AES-128 HLS DEKRIPCIJA AKTIVNA
+            </span>
+          )}
         </div>
-        <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz Widevine dekripciju. Podržava automatsko preuzimanje titlova i spajanje.</p>
+        <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz AES-128 HLS dekripciju. Podržava automatsko preuzimanje titlova i spajanje.</p>
       </div>
     </div>
 
@@ -208,7 +211,12 @@ export function VoyoTab() {
               placeholder={voyoMode === "video" ? "npr. https://voyo.rs/uspeh-1_50584.html ili ID 50584" : "npr. https://voyo.rs/sadrzaj/reprodukuj?id=52173 ili ID 50"}
               value={voyoTarget}
               onChange={(e) => setVoyoTarget(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && voyoMode === "series" && searchVoyoSeries()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (voyoMode === "series") searchVoyoSeries();
+                  else startVoyoDownload();
+                }
+              }}
               className="input-premium pl-11 pr-24"
               style={cssVars({"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"})}
             />
@@ -256,7 +264,7 @@ export function VoyoTab() {
 
         <button
           onClick={startVoyoDownload}
-          disabled={!voyoTarget}
+          disabled={!voyoTarget.trim() || voyoSubmitting}
           className="btn-premium btn-premium-primary w-full py-4 text-base font-extrabold"
           style={cssVars({
             "--btn-grad-start": "#f97316",
@@ -265,8 +273,11 @@ export function VoyoTab() {
             "--btn-glow-hover": "rgba(249,115,22,0.45)"
           })}
         >
-          <Download className="w-5 h-5" />
-          Započni Preuzimanje
+          {voyoSubmitting ? (
+            <><Loader2 className="w-5 h-5 animate-spin" /> Slanje...</>
+          ) : (
+            <><Download className="w-5 h-5" /> Započni Preuzimanje</>
+          )}
         </button>
       </div>
 
@@ -299,7 +310,7 @@ export function VoyoTab() {
               <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NIJE PRIJAVLJEN
               </span>
-              <p className="text-xs text-text-secondary leading-relaxed mt-1">Prijavite se u <strong>"Postavkama"</strong> sa vašim Voyo.rs parametrima da biste otključali Widevine preuzimanja.</p>
+              <p className="text-xs text-text-secondary leading-relaxed mt-1">Prijavite se u <strong>"Postavkama"</strong> sa vašim Voyo.rs parametrima da biste otključali preuzimanja.</p>
             </div>
           )}
         </div>
@@ -308,15 +319,15 @@ export function VoyoTab() {
         <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-orange-card glow-card-premium">
           <h4 className="font-extrabold text-sm flex items-center gap-2 text-orange-400 border-b border-white/[0.04] pb-3">
             <ShieldAlert className="w-4 h-4" />
-            Widevine & DRM Engine
+            HLS & AES-128 Engine
           </h4>
           <p className="text-xs text-text-secondary leading-relaxed">
-            Voyo.rs koristi AES-128 enkripciju i Widevine DRM L3 za zaštitu sadržaja. Naš preuzimač integriše napredne dekripcione module:
+            Voyo.rs koristi AES-128 HLS enkripciju (bez Widevine CDM-a). Preuzimač automatski obrađuje segmente i ključeve:
           </p>
           <ul className="text-xs text-text-secondary flex flex-col gap-2.5 border-t border-white/[0.03] pt-3">
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-              <span>Widevine DRM L3 automatsko preuzimanje ključeva</span>
+              <span>AES-128 HLS automatska dekripcija segmenata</span>
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />

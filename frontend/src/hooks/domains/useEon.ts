@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { AppStatus, EonMediaItem, ServiceStatus } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
@@ -36,6 +36,7 @@ export function useEon({
   const [eonSearchQuery, setEonSearchQuery] = useState("");
   const [eonSearchResults, setEonSearchResults] = useState<EonMediaItem[]>([]);
   const [eonEpgItems, setEonEpgItems] = useState<EonMediaItem[]>([]);
+  const [eonSubmitting, setEonSubmitting] = useState(false);
 
   const eonStatus: ServiceStatus | undefined = status?.services.eon;
   const eonReady = Boolean(eonStatus?.ready);
@@ -75,34 +76,38 @@ export function useEon({
   }, [activeTab, showToast]);
 
   useEffect(() => {
-    if (activeTab === "eon" && eonChannels.length === 0) {
+    if ((activeTab === "eon" || activeTab === "iptv") && eonChannels.length === 0) {
       void fetchEonChannels();
     }
   }, [activeTab, eonChannels.length, fetchEonChannels]);
 
   const startEonDownload = useCallback(async () => {
+    const target = eonTarget.trim();
+    if (!target || eonSubmitting) return;
+    setEonSubmitting(true);
     try {
       const res = await apiFetch(`/api/eon/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: eonMode,
-          target: eonTarget,
+          target,
           duration: eonDuration,
-          episodes: eonEpisodesRange,
+          episodes: eonEpisodesRange.trim(),
           play: eonPlay,
-          player_path: eonPlayerPath,
+          player_path: eonPlayerPath.trim(),
         }),
       });
-      const data = await res.json().catch(() => null);
       if (res.ok) {
         showToast("EON download zadatak uspešno poslat!");
         setEonTarget("");
       } else {
-        showToast(data?.detail || "Greška pri slanju zadatka", "error");
+        showToast(await parseApiError(res, "Greška pri slanju zadatka"), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setEonSubmitting(false);
     }
   }, [
     eonDuration,
@@ -110,6 +115,7 @@ export function useEon({
     eonMode,
     eonPlay,
     eonPlayerPath,
+    eonSubmitting,
     eonTarget,
     showToast,
   ]);
@@ -170,19 +176,21 @@ export function useEon({
   }, [fetchEonChannels, showToast]);
 
   const loginEonApi = useCallback(async () => {
-    if (!eonUsername || !eonPassword || !eonSerial || !eonNumber) {
+    if (!eonUsername.trim() || !eonPassword || !eonSerial.trim() || !eonNumber.trim()) {
       showToast("Popunite EON nalog, lozinku, device serial i device number.", "error");
       return;
     }
+    if (eonSubmitting) return;
+    setEonSubmitting(true);
     try {
       const res = await apiFetch(`/api/eon/api-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: eonUsername,
+          username: eonUsername.trim(),
           password: eonPassword,
-          serial: eonSerial,
-          number: eonNumber,
+          serial: eonSerial.trim(),
+          number: eonNumber.trim(),
         }),
       });
       const data = await res.json().catch(() => null);
@@ -195,12 +203,14 @@ export function useEon({
         );
         await fetchStatus();
       } else {
-        showToast(data?.detail || "EON API login nije uspeo", "error");
+        showToast(await parseApiError(res, "EON API login nije uspeo"), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setEonSubmitting(false);
     }
-  }, [eonNumber, eonPassword, eonSerial, eonUsername, fetchStatus, showToast]);
+  }, [eonNumber, eonPassword, eonSerial, eonSubmitting, eonUsername, fetchStatus, showToast]);
 
   const refreshEonApiToken = useCallback(async () => {
     try {
@@ -286,6 +296,7 @@ export function useEon({
     eonReady,
     eonMissing,
     eonOptionalMissing,
+    eonSubmitting,
     eonRootPath,
     eonCatalogPath,
     fetchEonChannels,

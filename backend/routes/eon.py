@@ -1,7 +1,8 @@
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.queue_manager import queue_manager
 from backend.services.eon_adapter import EonAdapter
@@ -131,9 +132,9 @@ def eon_init_catalogs():
 
 
 class EonDownloadRequest(BaseModel):
-    mode: str
-    target: str
-    duration: int = 60
+    mode: Literal["vod", "series", "live"] = "vod"
+    target: str = Field(min_length=1)
+    duration: int = Field(default=60, ge=0)
     episodes: str = ""
     play: bool = False
     player_path: str = ""
@@ -141,14 +142,20 @@ class EonDownloadRequest(BaseModel):
 
 @router.post("/download")
 async def eon_download(req: EonDownloadRequest):
+    health = EonAdapter.get_health()
+    if not health.get("ready"):
+        raise HTTPException(
+            status_code=503,
+            detail=health.get("error") or "EON nije spreman. Proverite konfiguraciju i dependencies.",
+        )
     try:
         cmd = EonAdapter.make_download_cmd(
-            req.mode, req.target, req.duration, req.episodes, req.play, req.player_path,
+            req.mode, req.target.strip(), req.duration, req.episodes.strip(), req.play, req.player_path.strip(),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except (FileNotFoundError, RuntimeError) as e:
         raise HTTPException(status_code=503, detail=str(e))
-    title = f"EON {req.mode.upper()}: {req.target}"
+    title = f"EON {req.mode.upper()}: {req.target.strip()}"
     task_id = await queue_manager.add_download("eon", title, cmd)
     return {"success": True, "task_id": task_id}

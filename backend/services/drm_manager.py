@@ -240,6 +240,8 @@ class DRMManager:
 
         self.key_cache = _KeyCache()
         self._init_lock = threading.Lock()
+        # Serialize CDM session open/challenge/parse — pywidevine is not thread-safe
+        self._session_lock = threading.Lock()
 
         self._init_cdm()
 
@@ -353,23 +355,23 @@ class DRMManager:
                 return True  # Already fetched
 
         try:
-            session_id = self.cdm.open()
-            try:
-                # Get a "service certificate" challenge (empty PSSH-like request)
-                challenge = self.cdm.get_service_certificate_challenge(session_id)
-                resp = requests.post(license_url, data=challenge,
-                                     headers=headers or {"Content-Type": "application/octet-stream"},
-                                     timeout=15)
-                if resp.status_code == 200 and resp.content:
-                    self.cdm.set_service_certificate(session_id, resp.content)
-                    cert_data = resp.content
-                    with self._cert_lock:
-                        self._provider_certs[service_name] = cert_data
-                    logger.info(f"[DRMManager] Provider cert fetched for '{service_name}' "
-                                f"({len(cert_data)} bytes)")
-                    return True
-            finally:
-                self.cdm.close(session_id)
+            with self._session_lock:
+                session_id = self.cdm.open()
+                try:
+                    challenge = self.cdm.get_service_certificate_challenge(session_id)
+                    resp = requests.post(license_url, data=challenge,
+                                         headers=headers or {"Content-Type": "application/octet-stream"},
+                                         timeout=15)
+                    if resp.status_code == 200 and resp.content:
+                        self.cdm.set_service_certificate(session_id, resp.content)
+                        cert_data = resp.content
+                        with self._cert_lock:
+                            self._provider_certs[service_name] = cert_data
+                        logger.info(f"[DRMManager] Provider cert fetched for '{service_name}' "
+                                    f"({len(cert_data)} bytes)")
+                        return True
+                finally:
+                    self.cdm.close(session_id)
         except Exception as e:
             logger.debug(f"[DRMManager] Provider cert prefetch failed for '{service_name}': {e}")
         return False
@@ -403,66 +405,67 @@ class DRMManager:
         if not self.cdm:
             raise RuntimeError("CDM not initialized. Check device.wvd file.")
 
-        pssh = self.PSSH(pssh_b64)
-        session_id = self.cdm.open()
+        with self._session_lock:
+            pssh = self.PSSH(pssh_b64)
+            session_id = self.cdm.open()
 
-        # Apply provider cert if available
-        with self._cert_lock:
-            cert = self._provider_certs.get(service_name)
-        if cert:
+            with self._cert_lock:
+                cert = self._provider_certs.get(service_name)
+            if cert:
+                try:
+                    self.cdm.set_service_certificate(session_id, cert)
+                except Exception:
+                    pass
+
             try:
-                self.cdm.set_service_certificate(session_id, cert)
-            except Exception:
-                pass
+                challenge = self.cdm.get_license_challenge(session_id, pssh)
+                logger.debug(f"[DRMManager] Challenge size: {len(challenge)}B → {license_url}")
 
-        try:
-            challenge = self.cdm.get_license_challenge(session_id, pssh)
-            logger.debug(f"[DRMManager] Challenge size: {len(challenge)}B → {license_url}")
+                resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
+                resp.raise_for_status()
 
-            resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
-            resp.raise_for_status()
+                logger.debug(
+                    f"[DRMManager] License response: HTTP {resp.status_code}  "
+                    f"CT={resp.headers.get('Content-Type', '?')}  "
+                    f"size={len(resp.content)}B  "
+                    f"first8={resp.content[:8].hex()}"
+                )
 
-            logger.debug(
-                f"[DRMManager] License response: HTTP {resp.status_code}  "
-                f"CT={resp.headers.get('Content-Type', '?')}  "
-                f"size={len(resp.content)}B  "
-                f"first8={resp.content[:8].hex()}"
-            )
+                license_bytes = self._unwrap_license(resp)
+                logger.debug(
+                    f"[DRMManager] Unwrapped: size={len(license_bytes)}B  "
+                    f"first8={license_bytes[:8].hex()}"
+                )
 
-            license_bytes = self._unwrap_license(resp)
-            logger.debug(
-                f"[DRMManager] Unwrapped: size={len(license_bytes)}B  "
-                f"first8={license_bytes[:8].hex()}"
-            )
+                self.cdm.parse_license(session_id, license_bytes)
 
-            self.cdm.parse_license(session_id, license_bytes)
-
-            keys = []
-            for key in self.cdm.get_keys(session_id):
-                if key.type == "CONTENT":
-                    keys.append(f"{key.kid.hex}:{key.key.hex()}")
-            logger.info(f"[DRMManager] Got {len(keys)} CONTENT key(s) from '{service_name}'")
-            return keys
-        finally:
-            self.cdm.close(session_id)
+                keys = []
+                for key in self.cdm.get_keys(session_id):
+                    if key.type == "CONTENT":
+                        keys.append(f"{key.kid.hex}:{key.key.hex()}")
+                logger.info(f"[DRMManager] Got {len(keys)} CONTENT key(s) from '{service_name}'")
+                return keys
+            finally:
+                self.cdm.close(session_id)
 
     def _get_keys_legacy(self, pssh_b64: str, license_url: str,
                          headers: dict, service_name: str = "") -> List[str]:
         from pywidevine.decrypt.wvdecryptcustom import WvDecrypt
-        for attempt in range(3):
-            try:
-                wvd = WvDecrypt(init_data_b64=pssh_b64.encode(), cert_data_b64=None)
-                challenge = wvd.get_challenge()
-                resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
-                resp.raise_for_status()
-                wvd.update_license(base64.b64encode(resp.content))
-                success, keys = wvd.start_process()
-                if success and keys:
-                    return keys
-            except Exception as e:
-                logger.warning(f"[DRMManager] Legacy key attempt {attempt + 1} failed: {e}")
-                if attempt < 2:
-                    time.sleep(2)
+        with self._session_lock:
+            for attempt in range(3):
+                try:
+                    wvd = WvDecrypt(init_data_b64=pssh_b64.encode(), cert_data_b64=None)
+                    challenge = wvd.get_challenge()
+                    resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
+                    resp.raise_for_status()
+                    wvd.update_license(base64.b64encode(resp.content))
+                    success, keys = wvd.start_process()
+                    if success and keys:
+                        return keys
+                except Exception as e:
+                    logger.warning(f"[DRMManager] Legacy key attempt {attempt + 1} failed: {e}")
+                    if attempt < 2:
+                        time.sleep(2)
         raise Exception("Failed to get decryption keys after 3 legacy attempts")
 
     def get_keys(self, pssh_b64: str, license_url: str, headers: dict,

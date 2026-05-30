@@ -92,6 +92,28 @@
       const t = localStorage.getItem('token') || '';
       if (t && t.length > 8) batch.hbomax = t;
     }
+    if (host.includes('eon.tv')) {
+      const cookies = {};
+      const raw = document.cookie || '';
+      if (raw) {
+        raw.split(';').forEach(function (part) {
+          const eq = part.indexOf('=');
+          if (eq < 1) return;
+          const name = part.slice(0, eq).trim();
+          const val = part.slice(eq + 1).trim();
+          if (name) {
+            try {
+              cookies[name] = decodeURIComponent(val.replace(/\+/g, ' '));
+            } catch (e) {
+              cookies[name] = val;
+            }
+          }
+        });
+      }
+      if (Object.keys(cookies).length) {
+        batch.eon = JSON.stringify({ cookies: cookies });
+      }
+    }
 
     return batch;
   }

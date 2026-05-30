@@ -1,5 +1,5 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from backend.queue_manager import queue_manager
 
@@ -7,10 +7,10 @@ router = APIRouter()
 
 
 class ScheduledRecordingRequest(BaseModel):
-    channel_name: str
-    title: str
-    start_time: str
-    duration: int
+    channel_name: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    start_time: str = Field(min_length=1)
+    duration: int = Field(ge=1, description="Duration in minutes")
 
 
 @router.post("/schedule")

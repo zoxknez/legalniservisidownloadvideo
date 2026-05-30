@@ -3,9 +3,14 @@ import {
   FlaskConical, KeyRound, Loader2, Copy, Check,
   CheckCircle2, AlertCircle,
 } from "lucide-react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, parseApiError } from "../../lib/api";
+import type { ShowToastFn } from "../../hooks/domainTypes";
 
-export function DrmTestKeys() {
+interface DrmTestKeysProps {
+  showToast: ShowToastFn;
+}
+
+export function DrmTestKeys({ showToast }: DrmTestKeysProps) {
   const [testMpdUrl, setTestMpdUrl] = useState("");
   const [testLicUrl, setTestLicUrl] = useState("");
   const [testService, setTestService] = useState("manual");
@@ -26,11 +31,19 @@ export function DrmTestKeys() {
       const d = await r.json();
       if (r.ok && d.success) {
         setTestResult({ keys: d.keys, psshs: d.psshs });
+        showToast(`Pronađeno ${d.keys?.length ?? 0} ključeva.`, "success");
       } else {
-        setTestResult({ error: d.detail || "Nepoznata greška" });
+        const msg =
+          r.status === 403
+            ? "Izvoz ključeva je onemogućen. Postavite VIDEODOWNLOAD_ALLOW_DRM_KEY_EXPORT=true za dijagnostiku."
+            : await parseApiError(r, d.detail || "Nepoznata greška");
+        setTestResult({ error: msg });
+        showToast(msg, "error");
       }
     } catch (e: unknown) {
-      setTestResult({ error: e instanceof Error ? e.message : "Network error" });
+      const msg = e instanceof Error ? e.message : "Mrežna greška";
+      setTestResult({ error: msg });
+      showToast(msg, "error");
     }
     setTesting(false);
   };
@@ -70,7 +83,7 @@ export function DrmTestKeys() {
             value={testService} onChange={e => setTestService(e.target.value)}
             className="w-full bg-white/[0.04] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500/50"
             style={{backgroundColor:"rgba(255,255,255,0.04)"}}>
-            {["manual","hrti","eon","voyo","rtsplaneta","hbomax"].map(s => (
+            {["manual","hrti","eon","rtsplaneta","hbomax"].map(s => (
               <option key={s} value={s} style={{background:"#1a1a2e"}}>{s}</option>
             ))}
           </select>
@@ -99,7 +112,7 @@ export function DrmTestKeys() {
                   {testResult.keys?.map(key => (
                     <div key={key} className="flex items-center gap-2 bg-white/[0.04] rounded-lg px-2.5 py-1.5 group">
                       <span className="font-mono text-[10px] text-white flex-1 break-all">{key}</span>
-                      <button onClick={() => copyKey(key)}
+                      <button type="button" onClick={() => copyKey(key)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                         {copiedKey === key ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-text-muted hover:text-white" />}
                       </button>

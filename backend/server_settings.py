@@ -47,6 +47,18 @@ def ensure_api_key() -> str:
     return new_key
 
 
+def set_api_key(value: str) -> None:
+    """Persist API key in config.json (ignored when VIDEODOWNLOAD_API_KEY env is set)."""
+    if "server" not in config.data:
+        config.data["server"] = {}
+    config.data["server"]["api_key"] = (value or "").strip()
+    config.save()
+
+
+def api_key_from_env() -> bool:
+    return bool(os.environ.get("VIDEODOWNLOAD_API_KEY", "").strip())
+
+
 def localhost_bypass_enabled() -> bool:
     return _env_bool("VIDEODOWNLOAD_LOCALHOST_BYPASS", True)
 

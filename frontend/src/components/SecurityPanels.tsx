@@ -71,8 +71,12 @@ function fieldBadge(field: string, st: CredentialFieldStatus) {
 
 export function CredentialsSecurityPanel({
   credentialsSecurity,
+  onMigrate,
+  migrating,
 }: {
   credentialsSecurity?: CredentialsSecurityMap | null;
+  onMigrate?: () => void;
+  migrating?: boolean;
 }) {
   if (!credentialsSecurity) return null;
 
@@ -83,9 +87,22 @@ export function CredentialsSecurityPanel({
 
   return (
     <div className="glass-panel p-6 rounded-xl border border-glass flex flex-col gap-4 glow-emerald-card glow-card-premium">
-      <div className="flex items-center gap-2">
-        <KeyRound className="w-5 h-5 text-emerald-400" />
-        <h3 className="font-extrabold text-base text-white">Sigurnost naloga (keyring)</h3>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <KeyRound className="w-5 h-5 text-emerald-400" />
+          <h3 className="font-extrabold text-base text-white">Sigurnost naloga (keyring)</h3>
+        </div>
+        {onMigrate && (
+          <button
+            type="button"
+            onClick={onMigrate}
+            disabled={migrating}
+            className="text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {migrating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+            {migrating ? "Migracija…" : "Migriraj u keyring"}
+          </button>
+        )}
       </div>
       <p className="text-xs text-text-secondary m-0 leading-relaxed">
         Lozinke i tokeni plaćenih pretplata čuvaju se u{" "}
@@ -328,6 +345,23 @@ export function WvdInstallerPanel({
 }
 
 export function SessionConsoleScriptHint({ service }: { service: string }) {
+  if (service === "eon") {
+    return (
+      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 flex flex-col gap-2">
+        <div className="font-extrabold text-emerald-400 text-sm flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          EON TV — uvoz kolačića
+        </div>
+        <p className="text-xs text-text-secondary m-0 leading-relaxed">
+          EON nema konzola-token skriptu. Najlakše: <strong className="text-white">Sinhronizuj iz pretraživača</strong>{" "}
+          (Windows, prijavljeni na play.eon.tv) ili nalepite JSON iz EditThisCookie / slične ekstenzije u polje ispod
+          (mapa <code className="font-mono text-emerald-300/90">name → value</code> ili objekat sa ključem{" "}
+          <code className="font-mono text-emerald-300/90">cookies</code>).
+        </p>
+      </div>
+    );
+  }
+
   const script = buildSessionConsoleScripts()[service];
   if (!script) return null;
 

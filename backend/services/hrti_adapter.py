@@ -27,12 +27,12 @@ class HrtiAdapter:
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
         from backend.credentials_store import get_secret
+        import json
 
         email = ""
         cfg_path = Path.home() / ".hrti" / "config.json"
         if cfg_path.exists():
             try:
-                import json
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 email = data.get("email") or data.get("username", "")
@@ -41,29 +41,30 @@ class HrtiAdapter:
 
         app_creds = config.get_credentials("hrti")
         if not email:
-            email = app_creds.get("email", "")
+            email = app_creds.get("email") or app_creds.get("username", "")
 
         password = get_secret("hrti", "password") or app_creds.get("password", "")
-        token = get_secret("hrti", "token")
 
-        if email and (password or token):
+        if email and password:
             return {"authenticated": True, "email": email}
         if email:
             return {
                 "authenticated": False,
                 "email": email,
-                "error": "Lozinka ili token nisu sačuvani u keyringu.",
+                "error": "Lozinka nije sačuvana. Unesite kredencijale ponovo.",
             }
-        return {"authenticated": False, "email": "", "error": "No credentials stored"}
+        return {"authenticated": False, "email": "", "error": "Kredencijali nisu sačuvani."}
 
     @staticmethod
     def save_credentials(email: str, password: str) -> Dict[str, Any]:
         try:
             auth = HRTIAuth()
+            auth.login(email, password)
             auth.save_credentials(email, password)
             config.update_credentials("hrti", {"email": email, "password": password})
-            return {"success": True}
+            return {"success": True, "email": email}
         except Exception as exc:
+            logger.error("HRTi save_credentials failed: %s", exc)
             return {"success": False, "error": str(exc)}
 
     @classmethod
@@ -143,13 +144,16 @@ class HrtiAdapter:
 
     @staticmethod
     def make_download_cmd(ref_id: str, title: str = "", workers: int = 16) -> List[str]:
+        ref_id = ref_id.strip()
+        if not ref_id:
+            raise ValueError("HRTi ref_id je obavezan.")
         return build_job(
             "hrti",
             "download",
             {
                 "ref_id": ref_id,
-                "title": title,
-                "workers": workers,
+                "title": title.strip(),
+                "workers": max(1, min(workers, 64)),
                 "output_dir": config.get_output_dir(),
             },
         )

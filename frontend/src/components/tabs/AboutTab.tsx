@@ -68,8 +68,8 @@ export function AboutTab() {
           <div className="flex flex-col gap-3">
             {[
               {
-                title: "Widevine DRM CENC Dekripcija",
-                desc: "Automatska ekstrakcija Widevine PSSH manifesta, prefetch provider sertifikata i licencna razmena u realnom vremenu uz in-memory dekodiranje audio i video segmenata.",
+                title: "DRM: Widevine CENC i AES-128 HLS",
+                desc: "EON, HBO Max, RTS i HRTi koriste Widevine (PSSH, licenca, mp4decrypt). Voyo koristi AES-128 HLS — segmenti se kopiraju bez Widevine CDM-a. Jedan WVD/CDM panel pokriva Widevine servise.",
                 color: "text-violet-400"
               },
               {

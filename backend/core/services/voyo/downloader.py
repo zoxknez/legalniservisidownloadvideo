@@ -37,10 +37,6 @@ import requests
 
 from .auth import VoyoAuth, VoyoConfig
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 requests.packages.urllib3.disable_warnings()
@@ -311,7 +307,7 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
             speed_str = f"{speed_bps / (1024*1024):.2f}MiB/s"
             eta_sec = (total_bytes - downloaded_bytes) / speed_bps if speed_bps > 0 else 0
             eta_str = f"{int(eta_sec)}s" if eta_sec < 3600 else f"{int(eta_sec/3600)}h{int((eta_sec%3600)/60)}m"
-            print(f"\r  {pct:.1f}%  speed={speed_str}  eta={eta_str}  ", end="", flush=True)
+            logger.info(f"Download {pct:.1f}%  speed={speed_str}  eta={eta_str}")
 
         logger.info(f"Downloading {len(segments)} segments concurrently...")
         success = await engine.download_segments(
@@ -320,7 +316,6 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
             headers=headers,
             progress_callback=progress_callback
         )
-        print()  # newline after progress bar
         
         if not success:
             logger.error("HLS segment download failed.")
@@ -410,12 +405,12 @@ def download_with_ytdlp(m3u8_url: str, temp_stem: str,
 
 def _progress_hook(d: dict):
     if d['status'] == 'finished':
-        print(f'\r  → Post-processing...                              ', flush=True)
+        logger.info("Post-processing...")
     elif d['status'] == 'downloading':
         pct   = d.get('_percent_str', '?%').strip()
         speed = d.get('_speed_str', '?').strip()
         eta   = d.get('_eta_str', '?').strip()
-        print(f'\r  {pct}  speed={speed}  eta={eta}  ', end='', flush=True)
+        logger.info(f"{pct}  speed={speed}  eta={eta}")
 
 
 # ── mkvmerge mux ─────────────────────────────────────────────────────────────
@@ -580,18 +575,18 @@ class VoyoDownloader:
         items, series_title = self._get_series(category_id)
         if not items:
             return
-        print(f'\nSeries: {series_title}  ({len(items)} episodes)\n')
+        logger.info("Series: %s  (%d episodes)", series_title, len(items))
         for i, ep in enumerate(items, 1):
             inner  = ep.get('meta', {})
             season = _parse_season_number(inner.get('season', ''))
             epnum  = inner.get('episode')
             mins   = ep.get('length', 0) // 60
-            drm    = '🔒' if ep.get('drmProtected') else '  '
-            sub    = '📄' if ep.get('hasSubtitles') else '  '
-            se     = f'S{season:02d}E{int(epnum):02d}' if epnum is not None else '      '
-            print(f'  [{i:3d}] {drm}{sub} {se}  [{ep["id"]:>7}]  '
-                  f'{ep.get("title", "?"):<40}  ({mins}m)')
-        print()
+            drm    = '[DRM]' if ep.get('drmProtected') else ''
+            sub    = '[SUB]' if ep.get('hasSubtitles') else ''
+            se     = f'S{season:02d}E{int(epnum):02d}' if epnum is not None else ''
+            logger.info("  [%3d] %s%s %s  [%7s]  %s  (%dm)",
+                        i, drm, sub, se, ep.get("id", "?"),
+                        ep.get("title", "?"), mins)
 
     def download_series(self, category_id: int,
                         episode_range: str = '') -> Tuple[int, int]:

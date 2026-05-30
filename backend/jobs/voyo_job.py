@@ -61,24 +61,30 @@ def run_voyo_job(
         _check_cancelled(cancel_event)
 
         if action == "video":
+            _check_cancelled(cancel_event)
             if is_url:
                 ok = downloader.download_video_url(target)
             else:
                 ok = downloader.download_video(int(target))
+            _check_cancelled(cancel_event)
             if not ok:
                 raise RuntimeError(f"Voyo video download failed: {target}")
             return True
 
         if action == "series":
+            _check_cancelled(cancel_event)
             if is_url:
                 ok_count, total = downloader.download_series_url(target, episodes)
             else:
                 ok_count, total = downloader.download_series(int(target), episodes)
+            _check_cancelled(cancel_event)
             log_fn(f"INFO Voyo serija završena: {ok_count}/{total} epizoda")
             return ok_count > 0
 
         if action == "url":
+            _check_cancelled(cancel_event)
             ok = downloader.download_video_url(target)
+            _check_cancelled(cancel_event)
             if not ok:
                 raise RuntimeError(f"Voyo URL download failed: {target}")
             return True

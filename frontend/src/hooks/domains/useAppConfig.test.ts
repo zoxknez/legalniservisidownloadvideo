@@ -37,6 +37,49 @@ describe("useAppConfig", () => {
     expect(result.current.outputDir).toBe("/tmp/out");
   });
 
+  it("handleClearCredentials returns true when API succeeds", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url: string) => {
+      if (url.includes("/api/credentials/clear")) {
+        return {
+          ok: true,
+          json: async () => ({ success: true, message: "ok", service: "voyo" }),
+        } as Response;
+      }
+      if (url.includes("/api/status")) {
+        return { ok: true, json: async () => mockAppStatus } as Response;
+      }
+      return { ok: false, json: async () => ({ detail: "unknown" }) } as Response;
+    });
+
+    const showToast = vi.fn();
+    const { result } = renderHook(() => useAppConfig({ showToast }));
+
+    let cleared = false;
+    await act(async () => {
+      cleared = await result.current.handleClearCredentials("voyo");
+    });
+
+    expect(cleared).toBe(true);
+    expect(showToast).toHaveBeenCalledWith("ok", "success");
+  });
+
+  it("handleClearCredentials returns false when API fails", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      ok: false,
+      json: async () => ({ detail: "fail" }),
+    } as Response);
+
+    const showToast = vi.fn();
+    const { result } = renderHook(() => useAppConfig({ showToast }));
+
+    let cleared = false;
+    await act(async () => {
+      cleared = await result.current.handleClearCredentials("voyo");
+    });
+
+    expect(cleared).toBe(false);
+  });
+
   it("unsubscribes status listeners on cleanup", async () => {
     vi.mocked(apiFetch).mockResolvedValue({
       ok: true,

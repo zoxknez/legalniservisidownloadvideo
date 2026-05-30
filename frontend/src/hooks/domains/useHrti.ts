@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { HrtiItem } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
@@ -25,6 +25,7 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
   const [hrtiSearchQuery, setHrtiSearchQuery] = useState("");
   const [hrtiLoadingItems, setHrtiLoadingItems] = useState(false);
   const hrtiDownloadWorkers = 16;
+  const [hrtiSubmitting, setHrtiSubmitting] = useState(false);
   const [selectedHrtiSeries, setSelectedHrtiSeries] = useState<{ id: string; title: string } | null>(
     null,
   );
@@ -33,19 +34,22 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries(null);
     try {
-      const res = await apiFetch(`/api/hrti/category-items?category=${cat}&page=${page}`);
+      const res = await apiFetch(`/api/hrti/category-items?category=${encodeURIComponent(cat)}&page=${page}`);
       if (res.ok) {
         const data = await res.json();
-        setCatItems(data.items);
-        setCatPage(data.metadata.page);
-        setCatTotalPages(data.metadata.total_pages);
+        setCatItems(data.items ?? []);
+        setCatPage(data.metadata?.page ?? 1);
+        setCatTotalPages(data.metadata?.total_pages ?? 1);
+      } else {
+        const msg = await parseApiError(res, "Greška pri učitavanju sadržaja");
+        showToast(msg, "error");
       }
     } catch (e) {
-      console.error(e);
+      showToast(errorMessage(e, "Greška pri učitavanju sadržaja"), "error");
     } finally {
       setHrtiLoadingItems(false);
     }
-  }, []);
+  }, [showToast]);
 
   const fetchHrtiCategories = useCallback(async () => {
     try {
@@ -57,48 +61,58 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
           setSelectedCat(data[0]);
           await fetchHrtiCategoryItems(data[0], 1);
         }
+      } else {
+        const msg = await parseApiError(res, "Greška pri učitavanju kategorija");
+        showToast(msg, "error");
       }
     } catch (e) {
-      console.error(e);
+      showToast(errorMessage(e, "Greška pri učitavanju kategorija"), "error");
     }
-  }, [fetchHrtiCategoryItems]);
+  }, [fetchHrtiCategoryItems, showToast]);
 
   const searchHrti = useCallback(async () => {
-    if (!hrtiSearchQuery.trim()) return;
+    const q = hrtiSearchQuery.trim();
+    if (!q) return;
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries(null);
     try {
-      const res = await apiFetch(`/api/hrti/search?query=${encodeURIComponent(hrtiSearchQuery)}`);
+      const res = await apiFetch(`/api/hrti/search?query=${encodeURIComponent(q)}`);
       if (res.ok) {
         const data = await res.json();
-        setCatItems(data.items);
+        setCatItems(data.items ?? []);
         setCatPage(1);
         setCatTotalPages(1);
+      } else {
+        const msg = await parseApiError(res, "Pretraga nije uspela");
+        showToast(msg, "error");
       }
     } catch (e) {
-      console.error(e);
+      showToast(errorMessage(e, "Greška pri pretrazi"), "error");
     } finally {
       setHrtiLoadingItems(false);
     }
-  }, [hrtiSearchQuery]);
+  }, [hrtiSearchQuery, showToast]);
 
   const fetchHrtiSeriesEpisodes = useCallback(async (uuid: string, title: string) => {
     setHrtiLoadingItems(true);
     setSelectedHrtiSeries({ id: uuid, title });
     try {
-      const res = await apiFetch(`/api/hrti/series/${uuid}`);
+      const res = await apiFetch(`/api/hrti/series/${encodeURIComponent(uuid)}`);
       if (res.ok) {
         const data = await res.json();
-        setCatItems(data.items);
+        setCatItems(data.items ?? []);
         setCatPage(1);
         setCatTotalPages(1);
+      } else {
+        const msg = await parseApiError(res, "Greška pri učitavanju epizoda");
+        showToast(msg, "error");
       }
     } catch (e) {
-      console.error(e);
+      showToast(errorMessage(e, "Greška pri učitavanju epizoda"), "error");
     } finally {
       setHrtiLoadingItems(false);
     }
-  }, []);
+  }, [showToast]);
 
   const startHrtiDownload = useCallback((refId: string, itemTitle: string) => {
     setHrtiModalTitle(itemTitle);
@@ -106,29 +120,32 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
   }, []);
 
   const confirmHrtiDownload = useCallback(async () => {
-    if (!hrtiModal) return;
+    if (!hrtiModal || hrtiSubmitting) return;
+    setHrtiSubmitting(true);
     try {
       const res = await apiFetch(`/api/hrti/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ref_id: hrtiModal.refId,
-          title: hrtiModalTitle || hrtiModal.title,
+          ref_id: hrtiModal.refId.trim(),
+          title: (hrtiModalTitle || hrtiModal.title).trim(),
           workers: hrtiDownloadWorkers,
         }),
       });
       if (res.ok) {
         showToast("HRTi preuzimanje pokrenuto!");
       } else {
-        showToast("Greška pri slanju preuzimanja", "error");
+        const msg = await parseApiError(res, "Greška pri slanju preuzimanja");
+        showToast(msg, "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     } finally {
+      setHrtiSubmitting(false);
       setHrtiModal(null);
       setHrtiModalTitle("");
     }
-  }, [hrtiModal, hrtiModalTitle, showToast]);
+  }, [hrtiModal, hrtiModalTitle, hrtiSubmitting, showToast]);
 
   useEffect(() => {
     if (activeTab === "hrti" && hrtiCats.length === 0) {
@@ -162,6 +179,7 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
     hrtiLoadingItems,
     setHrtiLoadingItems,
     hrtiDownloadWorkers,
+    hrtiSubmitting,
     selectedHrtiSeries,
     setSelectedHrtiSeries,
     fetchHrtiCategories,

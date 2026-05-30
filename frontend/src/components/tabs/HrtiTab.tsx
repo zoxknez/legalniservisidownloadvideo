@@ -45,9 +45,11 @@ export function HrtiTab() {
           <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
             <Film className="w-6 h-6 text-cyan-400" /> HRTi Catalog
           </h2>
-          <span className="badge flex items-center gap-1.5 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
-            <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
-          </span>
+          {status?.services.hrti.authenticated && (
+            <span className="badge flex items-center gap-1.5 bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+              <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+            </span>
+          )}
         </div>
         <p className="text-text-secondary text-sm">Pregledajte, pretražujte i preuzmite filmove i serije sa HRTi streaming servisa uz automatsko dekodiranje.</p>
       </div>
@@ -106,14 +108,14 @@ export function HrtiTab() {
         <div className="glass-panel p-8 rounded-xl border border-glass min-h-96 relative glow-cyan-card glow-card-premium">
           {hrtiLoadingItems && (
             <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-xl">
-              <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+              <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
             </div>
           )}
 
           {selectedHrtiSeries ? (
             <div className="flex justify-between items-center mb-6">
               <div className="flex items-center gap-2">
-                <Film className="w-5 h-5 text-indigo-400" />
+                <Film className="w-5 h-5 text-cyan-400" />
                 <h3 className="font-extrabold text-xl text-white">Epizode za: {selectedHrtiSeries.title}</h3>
               </div>
               <button

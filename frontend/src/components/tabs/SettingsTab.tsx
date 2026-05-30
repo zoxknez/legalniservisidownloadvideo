@@ -2,6 +2,7 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  Clapperboard,
   Copy,
   Database,
   Download,
@@ -30,10 +31,25 @@ import {
   HBO_SNIFFER_BOOKMARKLET,
 } from "../../lib/sessionConsoleScripts";
 import { USERSCRIPT_INSTALL_URL, fetchUserscriptText } from "../../lib/bridge";
-import { setStoredApiKey } from "../../lib/api";
+import { SESSION_IMPORT_PLACEHOLDERS } from "../../lib/sessionConsoleScripts";
+import { apiFetch, setStoredApiKey } from "../../lib/api";
 import type { BinaryStatus, TranscodeAcceleration } from "../../types/app";
 import { useSettingsTab } from "../../hooks/domains/useSettingsTab";
+import { SettingsDrmCard } from "../settings/SettingsDrmCard";
+import { SettingsServiceGrid } from "../settings/SettingsServiceGrid";
+import { SettingsCredentialFooter } from "../settings/SettingsCredentialFooter";
 import { cssVars } from "../../utils/cssVars";
+
+const SETTINGS_SECTIONS = [
+  { id: "settings-auth", label: "Autentifikacija" },
+  { id: "settings-security", label: "Sigurnost" },
+  { id: "settings-wvd", label: "WVD / CDM" },
+  { id: "settings-services", label: "Servisi" },
+  { id: "settings-system", label: "Sistem" },
+  { id: "settings-session", label: "Uvoz sesije" },
+  { id: "settings-sniffer", label: "Sniffer" },
+  { id: "settings-credentials", label: "Kredencijali" },
+] as const;
 
 export function SettingsTab() {
   const {
@@ -49,9 +65,16 @@ export function SettingsTab() {
     fetchStatus,
     fetchTranscodeDiagnostics,
     handleAutoSyncBrowser,
+    handleClearCredentials,
+    clearingService,
     handleImportSession,
+    handleSaveApiKeyToServer,
+    savingApiKey,
+    handleMigrateCredentials,
+    migratingCredentials,
     handleSaveConfig,
-    handleSaveDeviceWvdPath,
+    savingConfig,
+    submittingLogin,
     hrtiEmail,
     hrtiPassword,
     importLoading,
@@ -88,6 +111,8 @@ export function SettingsTab() {
     showHrtiPass,
     showRtsPass,
     showToast,
+    setActiveTab,
+    browserSyncSupported,
     showVoyoPass,
     snifferAutoDownload,
     snifferScriptCopied,
@@ -98,6 +123,11 @@ export function SettingsTab() {
     userscriptPreview,
     voyoEmail,
     voyoPassword,
+    hboMarket,
+    setHboMarket,
+    startHboLogin,
+    hboSubmitting,
+    hboAuth,
   } = useSettingsTab();
   return (
 <div key="settings" className="tab-content tab-content-settings">
@@ -113,10 +143,22 @@ export function SettingsTab() {
       </div>
     </div>
 
+    <nav className="flex flex-wrap gap-2 mb-2 pb-4 border-b border-white/[0.04]">
+      {SETTINGS_SECTIONS.map(({ id, label }) => (
+        <a
+          key={id}
+          href={`#${id}`}
+          className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md border border-white/10 text-text-muted hover:text-white hover:border-indigo-500/40 transition-colors"
+        >
+          {label}
+        </a>
+      ))}
+    </nav>
+
     <div className="flex flex-col gap-8">
 
       {/* Zero-Friction Authentication Panel */}
-      <div className="glass-panel p-8 rounded-xl border border-glass glow-indigo-card glow-card-premium relative overflow-hidden">
+      <div id="settings-auth" className="glass-panel p-8 rounded-xl border border-glass glow-indigo-card glow-card-premium relative overflow-hidden scroll-mt-24">
         <div className="console-scanline" />
         <div className="flex items-center justify-between gap-4 flex-wrap mb-6 pb-4 border-b border-white/[0.04]">
           <div className="flex items-center gap-3">
@@ -128,10 +170,17 @@ export function SettingsTab() {
               <p className="text-text-secondary text-xs">Uvezite sesije jednim klikom direktno iz vašeg pretraživača</p>
             </div>
           </div>
+          {!browserSyncSupported && (
+            <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 m-0 w-full">
+              Automatska sinhronizacija iz Chrome/Edge/Brave radi samo na <strong>Windows</strong>-u.
+              Na ovom sistemu koristite bookmarklet ili ručni uvoz sesije.
+            </p>
+          )}
           <button
             type="button"
             onClick={handleAutoSyncBrowser}
-            disabled={autoSyncLoading}
+            disabled={autoSyncLoading || !browserSyncSupported}
+            title={!browserSyncSupported ? "Dostupno samo na Windows-u" : undefined}
             className="py-2.5 px-5 rounded-lg text-xs font-black tracking-wider uppercase bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white flex items-center gap-2 transition-all duration-300 shadow-[0_0_15px_rgba(99,102,241,0.4)] disabled:opacity-50"
           >
             {autoSyncLoading ? (
@@ -148,7 +197,7 @@ export function SettingsTab() {
           <div className="flex flex-col gap-3">
             <h4 className="font-bold text-xs text-indigo-300 tracking-wider uppercase">Kako funkcioniše automatski uvoz?</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
-              Aplikacija bezbedno skenira lokalne profile instaliranih pretraživača (**Chrome, Edge, Brave**) na vašem računaru i dešifruje aktivne sesijske kolačiće za <strong className="text-white">RTS Planetu, EON TV, Voyo i HRTi</strong> koristeći Windows DPAPI zaštitu.
+              Aplikacija bezbedno skenira lokalne profile instaliranih pretraživača (**Chrome, Edge, Brave**) na vašem računaru i dešifruje aktivne sesijske kolačiće za <strong className="text-white">RTS Planetu, EON TV, Voyo i HRTi</strong> koristeći Windows DPAPI zaštitu. Za <strong className="text-white">HBO Max</strong> koristite uvoz sesije ili bookmarklet ispod.
             </p>
             <div className="p-3.5 rounded-lg bg-black/40 border border-white/[0.04] text-[11px] text-text-muted flex flex-col gap-2">
               <span className="flex items-center gap-1.5 text-amber-400 font-bold">
@@ -163,7 +212,7 @@ export function SettingsTab() {
           <div className="flex flex-col gap-3">
             <h4 className="font-bold text-xs text-purple-300 tracking-wider uppercase">1-Klik Bookmarkleti (direktno u app)</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
-              Prevucite link u Bookmark bar. Klik na sajtu servisa šalje sesiju na{" "}
+              Prevucite link u Bookmark bar. Klik na sajtu servisa (Voyo, HRTi, RTS, Max, EON) šalje sesiju na{" "}
               <code className="font-mono bg-white/10 px-1 rounded">127.0.0.1:8000</code> — bez copy-paste.
               Aplikacija mora biti pokrenuta (<code className="font-mono">python run.py</code>).
             </p>
@@ -208,50 +257,40 @@ export function SettingsTab() {
         </div>
       </div>
 
-      <CredentialsSecurityPanel credentialsSecurity={status?.credentials_security} />
+      <div id="settings-security" className="scroll-mt-24">
+        <CredentialsSecurityPanel
+          credentialsSecurity={status?.credentials_security}
+          onMigrate={() => void handleMigrateCredentials()}
+          migrating={migratingCredentials}
+        />
+      </div>
 
+      <div id="settings-wvd" className="scroll-mt-24 flex flex-col gap-5">
       <WvdInstallerPanel
         deviceFound={deviceWvdInfo?.found}
         onInstalled={() => {
           fetchStatus();
           fetchTranscodeDiagnostics();
+          void apiFetch("/api/drm/reload", { method: "POST" });
         }}
         showToast={showToast}
       />
+      {status && <SettingsDrmCard drm={status.drm} onOpenDrmTab={() => setActiveTab("drm")} />}
+      </div>
 
       {/* F3: Services Authentication Status Overview */}
       {status && (
-        <div className="glass-panel p-6 rounded-xl border border-glass glow-indigo-card glow-card-premium">
+        <div id="settings-services" className="glass-panel p-6 rounded-xl border border-glass glow-indigo-card glow-card-premium scroll-mt-24">
           <h3 className="font-extrabold text-base mb-4 flex items-center gap-2 text-white">
             <Server className="w-4 h-4 text-indigo-400" />
             Pregled Autentifikacije Servisa
           </h3>
-          <div className="service-status-grid">
-            {[
-              { key: "voyo",       label: "Voyo RS",     icon: Tv,     color: "service-voyo" },
-              { key: "hrti",       label: "HRTi",        icon: Film,   color: "service-hrti" },
-              { key: "eon",        label: "EON TV",      icon: Play,   color: "service-eon"  },
-              { key: "rtsplaneta", label: "RTS Planeta", icon: Radio,  color: "service-rts"  },
-              { key: "hbomax",     label: "HBO Max",     icon: Zap,    color: "service-hbo"  },
-            ].map(({ key, label, icon: Icon, color }) => {
-              const serviceStatus = status.services[key];
-              const auth = key === "eon" ? Boolean(serviceStatus?.ready) : Boolean(serviceStatus?.authenticated);
-              return (
-                <div key={key} className={`service-status-card ${auth ? "authenticated" : "not-authenticated"}`}>
-                  <Icon className={`w-5 h-5 ${color}`} />
-                  <span className="text-xs font-bold text-white">{label}</span>
-                  <span className={`text-[10px] font-semibold ${auth ? "text-emerald-400" : "text-red-400"}`}>
-                    {auth ? "Spreman" : "Nije spreman"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          <SettingsServiceGrid status={status} />
         </div>
       )}
 
       {/* Folder and Binaries Status */}
-      <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium">
+      <div id="settings-system" className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium scroll-mt-24">
         <h3 className="font-extrabold text-xl text-indigo-400 flex items-center gap-2">
           <Settings className="w-5 h-5" />
           Sistemska Podešavanja
@@ -286,18 +325,43 @@ export function SettingsTab() {
             className="input-premium font-mono text-xs"
             style={cssVars({"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"})}
           />
-          <button
-            type="button"
-            className="mt-2 text-xs font-bold text-indigo-400 hover:text-indigo-300"
-            onClick={() => {
-              setStoredApiKey(apiKeyInput);
-              showToast("API ključ sačuvan u pregledaču.", "success");
-            }}
-          >
-            Sačuvaj API ključ lokalno
-          </button>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              className="text-xs font-bold text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded border border-indigo-500/20"
+              onClick={() => {
+                setStoredApiKey(apiKeyInput);
+                showToast("API ključ sačuvan u pregledaču (localStorage).", "success");
+              }}
+            >
+              Sačuvaj lokalno
+            </button>
+            <button
+              type="button"
+              disabled={savingApiKey || !apiKeyInput.trim()}
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded border border-emerald-500/20 disabled:opacity-50"
+              onClick={() => void handleSaveApiKeyToServer()}
+            >
+              {savingApiKey ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Čuvanje…
+                </span>
+              ) : (
+                "Sačuvaj na server"
+              )}
+            </button>
+          </div>
           <p className="text-[10px] text-text-muted mt-1.5">
-            Na localhost-u ključ obično nije potreban. Potreban je ako server slušate na LAN-u.
+            Lokalno = header u frontendu; na server = <code className="font-mono bg-white/[0.04] px-1 rounded">~/.videodownload/config.json</code>.
+            Na localhost-u ključ obično nije potreban. Potreban je za LAN pristup.
+            {status?.server?.api_key_configured ? (
+              <span className="block mt-1 text-emerald-400/90">Server ima podešen API ključ.</span>
+            ) : (
+              <span className="block mt-1 text-amber-400/90">
+                Server još nema API ključ u config.json — prvi start ga može generisati automatski.
+              </span>
+            )}
           </p>
         </div>
 
@@ -420,7 +484,7 @@ export function SettingsTab() {
 
         <button
           onClick={handleSaveConfig}
-          disabled={saveFeedback}
+          disabled={saveFeedback || savingConfig}
           className={`btn-premium self-end transition-all ${saveFeedback ? "bg-emerald-600 text-white border border-emerald-500 shadow-emerald" : "btn-premium-primary"}`}
           style={cssVars({
             "--btn-grad-start": "#6366f1",
@@ -434,6 +498,11 @@ export function SettingsTab() {
               <Check className="w-4 h-4 animate-bounce" />
               Podešavanja sačuvana!
             </span>
+          ) : savingConfig ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Čuvanje…
+            </span>
           ) : (
             "Sačuvaj Podešavanja"
           )}
@@ -441,13 +510,13 @@ export function SettingsTab() {
       </div>
 
       {/* Session / Cookie Import Panel to bypass CAPTCHA */}
-      <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-amber-card glow-card-premium">
+      <div id="settings-session" className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-amber-card glow-card-premium scroll-mt-24">
         <h3 className="font-extrabold text-xl text-amber-400 flex items-center gap-2">
           <ShieldAlert className="w-5 h-5 text-amber-400 animate-pulse" />
           Uvoz Sesije / Kolačića (Bypass CAPTCHA)
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed m-0">
-          Ukoliko neki od servisa (RTS, Voyo, HRTi, HBO) zahteva CAPTCHA zaštitu ili verifikaciju na formi za logovanje,
+          Ukoliko neki od servisa (RTS, Voyo, HRTi, HBO, EON) zahteva CAPTCHA zaštitu ili verifikaciju na formi za logovanje,
           možete se ulogovati normalno u vašem brauzeru, kopirati token ili sesiju (npr. preko EditThisCookie ekstenzije) i uvesti ga ovde.
         </p>
 
@@ -463,13 +532,14 @@ export function SettingsTab() {
             <label>Izaberite servis</label>
             <CustomSelect
               value={importService}
-              options={["voyo", "hrti", "rtsplaneta", "hbomax"]}
+              options={["voyo", "hrti", "rtsplaneta", "hbomax", "eon"]}
               onChange={(val) => setImportService(val)}
               formatLabel={(val) => {
                 if (val === "voyo") return "Voyo RS";
                 if (val === "hrti") return "HRTi";
                 if (val === "rtsplaneta") return "RTS Planeta";
                 if (val === "hbomax") return "HBO Max";
+                if (val === "eon") return "EON TV (kolačići)";
                 return val;
               }}
               className="max-w-xs"
@@ -479,7 +549,8 @@ export function SettingsTab() {
           <div>
             <label>Podaci o sesiji (Token / Cookie JSON string)</label>
             <textarea
-              placeholder="Nalepite kopirani token ili sesijski JSON ovde..."
+              value={importSessionData}
+              placeholder={SESSION_IMPORT_PLACEHOLDERS[importService] || "Nalepite kopirani token ili sesijski JSON ovde…"}
               onChange={(e) => setImportSessionData(e.target.value)}
               rows={5}
               className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full font-mono text-xs"
@@ -498,17 +569,22 @@ export function SettingsTab() {
             })}
           >
             {importLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Uvoz u toku…
+              </>
             ) : (
-              <Download className="w-5 h-5" />
+              <>
+                <Download className="w-5 h-5" />
+                Uvezi sesiju
+              </>
             )}
-            Uvezi Sesiju
           </button>
         </div>
       </div>
 
       {/* DevTools WebSocket Sniffer Proxy Panel */}
-      <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-cyan-card glow-card-premium">
+      <div id="settings-sniffer" className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-cyan-card glow-card-premium scroll-mt-24">
         <h3 className="font-extrabold text-xl text-cyan-400 flex items-center gap-2">
           <Zap className="w-5 h-5 text-cyan-400 animate-pulse" />
           Tampermonkey Bridge v2 (Sesije + Sniffer)
@@ -588,7 +664,7 @@ export function SettingsTab() {
         </div>
       </div>
 
-      <div className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium">
+      <div id="settings-credentials" className="glass-panel p-8 rounded-xl border border-glass flex flex-col gap-6 glow-indigo-card glow-card-premium scroll-mt-24">
         <h3 className="font-extrabold text-xl text-indigo-400 border-b border-white/[0.04] pb-3">Upravljanje Kredencijalima</h3>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -633,18 +709,19 @@ export function SettingsTab() {
                 </button>
               </div>
             </div>
-            <button
-              onClick={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword })}
-              className="btn btn-premium-primary text-xs w-full"
-              style={cssVars({
+            <SettingsCredentialFooter
+              loginLabel="Prijavi se na Voyo"
+              onLogin={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword })}
+              onClear={() => void handleClearCredentials("voyo")}
+              loginLoading={submittingLogin}
+              clearLoading={clearingService === "voyo"}
+              loginStyle={cssVars({
                 "--btn-grad-start": "#f97316",
                 "--btn-grad-end": "#ea580c",
                 "--btn-glow": "rgba(249,115,22,0.25)",
-                "--btn-glow-hover": "rgba(249,115,22,0.45)"
+                "--btn-glow-hover": "rgba(249,115,22,0.45)",
               })}
-            >
-              Prijavi se na Voyo
-            </button>
+            />
           </div>
 
           {/* HRTi Credentials */}
@@ -687,18 +764,19 @@ export function SettingsTab() {
                 </button>
               </div>
             </div>
-            <button
-              onClick={() => submitLogin("hrti", { email: hrtiEmail, password: hrtiPassword })}
-              className="btn btn-premium-primary text-xs w-full"
-              style={cssVars({
+            <SettingsCredentialFooter
+              loginLabel="Prijavi se na HRTi"
+              onLogin={() => submitLogin("hrti", { email: hrtiEmail, password: hrtiPassword })}
+              onClear={() => void handleClearCredentials("hrti")}
+              loginLoading={submittingLogin}
+              clearLoading={clearingService === "hrti"}
+              loginStyle={cssVars({
                 "--btn-grad-start": "#06b6d4",
                 "--btn-grad-end": "#0284c7",
                 "--btn-glow": "rgba(6,182,212,0.25)",
-                "--btn-glow-hover": "rgba(6,182,212,0.45)"
+                "--btn-glow-hover": "rgba(6,182,212,0.45)",
               })}
-            >
-              Prijavi se na HRTi
-            </button>
+            />
           </div>
 
           {/* EON device credentials */}
@@ -753,39 +831,34 @@ export function SettingsTab() {
                 <p className="text-[10px] text-text-muted mt-1.5">Vrednost koju vidite kao device-number u response-u.</p>
               </div>
             </div>
-            <div className="border-t border-white/[0.04] pt-4 mt-2">
-              <label>device.wvd putanja</label>
-              <div className="flex flex-col md:flex-row gap-3">
-                <input
-                  type="text"
-                  value={binariesPaths.device_wvd || ""}
-                  onChange={(e) => setBinariesPaths({ ...binariesPaths, device_wvd: e.target.value })}
-                  placeholder="npr. D:\ProjektiApp\videodownloadservisi\device.wvd"
-                  className="font-mono text-xs flex-1 input-premium"
-                  style={cssVars({"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"})}
-                />
-                <button onClick={handleSaveDeviceWvdPath} className="btn btn-premium-secondary text-xs">
-                  Sačuvaj WVD
-                </button>
-              </div>
-              <p className="text-[10px] text-text-muted mt-1.5">
-                Status: {deviceWvdInfo?.found ? "pronađen ✓" : "nije pronađen ✗"} {deviceWvdInfo?.path ? `(${deviceWvdInfo.path})` : ""}
-              </p>
+            <p className="text-[10px] text-text-muted border-t border-white/[0.04] pt-3 mt-1">
+              Widevine <code className="font-mono bg-white/[0.04] px-1 rounded">device.wvd</code> podešavate u
+              sekciji <strong className="text-violet-300">WVD / CDM</strong> iznad ili na DRM tabu.
+              {deviceWvdInfo?.found ? " CDM fajl je pronađen ✓" : " CDM fajl trenutno nije pronađen ✗"}
+            </p>
+            <div className="mt-2 max-w-md">
+              <SettingsCredentialFooter
+                loginLabel={eonStatus?.engine_installed === false ? "EON engine nedostaje" : "Sačuvaj EON uređaj"}
+                onLogin={() =>
+                  submitLogin("eon", {
+                    username: eonUsername,
+                    password: eonPassword,
+                    serial: eonSerial,
+                    number: eonNumber,
+                  })
+                }
+                onClear={() => void handleClearCredentials("eon")}
+                loginLoading={submittingLogin}
+                clearLoading={clearingService === "eon"}
+                loginDisabled={eonStatus?.engine_installed === false}
+                loginStyle={cssVars({
+                  "--btn-grad-start": "#10b981",
+                  "--btn-grad-end": "#059669",
+                  "--btn-glow": "rgba(16,185,129,0.25)",
+                  "--btn-glow-hover": "rgba(16,185,129,0.45)",
+                })}
+              />
             </div>
-            <button
-              onClick={() => submitLogin("eon", { username: eonUsername, password: eonPassword, serial: eonSerial, number: eonNumber })}
-              disabled={eonStatus?.engine_installed === false}
-              className="btn btn-premium-primary text-xs mt-2 self-start"
-              style={cssVars({
-                "--btn-grad-start": "#10b981",
-                "--btn-grad-end": "#059669",
-                "--btn-glow": "rgba(16,185,129,0.25)",
-                "--btn-glow-hover": "rgba(16,185,129,0.45)"
-              })}
-              title={eonStatus?.engine_installed === false ? "Dodajte eon_downloader.py u root aplikacije." : undefined}
-            >
-              {eonStatus?.engine_installed === false ? "EON engine nedostaje" : "Sačuvaj EON uređaj"}
-            </button>
           </div>
 
           {/* RTS Planeta */}
@@ -828,18 +901,62 @@ export function SettingsTab() {
                 </button>
               </div>
             </div>
-            <button
-              onClick={() => submitLogin("rts", { email: rtsEmail, password: rtsPassword })}
-              className="btn btn-premium-primary text-xs w-full"
-              style={cssVars({
+            <SettingsCredentialFooter
+              loginLabel="Sačuvaj RTS kredencijale"
+              onLogin={() => submitLogin("rts", { email: rtsEmail, password: rtsPassword })}
+              onClear={() => void handleClearCredentials("rts")}
+              loginLoading={submittingLogin}
+              clearLoading={clearingService === "rts"}
+              loginStyle={cssVars({
                 "--btn-grad-start": "#f43f5e",
                 "--btn-grad-end": "#e11d48",
                 "--btn-glow": "rgba(244,63,94,0.25)",
-                "--btn-glow-hover": "rgba(244,63,94,0.45)"
+                "--btn-glow-hover": "rgba(244,63,94,0.45)",
               })}
-            >
-              Sačuvaj RTS Kredencijale
-            </button>
+            />
+          </div>
+
+          {/* HBO Max */}
+          <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-purple-card glow-card-premium transition-all hover:bg-white/[0.03]">
+            <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
+              <Clapperboard className="w-4 h-4 service-hbo" />
+              HBO Max
+              {hboAuth?.authenticated && (
+                <span className="text-[9px] font-bold text-emerald-400 ml-auto">Token aktivan</span>
+              )}
+            </h4>
+            <p className="text-[10px] text-text-muted m-0 leading-relaxed">
+              Prijava pokreće interaktivni device login u pozadini (pogledajte Logs). Alternativa: uvoz sesije iznad
+              ili Max bookmarklet u sekciji Autentifikacija.
+            </p>
+            <div>
+              <label>Tržište (market)</label>
+              <CustomSelect
+                value={hboMarket}
+                options={["emea", "latam", "us"]}
+                onChange={(val) => setHboMarket(val)}
+                formatLabel={(val) => {
+                  if (val === "emea") return "EMEA (Srbija / region)";
+                  if (val === "latam") return "Latam";
+                  if (val === "us") return "US";
+                  return val;
+                }}
+                className="max-w-xs"
+              />
+            </div>
+            <SettingsCredentialFooter
+              loginLabel="Pokreni HBO Max prijavu"
+              onLogin={() => void startHboLogin()}
+              onClear={() => void handleClearCredentials("hbomax")}
+              loginLoading={hboSubmitting}
+              clearLoading={clearingService === "hbomax"}
+              loginStyle={cssVars({
+                "--btn-grad-start": "#9333ea",
+                "--btn-grad-end": "#7e22ce",
+                "--btn-glow": "rgba(147,51,234,0.25)",
+                "--btn-glow-hover": "rgba(147,51,234,0.45)",
+              })}
+            />
           </div>
 
         </div>

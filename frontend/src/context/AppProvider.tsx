@@ -90,9 +90,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data.sniffer?.auto_download !== undefined) {
         sniffer.setSnifferAutoDownload(Boolean(data.sniffer.auto_download));
       }
+      const svc = data.services;
+      voyo.setVoyoEmail(svc?.voyo?.email || "");
+      voyo.setVoyoPassword("");
+      hrti.setHrtiEmail(svc?.hrti?.email || "");
+      hrti.setHrtiPassword("");
+      const rtsEmail = svc?.rtsplaneta?.email;
+      if (rtsEmail && !String(rtsEmail).startsWith("(sesija")) {
+        rts.setRtsEmail(rtsEmail);
+      } else if (!rtsEmail) {
+        rts.setRtsEmail("");
+      }
+      rts.setRtsPassword("");
+      eon.setEonUsername(svc?.eon?.username || "");
+      eon.setEonPassword("");
+      eon.setEonSerial(svc?.eon?.serial || "");
+      eon.setEonNumber(svc?.eon?.number || "");
+      const hboMarket = svc?.hbomax?.market;
+      if (hboMarket === "emea" || hboMarket === "latam" || hboMarket === "us") {
+        hbo.setHboMarket(hboMarket);
+      }
+      hbo.refreshAuth();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribeStatusLoaded and setSnifferAutoDownload are stable
-  }, [config.subscribeStatusLoaded, sniffer.setSnifferAutoDownload]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable setter refs from domain hooks
+  }, [config.subscribeStatusLoaded, sniffer.setSnifferAutoDownload, hbo.setHboMarket, hbo.refreshAuth]);
+
+  useEffect(() => {
+    if (activeTab === "settings") {
+      void config.fetchTranscodeDiagnostics();
+    }
+  }, [activeTab, config.fetchTranscodeDiagnostics]);
 
   const bootstrap = useCallback(async () => {
     setBootState("loading");

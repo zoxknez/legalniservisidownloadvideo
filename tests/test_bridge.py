@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -34,3 +35,20 @@ def test_bridge_cors_headers():
     r = client.options("/api/bridge/session")
     assert r.status_code == 204
     assert r.headers.get("access-control-allow-origin") == "*"
+
+
+@patch("backend.credentials_store.set_secret")
+def test_bridge_session_eon_cookies(mock_set, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    client = TestClient(app)
+    eon_payload = json.dumps({"cookies": {"sid": "bridge-eon"}})
+    r = client.post(
+        "/api/bridge/session",
+        json={"batch": {"eon": eon_payload}, "source": "test"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("success")
+    cfg = tmp_path / ".eon" / "config.json"
+    assert cfg.exists()
+    assert json.loads(cfg.read_text(encoding="utf-8"))["cookies"]["sid"] == "bridge-eon"

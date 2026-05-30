@@ -54,13 +54,17 @@ def run_rts_job(
         _check_cancelled(cancel_event)
 
         if downloader.is_series_url(target_url):
+            _check_cancelled(cancel_event)
             downloaded = downloader.download_series(
                 target_url,
                 start=start_ep,
                 end=end_ep_val,
             )
+            _check_cancelled(cancel_event)
             log_fn(f"INFO RTS serija završena: {len(downloaded)} epizoda")
             return len(downloaded) > 0
 
+        _check_cancelled(cancel_event)
         downloader.download(target_url)
+        _check_cancelled(cancel_event)
         return True

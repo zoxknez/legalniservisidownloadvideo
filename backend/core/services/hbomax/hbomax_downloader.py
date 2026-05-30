@@ -50,6 +50,13 @@ import xmltodict
 from .hbomax_auth import HBOMaxAuth, load_token, save_token
 
 try:
+    from backend.services.drm_manager import drm_manager as _drm_manager
+    _USE_CENTRAL_DRM = True
+except ImportError:
+    _USE_CENTRAL_DRM = False
+    _drm_manager = None
+
+try:
     from curl_cffi import requests as cffi_requests
     _HAS_CURL_CFFI = True
 except ImportError:
@@ -142,6 +149,33 @@ class WidevineCDM:
 
     def close(self) -> None:
         pass  # Cdm is stateless per session
+
+
+def _pairs_to_hbo_keys(pairs: List[str]) -> List[Dict[str, str]]:
+    keys: List[Dict[str, str]] = []
+    for pair in pairs:
+        if ":" in pair:
+            kid, key = pair.split(":", 1)
+            keys.append({"kid": kid, "key": key})
+    return keys
+
+
+class HBOCDMBridge:
+    """Delegates to central DRMManager; HBO code expects kid/key dicts."""
+
+    def get_keys(
+        self, pssh_b64: str, license_url: str, headers: Dict[str, str]
+    ) -> List[Dict[str, str]]:
+        if not (_USE_CENTRAL_DRM and _drm_manager and _drm_manager.is_ready()):
+            raise RuntimeError("Central CDM not ready")
+        pairs = _drm_manager.get_keys(pssh_b64, license_url, headers, "hbomax")
+        return _pairs_to_hbo_keys(pairs)
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 # ── Binary discovery ───────────────────────────────────────────────────────────
@@ -271,6 +305,7 @@ def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]
     """
     mpd = xmltodict.parse(mpd_text)
     root = mpd.get("MPD", mpd)
+    mpd_duration = root.get("@mediaPresentationDuration", "")
 
     periods = root.get("Period", [])
     if isinstance(periods, dict):
@@ -352,12 +387,31 @@ def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]
         or (next(iter(best_audio_by_lang.values())) if best_audio_by_lang else None)
     )
 
+    if best_video and mpd_duration:
+        best_video["_mpd_duration"] = mpd_duration
+    if best_audio and mpd_duration:
+        best_audio["_mpd_duration"] = mpd_duration
+
     return {
         "video":     best_video,
         "audio":     best_audio,
         "subtitles": subtitle_tracks,
         "pssh":      pssh_b64,
     }
+
+
+def _parse_mpd_duration(adapt_rep: Dict) -> Optional[float]:
+    """Try to parse ISO 8601 duration (PT...S) stored in _mpd_duration key."""
+    dur_str = adapt_rep.get("_mpd_duration", "")
+    if not dur_str:
+        return None
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?", dur_str)
+    if not m:
+        return None
+    h = int(m.group(1) or 0)
+    mins = int(m.group(2) or 0)
+    secs = float(m.group(3) or 0)
+    return h * 3600 + mins * 60 + secs
 
 
 def _extract_segment_urls(adapt_rep: Dict, mpd_base_url: str) -> List[str]:
@@ -405,14 +459,13 @@ def _extract_segment_urls(adapt_rep: Dict, mpd_base_url: str) -> List[str]:
                     urls.append(seg_url)
                     t += d
         else:
-            # Number-based template
             start = int(seg_tmpl.get("@startNumber", 1))
             timescale = int(seg_tmpl.get("@timescale", 1))
             duration_attr = seg_tmpl.get("@duration")
             if duration_attr:
                 seg_duration = int(duration_attr) / timescale
-                # We need total duration — estimate 2 hours
-                total_secs = 7200
+                # Derive total duration from MPD @mediaPresentationDuration if available
+                total_secs = _parse_mpd_duration(adapt_rep) or 14400
                 count = int(total_secs / seg_duration) + 5
                 for i in range(start, start + count):
                     seg_url = base + _fill(media).replace("$Number$", str(i))
@@ -434,6 +487,19 @@ def _extract_segment_urls(adapt_rep: Dict, mpd_base_url: str) -> List[str]:
 
 # ── Download helpers ───────────────────────────────────────────────────────────
 
+_seg_session: Optional[requests.Session] = None
+
+def _get_seg_session() -> requests.Session:
+    global _seg_session
+    if _seg_session is None:
+        _seg_session = requests.Session()
+        _seg_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        })
+    return _seg_session
+
+
 def _download_segments(
     urls: List[str],
     out_path: Path,
@@ -443,14 +509,15 @@ def _download_segments(
     """Download a list of segment URLs and concatenate into out_path."""
     total = len(urls)
     data_map: Dict[int, bytes] = {}
+    sess = _get_seg_session()
 
     def _fetch(idx: int, url: str) -> Tuple[int, bytes]:
         for attempt in range(3):
             try:
-                r = requests.get(url, timeout=30, stream=True)
+                r = sess.get(url, timeout=30)
                 r.raise_for_status()
                 return idx, r.content
-            except Exception as e:
+            except Exception:
                 if attempt == 2:
                     raise
                 time.sleep(1.5 ** attempt)
@@ -463,9 +530,8 @@ def _download_segments(
             data_map[idx] = data
             done += 1
             pct = done * 100 // total
-            print(f"\r  {label}: {pct:3d}% ({done}/{total} segmenata)", end="", flush=True)
+            logger.info(f"  {label}: {pct:3d}% ({done}/{total} segmenata)")
 
-    print()  # newline after progress
     with out_path.open("wb") as f:
         for i in sorted(data_map):
             f.write(data_map[i])
@@ -615,7 +681,11 @@ class HBOMaxDownloader:
         self.workers     = workers
         self.auth        = HBOMaxAuth(market=market)
         self.api         = MaxAPI(self.auth)
-        self.cdm         = WidevineCDM(device_path=device_path)
+        if _USE_CENTRAL_DRM and _drm_manager and _drm_manager.is_ready():
+            self.cdm = HBOCDMBridge()
+            logger.info("HBO Max: using centralized DRM Manager")
+        else:
+            self.cdm = WidevineCDM(device_path=device_path)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.mp4decrypt_path = None
         self.mkvmerge_path = None
@@ -795,12 +865,19 @@ class HBOMaxDownloader:
         keys: List[Dict] = []
         if pssh:
             logger.info("Dobavljam Widevine ključeve …")
-            # In direct mode, we don't have playback info, so we build basic headers
             lic_headers = {
                 "Content-Type": "application/octet-stream",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Origin": "https://www.max.com",
+                "Referer": "https://www.max.com/",
             }
-            if self.auth.get_access_token():
-                lic_headers["Authorization"] = f"Bearer {self.auth.get_access_token()}"
+            try:
+                token = self.auth.get_access_token()
+                if token:
+                    lic_headers["Authorization"] = f"Bearer {token}"
+            except Exception:
+                pass
             try:
                 keys = self.cdm.get_keys(pssh, license_url, lic_headers)
                 logger.info(f"Dobijeno {len(keys)} ključ(eva)")

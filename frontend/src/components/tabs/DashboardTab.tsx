@@ -17,6 +17,7 @@ import { cssVars } from "../../utils/cssVars";
 
 export function DashboardTab() {
   const {
+    debouncedDetect,
     handleSmartDetect,
     setSmartAudioOnly,
     setSmartData,
@@ -38,6 +39,11 @@ export function DashboardTab() {
     smartSubs,
     smartUrl,
     smartUseAria2,
+    smartSubmitting,
+    smartRtsStartEp,
+    setSmartRtsStartEp,
+    smartRtsEndEp,
+    setSmartRtsEndEp,
     startSmartDownload,
     status,
   } = useSmartDashboardTab();
@@ -47,10 +53,11 @@ export function DashboardTab() {
     hrti:    { emoji:"🔵", name:"HRTi",        color:"#06b6d4", glow:"rgba(6,182,212,0.08)",    example:"https://hrti.hrt.hr/video/show/4a3b2c1d-0000-0000-0000-000000000001", exampleLabel:"Video (UUID)" },
     eon:     { emoji:"🟢", name:"EON TV",      color:"#10b981", glow:"rgba(16,185,129,0.08)",   example:"https://eon.tv/player/vod-abc123", exampleLabel:"VOD naslov" },
     rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
+    rtsplaneta: { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)", example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
     hbomax:  { emoji:"🟣", name:"HBO Max",     color:"#9333ea", glow:"rgba(147,51,234,0.08)",   example:"https://www.max.com/show/urn:hbo:episode:xyz123", exampleLabel:"Epizoda/film" },
     ytdlp:   { emoji:"🌐", name:"Univerzalno",  color:"#3b82f6", glow:"rgba(59,130,246,0.08)",   example:"https://www.youtube.com/watch?v=dQw4w9WgXcQ", exampleLabel:"YouTube, X, TikTok, FB..." },
   };
-  const svcKeys = Object.keys(SVC_THEMES);
+  const svcKeys = Object.keys(SVC_THEMES).filter(k => k !== "rtsplaneta");
   // Service auth sub-text (from status if available)
   const getSvcStatus = (k: string) => {
     if (k === "ytdlp") return { online: true, label: "Uvek aktivno" };
@@ -137,7 +144,7 @@ export function DashboardTab() {
             value={smartUrl}
             onChange={e => {
               setSmartUrl(e.target.value);
-              if (e.target.value.trim().startsWith("http")) handleSmartDetect(e.target.value);
+              if (e.target.value.trim().startsWith("http")) debouncedDetect(e.target.value);
             }}
             onKeyDown={e => e.key === "Enter" && handleSmartDetect(smartUrl)}
           />
@@ -162,7 +169,7 @@ export function DashboardTab() {
           <button
             className="smart-url-analyze-btn"
             onClick={() => handleSmartDetect(smartUrl)}
-            disabled={smartLoading || !smartUrl}
+            disabled={smartLoading || smartSubmitting || !smartUrl}
           >
             {smartLoading ? <Loader2 style={{width:16,height:16,animation:"spin 1s linear infinite"}} /> : <Search style={{width:16,height:16}} />}
             {smartLoading ? "Analizira..." : "Analiziraj"}
@@ -183,6 +190,15 @@ export function DashboardTab() {
     </div>
 
     <div className="flex flex-col gap-5 max-w-4xl mx-auto w-full">
+
+      {/* ── Loading skeleton while analyzing ── */}
+      {smartLoading && !smartData && (
+        <div className="smart-preview-panel" style={{borderColor:"rgba(255,255,255,0.08)", padding:"32px", display:"flex", flexDirection:"column", alignItems:"center", gap:"16px"}}>
+          <Loader2 style={{width:32,height:32,color:"#f59e0b",animation:"spin 1s linear infinite"}} />
+          <p className="text-sm font-bold text-white">Analiziramo vaš link...</p>
+          <p className="text-xs text-text-muted">Prepoznavanje servisa, ekstrakcija metapodataka i dostupnih formata</p>
+        </div>
+      )}
 
       {/* ── Preview & Download Panel ── */}
       {smartData && previewTheme && (
@@ -275,7 +291,7 @@ export function DashboardTab() {
                         key={ep.id ?? idx}
                         className={`smart-ep-item ${checked ? "selected" : ""}`}
                         onClick={() => setSmartSelectedEpisodes(checked
-                          ? smartSelectedEpisodes.filter((id: number) => id !== ep.id)
+                          ? smartSelectedEpisodes.filter((id: number | string) => id !== ep.id)
                           : [...smartSelectedEpisodes, ep.id]
                         )}
                         style={checked ? {borderLeft:`3px solid ${previewTheme.color}80`} : {borderLeft:"3px solid transparent"}}
@@ -304,7 +320,7 @@ export function DashboardTab() {
 
             {/* Config row */}
             <div className="smart-config-row">
-              {(["voyo","eon"].includes(smartData.service) || smartData.service === "ytdlp") && (
+              {(smartData.service === "voyo" || smartData.service === "ytdlp") && (
                 <div>
                   <label>Rezolucija</label>
                   <CustomSelect
@@ -420,8 +436,23 @@ export function DashboardTab() {
                 </div>
               )}
               {["rts", "rtsplaneta"].includes(smartData.service) && (
-                <div className="flex items-center" style={{marginTop: 24}}>
-                  <label className="custom-checkbox-wrap" style={{width: "100%"}}>
+                <div className="flex flex-col gap-3" style={{marginTop: 16}}>
+                  <div className="flex gap-3 items-end">
+                    <div style={{flex:1}}>
+                      <label>Početna epizoda</label>
+                      <input type="number" min="1" value={smartRtsStartEp} onChange={e => setSmartRtsStartEp(e.target.value)}
+                        placeholder="npr. 1"
+                        className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
+                    </div>
+                    <div style={{flex:1}}>
+                      <label>Krajnja epizoda</label>
+                      <input type="number" min="1" value={smartRtsEndEp} onChange={e => setSmartRtsEndEp(e.target.value)}
+                        placeholder="npr. 10"
+                        className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
+                    </div>
+                  </div>
+                  <p style={{fontSize:"0.68rem",color:"var(--text-muted)",marginTop:-4}}>Ostavite prazno za sve epizode ili jedan video.</p>
+                  <label className="custom-checkbox-wrap" style={{cursor: "pointer"}}>
                     <input
                       type="checkbox"
                       checked={smartRtsVerbose}
@@ -477,17 +508,23 @@ export function DashboardTab() {
               <button
                 className={`smart-cta-btn smart-cta-${smartData.service}`}
                 onClick={startSmartDownload}
-                disabled={smartData.episodes && smartSelectedEpisodes.length === 0}
+                disabled={smartSubmitting || (smartData.episodes && smartSelectedEpisodes.length === 0)}
               >
-                <Download style={{width:18,height:18}} />
-                {smartData.episodes
-                  ? `Preuzmi ${smartSelectedEpisodes.length} epizod${smartSelectedEpisodes.length === 1 ? "u" : smartSelectedEpisodes.length < 5 ? "e" : "a"}`
-                  : "Pokreni Preuzimanje"
+                {smartSubmitting
+                  ? <Loader2 style={{width:18,height:18,animation:"spin 1s linear infinite"}} />
+                  : <Download style={{width:18,height:18}} />
+                }
+                {smartSubmitting
+                  ? "Slanje..."
+                  : smartData.episodes
+                    ? `Preuzmi ${smartSelectedEpisodes.length} epizod${smartSelectedEpisodes.length === 1 ? "u" : smartSelectedEpisodes.length < 5 ? "e" : "a"}`
+                    : "Pokreni Preuzimanje"
                 }
               </button>
               <button
-                onClick={() => { setSmartData(null); setSmartUrl(""); setSmartSelectedEpisodes([]); setSmartEpisodesRange(""); }}
-                style={{fontSize:"0.75rem", color:"var(--text-muted)", background:"none", border:"none", cursor:"pointer"}}
+                onClick={() => { setSmartData(null); setSmartUrl(""); setSmartSelectedEpisodes([]); setSmartEpisodesRange(""); setSmartRtsStartEp(""); setSmartRtsEndEp(""); }}
+                disabled={smartSubmitting}
+                style={{fontSize:"0.75rem", color:"var(--text-muted)", background:"none", border:"none", cursor: smartSubmitting ? "not-allowed" : "pointer", opacity: smartSubmitting ? 0.4 : 1}}
               >✕ Otkaži</button>
             </div>
           </div>

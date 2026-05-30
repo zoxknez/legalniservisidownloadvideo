@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { RtsVideoInfo } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
@@ -19,6 +19,7 @@ export function useRts({ showToast }: UseRtsOptions) {
   const [rtsVerbose, setRtsVerbose] = useState(false);
   const [rtsVideoInfo, setRtsVideoInfo] = useState<RtsVideoInfo | null>(null);
   const [rtsInfoLoading, setRtsInfoLoading] = useState(false);
+  const [rtsSubmitting, setRtsSubmitting] = useState(false);
 
   const fetchRtsVideoInfo = useCallback(async (url: string) => {
     const val = url.trim();
@@ -42,12 +43,14 @@ export function useRts({ showToast }: UseRtsOptions) {
   }, []);
 
   const startRtsDownload = useCallback(async () => {
+    if (rtsSubmitting || !rtsTarget.trim()) return;
+    setRtsSubmitting(true);
     try {
       const res = await apiFetch(`/api/rts/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          target_url: rtsTarget,
+          target_url: rtsTarget.trim(),
           start_ep: rtsStartEp ? parseInt(rtsStartEp, 10) : null,
           end_ep: rtsEndEp ? parseInt(rtsEndEp, 10) : null,
           verbose: rtsVerbose,
@@ -57,12 +60,15 @@ export function useRts({ showToast }: UseRtsOptions) {
         showToast("RTS Planeta preuzimanje dodato!");
         setRtsTarget("");
       } else {
-        showToast("Greška pri slanju zadatka", "error");
+        const msg = await parseApiError(res, "Greška pri slanju zadatka");
+        showToast(msg, "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setRtsSubmitting(false);
     }
-  }, [rtsEndEp, rtsStartEp, rtsTarget, rtsVerbose, showToast]);
+  }, [rtsEndEp, rtsStartEp, rtsSubmitting, rtsTarget, rtsVerbose, showToast]);
 
   return {
     rtsEmail,
@@ -83,6 +89,7 @@ export function useRts({ showToast }: UseRtsOptions) {
     setRtsVideoInfo,
     rtsInfoLoading,
     setRtsInfoLoading,
+    rtsSubmitting,
     fetchRtsVideoInfo,
     startRtsDownload,
   };

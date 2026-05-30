@@ -12,10 +12,16 @@ export function getUserscriptInstallUrl(): string {
 /** @deprecated use getUserscriptInstallUrl() — kept for older imports */
 export const USERSCRIPT_INSTALL_URL = getUserscriptInstallUrl();
 
+/** Collect EON cookies when bookmarklet runs on *.eon.tv (HttpOnly cookies are not included). */
+function buildEonCookieCollectorJs(): string {
+  return `(function(){try{if(!/eon\\.tv/i.test(location.hostname))return'';const c={};(document.cookie||'').split(';').forEach(p=>{const i=p.indexOf('=');if(i>0){const k=p.slice(0,i).trim();try{c[k]=decodeURIComponent(p.slice(i+1).trim().replace(/\\+/g,' '));}catch(e){c[k]=p.slice(i+1).trim();}}});return Object.keys(c).length?JSON.stringify({cookies:c}):'';}catch(e){return'';}})()`;
+}
+
 /** Bookmarklet: push all sessions directly to localhost (no paste). */
 export function buildAllSessionsPushBookmarklet(): string {
   const bridgeUrl = resolveApiUrl("/api/bridge/session");
-  return `javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),rtsplaneta:(function(){const k=Object.keys(localStorage).find(x=>/token|auth/i.test(x));return k?localStorage.getItem(k):'';})(),hbomax:localStorage.getItem('token')};fetch('${bridgeUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:d,source:'bookmarklet'})}).then(r=>r.json()).then(j=>alert(j.success?'⚡ Sesija poslata u aplikaciju!':'Greška: '+(j.detail||j.message))).catch(()=>alert('Aplikacija nije pokrenuta (python run.py)?'));})();`;
+  const eonCollector = buildEonCookieCollectorJs();
+  return `javascript:(function(){const d={voyo:localStorage.getItem('token')||localStorage.getItem('apollo-cache-persist'),hrti:localStorage.getItem('token'),rtsplaneta:(function(){const k=Object.keys(localStorage).find(x=>/token|auth/i.test(x));return k?localStorage.getItem(k):'';})(),hbomax:localStorage.getItem('token'),eon:${eonCollector}};Object.keys(d).forEach(k=>{if(!d[k])delete d[k];});if(!Object.keys(d).length){alert('Nema sesije na ovoj stranici. Otvorite sajt servisa (Voyo, HRTi, RTS, Max, EON) pa ponovo kliknite bookmarklet.');return;}fetch('${bridgeUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:d,source:'bookmarklet'})}).then(r=>r.json()).then(j=>alert(j.success?'⚡ Sesija poslata u aplikaciju!':'Greška: '+(j.detail||j.message))).catch(()=>alert('Aplikacija nije pokrenuta (python run.py)?'));})();`;
 }
 
 export const ALL_SESSIONS_PUSH_BOOKMARKLET = buildAllSessionsPushBookmarklet();

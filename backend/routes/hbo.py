@@ -1,5 +1,7 @@
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.queue_manager import queue_manager
 from backend.services.hbo_adapter import HboAdapter
@@ -8,7 +10,7 @@ router = APIRouter()
 
 
 class HboLoginRequest(BaseModel):
-    market: str = "emea"
+    market: Literal["emea", "latam", "us"] = "emea"
 
 
 @router.post("/login")
@@ -27,22 +29,34 @@ async def hbo_login(req: HboLoginRequest):
     return {"success": True, "task_id": task_id}
 
 
+@router.get("/status")
+def hbo_status():
+    return HboAdapter.get_auth_status()
+
+
 class HboDownloadRequest(BaseModel):
-    video_id: str
+    video_id: str = Field(min_length=1)
     subs: str = "sr,hr,mk,bs,sl"
+    market: Literal["emea", "latam", "us"] = "emea"
 
 
 @router.post("/download")
 async def hbo_download(req: HboDownloadRequest):
-    cmd = HboAdapter.make_download_cmd(req.video_id, req.subs)
-    title = f"HBO Max: {req.video_id}"
+    status = HboAdapter.get_auth_status()
+    if not status.get("authenticated"):
+        raise HTTPException(
+            status_code=401,
+            detail="Niste prijavljeni na HBO Max. Pokrenite login prvo.",
+        )
+    cmd = HboAdapter.make_download_cmd(req.video_id.strip(), req.subs, req.market)
+    title = f"HBO Max: {req.video_id.strip()}"
     task_id = await queue_manager.add_download("hbomax", title, cmd)
     return {"success": True, "task_id": task_id}
 
 
 class HboDirectDownloadRequest(BaseModel):
-    manifest_url: str
-    license_url: str
+    manifest_url: str = Field(min_length=10)
+    license_url: str = Field(min_length=10)
     title: str = ""
     subs: str = "sr,hr,mk,bs,sl"
 

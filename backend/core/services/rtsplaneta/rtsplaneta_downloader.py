@@ -31,14 +31,16 @@ from yt_dlp import YoutubeDL
 # Import our auth module
 from .rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
 
+try:
+    from backend.services.drm_manager import drm_manager as _drm_manager
+    _USE_CENTRAL_DRM = True
+except ImportError:
+    _USE_CENTRAL_DRM = False
+    _drm_manager = None
+
 # Disable SSL warnings
 requests.packages.urllib3.disable_warnings()
 
-# Logging setup
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 
@@ -234,8 +236,11 @@ class RTSPlanetaDownloader:
         self.auth = RTSPlanetaAuth()
         self.config = RTSPlanetaConfig()
         
-        # Initialize CDM
-        self.cdm = WidevineCDM(device_path)
+        if _USE_CENTRAL_DRM and _drm_manager and _drm_manager.is_ready():
+            self.cdm = _drm_manager
+            logger.info("RTS: using centralized DRM Manager")
+        else:
+            self.cdm = WidevineCDM(device_path)
         
         # Cross-platform binary detection
         self.binaries = self._detect_binaries()
@@ -281,15 +286,22 @@ class RTSPlanetaDownloader:
     def login(self, username: Optional[str] = None, password: Optional[str] = None):
         """
         Authenticate with RTSPlaneta.
-        Uses stored credentials if none provided.
+        Uses synced session token or stored credentials if none provided.
         """
+        if not username and not password:
+            session_token = self.config.get_session_token()
+            if session_token:
+                self.auth.state.access_token = session_token
+                logger.info("Using synced RTS session token (browser/import).")
+                return
+
         if not username or not password:
             if self.config.has_credentials():
                 username, password = self.config.get_credentials()
                 logger.info(f"Using stored credentials for: {username}")
             else:
                 raise ValueError("No credentials provided and none stored")
-        
+
         self.auth.login(username, password)
         logger.info("Authentication successful!")
     
@@ -299,6 +311,8 @@ class RTSPlanetaDownloader:
             r'/episode/(\d+)',
             r'/show/(\d+)',
             r'/video/(\d+)',
+            r'/film/(\d+)',
+            r'/serial/(\d+)',
             r'video_id[=/](\d+)',
         ]
         
@@ -393,38 +407,28 @@ class RTSPlanetaDownloader:
         
         episodes_to_download = episodes[start_idx:end_idx]
         
-        print(f"\n{'='*60}")
-        print(f"Series Download: {len(episodes_to_download)} of {total} episodes")
-        print(f"Episodes {start} to {end_idx}")
-        print(f"{'='*60}\n")
+        logger.info("Series Download: %d of %d episodes (ep %d to %d)",
+                    len(episodes_to_download), total, start, end_idx)
         
         downloaded = []
         failed = []
         
         for i, episode in enumerate(episodes_to_download, start=start):
-            print(f"\n[{i}/{end_idx}] Downloading episode ID: {episode['id']}")
-            print(f"    URL: {episode['url'][:70]}...")
+            logger.info("[%d/%d] Downloading episode ID: %s", i, end_idx, episode['id'])
             
             try:
                 output_path = self.download(episode['url'])
                 downloaded.append(output_path)
-                print(f"    ✓ Success: {output_path.name}")
+                logger.info("  Success: %s", output_path.name)
             except Exception as e:
-                logger.error(f"Failed to download episode {episode['id']}: {e}")
+                logger.error("Failed to download episode %s: %s", episode['id'], e)
                 failed.append(episode)
-                print(f"    ✗ Failed: {e}")
         
-        # Summary
-        print(f"\n{'='*60}")
-        print(f"Download Summary")
-        print(f"{'='*60}")
-        print(f"  Successful: {len(downloaded)}")
-        print(f"  Failed: {len(failed)}")
+        logger.info("Download Summary: %d successful, %d failed", len(downloaded), len(failed))
         
         if failed:
-            print(f"\n  Failed episodes:")
             for ep in failed:
-                print(f"    - {ep['id']}: {ep['slug']}")
+                logger.warning("  Failed: %s (%s)", ep['id'], ep.get('slug', ''))
         
         return downloaded
     
@@ -653,6 +657,21 @@ class RTSPlanetaDownloader:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
 
+        if _USE_CENTRAL_DRM and _drm_manager and hasattr(_drm_manager, 'extract_all_pssh_from_mpd'):
+            try:
+                resp = requests.get(mpd_url, verify=False, timeout=15)
+                resp.raise_for_status()
+                pssh_list = _drm_manager.extract_all_pssh_from_mpd(resp.text)
+                if pssh_list:
+                    logger.info(f"Found {len(pssh_list)} PSSH(s) in MPD. Fetching keys...")
+                    return _drm_manager.get_keys_multi_pssh(
+                        pssh_list, license_url, headers, "rtsplaneta"
+                    )
+            except Exception as e:
+                logger.warning(f"Multi-PSSH key fetch failed, using single PSSH: {e}")
+
+        if _USE_CENTRAL_DRM and self.cdm is _drm_manager:
+            return self.cdm.get_keys(pssh, license_url, headers, "rtsplaneta")
         return self.cdm.get_keys(pssh, license_url, headers)
     
     def decrypt_media(self, input_file: Path, output_file: Path, keys: List[str]):

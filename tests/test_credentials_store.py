@@ -80,3 +80,26 @@ def test_migrate_native_voyo_password(temp_config, fake_keyring, tmp_path, monke
     data = json.loads(cfg.read_text(encoding="utf-8"))
     assert data.get("password", "") == ""
     assert cs.get_secret("voyo", "password") == "native-secret"
+
+
+def test_clear_service_credentials(temp_config, fake_keyring):
+    cs.save_service_credentials(
+        "voyo",
+        {"email": "user@voyo.rs", "password": "secret", "token": "tok-1"},
+        config_module=temp_config,
+    )
+    assert cs.get_secret("voyo", "password") == "secret"
+    assert cs.get_secret("voyo", "token") == "tok-1"
+
+    result = cs.clear_service_credentials("voyo", temp_config)
+
+    assert result["service"] == "voyo"
+    assert "password" in result["cleared_secrets"] or "token" in result["cleared_secrets"]
+    assert cs.get_secret("voyo", "password") == ""
+    assert cs.get_secret("voyo", "token") == ""
+    assert temp_config.get_credentials("voyo").get("email", "") == ""
+
+
+def test_clear_service_unknown_raises(temp_config):
+    with pytest.raises(ValueError, match="Nepoznat servis"):
+        cs.clear_service_credentials("unknown-svc", temp_config)

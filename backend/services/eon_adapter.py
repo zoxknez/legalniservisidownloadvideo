@@ -294,9 +294,9 @@ class EonAdapter:
         except Exception as exc:
             _invalidate_health_cache()
             return {
-                "success": True,
+                "success": False,
                 "validated": False,
-                "warning": cls._redact_text(str(exc)),
+                "error": cls._redact_text(str(exc)),
                 "status": cls.get_health(),
             }
 
@@ -372,9 +372,12 @@ class EonAdapter:
         return EONEngine.vod_info(target)
 
     @staticmethod
-    def _normalize_vod_target(target: str) -> str:
+    def _normalize_target(target: str) -> str:
         target = target.strip()
-        match = re.search(r"/(?:ondemand|series)/detail/([^/?#]+)", target)
+        match = re.search(r"/(?:ondemand|series|vod)/detail/([^/?#]+)", target)
+        if match:
+            return match.group(1)
+        match = re.search(r"eon\.tv/player/([^/?#]+)", target)
         if match:
             return match.group(1)
         return target
@@ -405,7 +408,7 @@ class EonAdapter:
         cls._require_ready()
 
         params: Dict[str, Any] = {
-            "target": cls._normalize_vod_target(target) if mode == "vod" else target,
+            "target": cls._normalize_target(target),
             "output_dir": config.get_output_dir(),
         }
         if episodes:

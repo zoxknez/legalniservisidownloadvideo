@@ -12,5 +12,5 @@ class SnifferPayload(BaseModel):
     service: str
     type: str
     url: str
-    headers: Dict[str, str] = None
+    headers: Optional[Dict[str, str]] = None
     title: str = ""

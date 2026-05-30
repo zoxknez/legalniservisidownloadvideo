@@ -437,8 +437,31 @@ class RTSPlanetaConfig:
             password,
         )
 
+    def get_session_token(self) -> str:
+        """Token from browser sync / session import (OS keyring)."""
+        from backend.credentials_store import get_secret
+
+        return (
+            get_secret("rtsplaneta", "secure_streaming_token")
+            or get_secret("rtsplaneta", "token")
+            or (self.config.get("token") or "").strip()
+        )
+
+    def set_session_token(self, token: str) -> None:
+        from backend.credentials_store import set_secret
+
+        token = (token or "").strip()
+        if not token:
+            return
+        set_secret("rtsplaneta", "token", token)
+        set_secret("rtsplaneta", "secure_streaming_token", token)
+        self.config.pop("token", None)
+        self.save()
+
     def has_credentials(self) -> bool:
-        """Check if credentials are stored"""
+        """Check if credentials or a synced session token are stored."""
+        if self.get_session_token():
+            return True
         username, password = self.get_credentials()
         return bool(username and password)
 

@@ -76,6 +76,47 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
         set_secret("rtsplaneta", "secure_streaming_token", token)
         return {"service": service, "message": "RTS Planeta token uvezen (OS keyring)."}
 
+    if service == "eon":
+        if not data.startswith("{"):
+            raise ValueError("EON uvoz: nalepite JSON (kolačići ili config iz ~/.eon/config.json).")
+        try:
+            js = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise ValueError("EON uvoz: neispravan JSON.") from exc
+        eon_dir = Path.home() / ".eon"
+        eon_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path = eon_dir / "config.json"
+        existing: Dict[str, Any] = {}
+        if cfg_path.exists():
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+        if isinstance(js.get("cookies"), dict):
+            existing["cookies"] = js["cookies"]
+        elif "cookies" in js:
+            existing["cookies"] = js.get("cookies") or {}
+        elif isinstance(js, dict) and js and all(isinstance(v, str) for v in js.values()):
+            existing["cookies"] = js
+        else:
+            for key, val in js.items():
+                if key != "cookies":
+                    existing[key] = val
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+        try:
+            cfg_path.chmod(0o600)
+        except OSError:
+            pass
+        try:
+            from backend.services.eon_adapter import _invalidate_health_cache
+
+            _invalidate_health_cache()
+        except Exception:
+            pass
+        return {"service": service, "message": "EON kolačići uvezeni u ~/.eon/config.json."}
+
     if service == "hbomax":
         token_path = Path.home() / ".hbomax" / "token.json"
         token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +169,7 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
     if not isinstance(blob, dict):
         return None
 
-    batch_keys = {"voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max"}
+    batch_keys = {"voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max", "eon"}
     if not batch_keys.intersection(k.lower() for k in blob.keys()):
         return None
 
@@ -143,6 +184,7 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
         ("hbomax", "hbomax"),
         ("hbo", "hbomax"),
         ("max", "hbomax"),
+        ("eon", "eon"),
     ]
     done: set[str] = set()
     for src_key, svc in mapping:

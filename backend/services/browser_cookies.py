@@ -6,12 +6,33 @@ import shutil
 import ctypes
 import tempfile
 import logging
+import sys
 from ctypes import wintypes
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from Crypto.Cipher import AES
 
 logger = logging.getLogger("BrowserCookies")
+
+DOMAIN_TO_SERVICE = {
+    "rtsplaneta.rs": "rtsplaneta",
+    "eon.tv": "eon",
+    "voyo.rs": "voyo",
+    "hrti.hrt.hr": "hrti",
+}
+
+
+def browser_sync_supported() -> bool:
+    return sys.platform == "win32"
+
+
+def _service_report(domain_report: Dict[str, bool]) -> Dict[str, bool]:
+    return {
+        DOMAIN_TO_SERVICE[domain]: ok
+        for domain, ok in domain_report.items()
+        if domain in DOMAIN_TO_SERVICE
+    }
+
 
 class DATA_BLOB(ctypes.Structure):
     _fields_ = [
@@ -234,85 +255,116 @@ def get_browser_cookies(domains: List[str]) -> Tuple[Dict[str, List[Dict[str, st
                                     
     return results, browser_locked
 
-def sync_all_supported_services() -> Dict[str, Any]:
-    """
-    Grabs session cookies for premium video services and automatically syncs them
-    into local configuration files (~/.rtsplaneta/config.json, ~/.voyo/config.json, etc.)
-    """
-    targets = ["rtsplaneta.rs", "eon.tv", "voyo.rs", "hrti.hrt.hr"]
-    logger.info("Initializing Browser Auto-Sync sequence...")
-    
-    extracted, browser_locked = get_browser_cookies(targets)
-    sync_report = {t: False for t in targets}
-    
-    # 1. RTS Planeta
-    rts_cookies = extracted.get("rtsplaneta.rs", [])
-    rts_token = next((c["value"] for c in rts_cookies if c["name"] == "rts_token" or c["name"] == "token"), "")
-    # Look for session cookies
-    if rts_cookies:
-        # RTS usually uses custom tokens or session headers. We will write them directly
-        # to RTS Planeta configuration folder.
-        rts_cfg_path = Path.home() / ".rtsplaneta" / "config.json"
-        rts_cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Build cookies dict
-        cookie_dict = {c["name"]: c["value"] for c in rts_cookies if c["value"]}
-        if cookie_dict:
-            try:
-                # Save cookies formatted as cookie string or dict
-                with open(rts_cfg_path, "w") as f:
-                    json.dump({"cookies": cookie_dict, "token": rts_token or cookie_dict.get("token", "")}, f, indent=2)
-                sync_report["rtsplaneta.rs"] = True
-                logger.info("✓ RTS Planeta cookies auto-synced successfully!")
-            except Exception as e:
-                logger.error(f"Failed to write RTS Planeta config: {e}")
 
-    # 2. EON TV
+def sync_all_supported_services() -> Dict[str, Any]:
+    """Extract Chromium cookies; store tokens in keyring + central config (Windows only)."""
+    domain_report = {d: False for d in DOMAIN_TO_SERVICE}
+
+    if not browser_sync_supported():
+        return {
+            "services": _service_report(domain_report),
+            "browser_locked": False,
+            "unsupported_platform": True,
+        }
+
+    targets = list(DOMAIN_TO_SERVICE.keys())
+    logger.info("Initializing Browser Auto-Sync sequence...")
+
+    extracted, browser_locked = get_browser_cookies(targets)
+
+    from backend.credentials_store import set_secret
+    from backend.config import config
+
+    rts_cookies = extracted.get("rtsplaneta.rs", [])
+    if rts_cookies:
+        cookie_dict = {c["name"]: c["value"] for c in rts_cookies if c["value"]}
+        rts_token = next(
+            (
+                c["value"]
+                for c in rts_cookies
+                if c["name"] in ("rts_token", "token", "secure_streaming_token")
+            ),
+            "",
+        ) or cookie_dict.get("token") or cookie_dict.get("secure_streaming_token", "")
+        if rts_token:
+            try:
+                set_secret("rtsplaneta", "token", rts_token)
+                set_secret("rtsplaneta", "secure_streaming_token", rts_token)
+                email = (cookie_dict.get("email") or cookie_dict.get("username") or "").strip()
+                if email:
+                    config.update_credentials("rtsplaneta", {"email": email})
+                try:
+                    from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaConfig
+
+                    cfg = RTSPlanetaConfig()
+                    if email:
+                        cfg.config["username"] = email
+                    cfg.config.pop("token", None)
+                    cfg.save()
+                except Exception as exc:
+                    logger.debug("RTS native config sync skipped: %s", exc)
+                domain_report["rtsplaneta.rs"] = True
+                logger.info("RTS Planeta session token synced (keyring).")
+            except Exception as e:
+                logger.error("Failed to store RTS token: %s", e)
+
     eon_cookies = extracted.get("eon.tv", [])
     if eon_cookies:
-        eon_cfg_path = Path.home() / ".eon" / "config.json"
-        eon_cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cookie_dict = {c["name"]: c["value"] for c in eon_cookies if c["value"]}
         if cookie_dict:
             try:
-                with open(eon_cfg_path, "w") as f:
+                eon_cfg_path = Path.home() / ".eon" / "config.json"
+                eon_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(eon_cfg_path, "w", encoding="utf-8") as f:
                     json.dump({"cookies": cookie_dict}, f, indent=2)
-                sync_report["eon.tv"] = True
-                logger.info("✓ EON TV cookies auto-synced successfully!")
+                try:
+                    eon_cfg_path.chmod(0o600)
+                except OSError:
+                    pass
+                domain_report["eon.tv"] = True
+                logger.info("EON TV browser cookies saved (device credentials still required).")
             except Exception as e:
-                logger.error(f"Failed to write EON config: {e}")
+                logger.error("Failed to write EON cookie cache: %s", e)
 
-    # 3. Voyo RS
     voyo_cookies = extracted.get("voyo.rs", [])
     if voyo_cookies:
         cookie_dict = {c["name"]: c["value"] for c in voyo_cookies if c["value"]}
         voyo_token = cookie_dict.get("token") or cookie_dict.get("s")
         if voyo_token:
             try:
-                from backend.credentials_store import set_secret
-
                 set_secret("voyo", "token", voyo_token)
-                sync_report["voyo.rs"] = True
-                logger.info("✓ Voyo RS session token auto-synced (keyring)!")
-            except Exception as e:
-                logger.error(f"Failed to store Voyo token: {e}")
+                try:
+                    from backend.services.voyo_adapter import _VOYO_CACHE
+                    import time
 
-    # 4. HRTi
+                    _VOYO_CACHE["token"] = voyo_token
+                    _VOYO_CACHE["last_check"] = time.time()
+                    _VOYO_CACHE["authenticated"] = True
+                except Exception:
+                    pass
+                domain_report["voyo.rs"] = True
+                logger.info("Voyo RS session token auto-synced (keyring).")
+            except Exception as e:
+                logger.error("Failed to store Voyo token: %s", e)
+
     hrti_cookies = extracted.get("hrti.hrt.hr", [])
     if hrti_cookies:
         cookie_dict = {c["name"]: c["value"] for c in hrti_cookies if c["value"]}
         hrti_token = cookie_dict.get("token") or cookie_dict.get("Authorization")
         if hrti_token:
             try:
-                from backend.credentials_store import set_secret
-
-                set_secret("hrti", "token", hrti_token.replace("Client ", ""))
-                sync_report["hrti.hrt.hr"] = True
-                logger.info("✓ HRTi session token auto-synced (keyring)!")
+                set_secret("hrti", "token", hrti_token.replace("Client ", "").strip())
+                domain_report["hrti.hrt.hr"] = True
+                logger.info("HRTi session token auto-synced (keyring).")
             except Exception as e:
-                logger.error(f"Failed to store HRTi token: {e}")
+                logger.error("Failed to store HRTi token: %s", e)
 
-    return {"services": sync_report, "browser_locked": browser_locked}
+    return {
+        "services": _service_report(domain_report),
+        "domains": domain_report,
+        "browser_locked": browser_locked,
+        "unsupported_platform": False,
+    }
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

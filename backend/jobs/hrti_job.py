@@ -35,7 +35,7 @@ def run_hrti_job(
 
     ref_id = str(params.get("ref_id") or params.get("url") or "").strip()
     title = str(params.get("title") or "").strip()
-    workers = int(params.get("workers") or 16)
+    workers = max(1, min(int(params.get("workers") or 16), 64))
     output_dir = params.get("output_dir") or config.get_output_dir()
 
     if not ref_id:
@@ -53,4 +53,5 @@ def run_hrti_job(
         downloader.login()
         _check_cancelled(cancel_event)
         downloader.download(ref_id, title or None)
+        _check_cancelled(cancel_event)
         return True

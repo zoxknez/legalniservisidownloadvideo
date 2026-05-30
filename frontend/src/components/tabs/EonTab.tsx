@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   Clock,
   Download,
@@ -47,6 +48,7 @@ export function EonTab() {
     eonSearchResults,
     eonSerial,
     eonStatus,
+    eonSubmitting,
     eonTarget,
     eonUsername,
     fetchEonEpg,
@@ -71,6 +73,10 @@ export function EonTab() {
     showEonPass,
     startEonDownload,
   } = useEonTab();
+
+  const dvrStartRef = useRef<HTMLInputElement>(null);
+  const dvrDurationRef = useRef<HTMLInputElement>(null);
+
   return (
 <div key="eon" className="tab-content tab-content-eon">
     <div className="tab-page-header tab-header-eon mb-8">
@@ -82,9 +88,15 @@ export function EonTab() {
           <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
             <Play className="w-6 h-6 text-emerald-400" /> EON TV
           </h2>
-          <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
-            <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
-          </span>
+          {eonStatus?.engine_status?.cdm_ready ? (
+            <span className="badge flex items-center gap-1.5 bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+              <Lock className="w-3.5 h-3.5" /> WIDEVINE L3 DEKRIPCIJA AKTIVNA
+            </span>
+          ) : (
+            <span className="badge flex items-center gap-1.5 bg-amber-500/10 border-amber-500/30 text-amber-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
+              <ShieldAlert className="w-3.5 h-3.5" /> CDM NIJE UČITAN
+            </span>
+          )}
         </div>
         <p className="text-text-secondary text-sm">VOD sadržaj, serije i TV kanali uživo sa Widevine DRM dekripcijom i API katalogom.</p>
       </div>
@@ -189,6 +201,7 @@ export function EonTab() {
                     placeholder="npr. https://.../live/index.m3u8"
                     value={eonTarget}
                     onChange={(e) => setEonTarget(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && eonTarget.trim() && eonReady && !eonSubmitting && startEonDownload()}
                     className="input-premium pl-11"
                     style={cssVars({"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"})}
                   />
@@ -211,6 +224,7 @@ export function EonTab() {
                 placeholder={eonMode === "vod" ? "npr. https://.../video.m3u8 ili .mpd/.mp4" : "npr. 162073-s1"}
                 value={eonTarget}
                 onChange={(e) => setEonTarget(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && eonTarget.trim() && eonReady && !eonSubmitting && startEonDownload()}
                 className="input-premium pl-11"
                 style={cssVars({"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"})}
               />
@@ -300,6 +314,7 @@ export function EonTab() {
                 type="text"
                 value={eonSearchQuery}
                 onChange={(e) => setEonSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && eonSearchQuery.trim() && searchEonVod()}
                 placeholder="Pretraži lokalni katalog ili API"
                 className="input-premium pl-11 pr-24"
                 style={cssVars({"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"})}
@@ -388,7 +403,7 @@ export function EonTab() {
                   <label className="text-[10px] text-text-muted">Početak (ISO format / Vreme)</label>
                   <input
                     type="datetime-local"
-                    id="dvr_start_time"
+                    ref={dvrStartRef}
                     className="input-premium py-1 text-xs"
                     style={cssVars({"--focused-border": "#10b981", "--focused-glow": "rgba(16,185,129,0.25)"})}
                   />
@@ -397,7 +412,7 @@ export function EonTab() {
                   <label className="text-[10px] text-text-muted">Trajanje (Minuti)</label>
                   <input
                     type="number"
-                    id="dvr_duration"
+                    ref={dvrDurationRef}
                     placeholder="60"
                     defaultValue="60"
                     className="input-premium py-1 text-xs"
@@ -407,10 +422,8 @@ export function EonTab() {
               </div>
               <button
                 onClick={() => {
-                  const startEl = document.getElementById("dvr_start_time") as HTMLInputElement;
-                  const durEl = document.getElementById("dvr_duration") as HTMLInputElement;
-                  const startTime = startEl?.value ? new Date(startEl.value).toISOString() : new Date().toISOString();
-                  const duration = parseInt(durEl?.value || "60");
+                  const startTime = dvrStartRef.current?.value ? new Date(dvrStartRef.current.value).toISOString() : new Date().toISOString();
+                  const duration = parseInt(dvrDurationRef.current?.value || "60");
                   scheduleEonRecording(eonTarget, `DVR Snimanje: ${eonTarget}`, startTime, duration);
                 }}
                 disabled={!eonTarget}
@@ -430,7 +443,7 @@ export function EonTab() {
 
         <button
           onClick={startEonDownload}
-          disabled={!eonTarget || !eonReady}
+          disabled={!eonTarget.trim() || !eonReady || eonSubmitting}
           className="btn btn-premium-primary w-full py-4 text-white font-bold"
           style={cssVars({
             "--btn-grad-start": "#10b981",
@@ -441,7 +454,7 @@ export function EonTab() {
           title={!eonReady ? "EON engine, credentials or dependencies are missing." : undefined}
         >
           <Download className="w-5 h-5" />
-          {eonMode === "live" ? "Započni Snimanje / Stream" : "Započni Preuzimanje"}
+          {eonSubmitting ? "Slanje..." : eonMode === "live" ? "Započni Snimanje / Stream" : "Započni Preuzimanje"}
         </button>
       </div>
 
@@ -489,7 +502,15 @@ export function EonTab() {
                 {eonStatus.engine_status?.token?.expires_at && (
                   <div className="flex flex-col text-[10px] text-text-muted mt-1 bg-black/20 p-2 rounded border border-white/[0.02] truncate">
                     <span>Token ističe:</span>
-                    <span className="font-mono text-white mt-0.5">{eonStatus.engine_status.token.expires_at}</span>
+                    <span className={`font-mono mt-0.5 ${eonStatus.engine_status.token.expired ? "text-red-400" : "text-white"}`}>
+                      {(() => {
+                        try {
+                          const d = new Date(eonStatus.engine_status!.token!.expires_at!);
+                          return isNaN(d.getTime()) ? eonStatus.engine_status!.token!.expires_at : d.toLocaleString("sr-RS", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+                        } catch { return eonStatus.engine_status!.token!.expires_at; }
+                      })()}
+                      {eonStatus.engine_status.token.expired && " (istekao)"}
+                    </span>
                   </div>
                 )}
               </div>
@@ -706,8 +727,8 @@ export function EonTab() {
                           showToast("✓ Zakazano snimanje otkazano", "info");
                           fetchScheduledRecordings();
                         }
-                      } catch (err) {
-                        console.error("Failed to cancel scheduled recording:", err);
+                      } catch {
+                        showToast("Greška pri otkazivanju snimanja.", "error");
                       }
                     }}
                     className="text-text-muted hover:text-red-400 p-1.5 hover:bg-red-500/10 rounded transition-all flex-shrink-0"

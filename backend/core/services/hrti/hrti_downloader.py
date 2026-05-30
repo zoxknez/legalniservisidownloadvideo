@@ -39,8 +39,6 @@ from .hrti_auth import HRTIAuth
 
 # Use centralized DRM Manager (shared singleton with key caching, WVD diagnostics, multi-PSSH)
 try:
-    import sys, os
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from backend.services.drm_manager import drm_manager as _drm_manager
     _USE_CENTRAL_DRM = True
 except ImportError:
@@ -390,35 +388,36 @@ class HRTIDownloader:
         aria2c = self.bins.get("aria2c")
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
 
+        _last_log = [0.0]
+
         def _progress(d):
             if d.get("status") == "downloading":
+                now = time.time()
+                if now - _last_log[0] < 2.0:
+                    return
+                _last_log[0] = now
                 fname   = d.get("filename", "")
                 track   = "Video" if "video" in fname.lower() else "Audio"
                 done    = d.get("downloaded_bytes", 0)
                 total   = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
                 speed   = d.get("speed") or 0
-                eta     = d.get("eta") or 0
                 fi      = d.get("fragment_index")
                 fc      = d.get("fragment_count")
                 spd_str = f"{speed/1024/1024:.1f}MB/s" if speed else "??MB/s"
-                eta_str = f"ETA {eta}s" if eta else ""
                 if total:
-                    pct    = done / total * 100
-                    filled = int(20 * done / total)
-                    bar    = "█" * filled + "░" * (20 - filled)
-                    size   = f"{total/1024/1024:.1f}MB"
-                    frag   = f" frag {fi}/{fc}" if fi else ""
-                    line   = f"  {track} [{bar}] {pct:5.1f}% of {size}  {spd_str}  {eta_str}{frag}"
+                    pct  = done / total * 100
+                    size = f"{total/1024/1024:.1f}MB"
+                    frag = f" frag {fi}/{fc}" if fi else ""
+                    logger.info(f"{track} {pct:.1f}% of {size}  {spd_str}{frag}")
                 elif fi:
-                    line   = f"  {track} frag {fi}/{fc or '?'}  {spd_str}  {eta_str}"
+                    logger.info(f"{track} frag {fi}/{fc or '?'}  {spd_str}")
                 else:
-                    line   = f"  {track} {done//1024}KB  {spd_str}"
-                print(f"\r{line:<70}", end="", flush=True)
+                    logger.info(f"{track} {done//1024}KB  {spd_str}")
             elif d.get("status") == "finished":
                 fname = d.get("filename", "")
                 track = "Video" if "video" in fname.lower() else "Audio"
                 size  = (d.get("total_bytes") or d.get("downloaded_bytes", 0)) / 1024 / 1024
-                print(f"\r  {track} ✓  {size:.1f}MB" + " " * 40)
+                logger.info(f"{track} done — {size:.1f}MB")
 
         ydl_opts = {
             "allow_unplayable_formats": True,

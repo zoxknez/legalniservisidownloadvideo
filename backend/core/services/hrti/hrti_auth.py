@@ -16,6 +16,7 @@ DRM flow (DRMtoday / aviion2):
 
 import requests
 import json
+import re
 import uuid
 import logging
 from typing import Optional, Dict, Any
@@ -113,6 +114,7 @@ class HRTIAuth:
             except Exception:
                 pass
         cfg["username"] = username
+        cfg["email"] = username
         cfg.pop("password", None)
         cfg["device_id"] = self.state.device_id
         with open(self.config_path, "w") as f:
@@ -370,7 +372,6 @@ class HRTIAuth:
             raise Exception("No MPD URL (FileName) in GetVodDetails response")
 
         content_drm_id = None
-        import re
         m = re.search(r'hrtvodorigin/([^/]+)\.smil', mpd_url)
         if m:
             content_drm_id = f"hrtvodorigin_{m.group(1)}.smil"

@@ -11,17 +11,34 @@ from backend.services.hbo_adapter import HboAdapter
 logger = logging.getLogger(__name__)
 
 # Regular expressions for matching Streaming URLs
-VOYO_SERIES_RE = re.compile(r"voyo\.rs/(?:[^/]+/)?serije/(\d+)", re.I)
-VOYO_VIDEO_RE = re.compile(r"voyo\.rs/.*_(\d+)\.html|voyo\.rs/proizvod/(\d+)", re.I)
+VOYO_SERIES_RE = re.compile(r"voyo\.(?:rs|si|cz)/(?:[^/]+/)?serije/(\d+)", re.I)
+VOYO_VIDEO_RE = re.compile(
+    r"voyo\.(?:rs|si|cz)/.*_(\d+)\.html"
+    r"|voyo\.(?:rs|si|cz)/proizvod/(\d+)"
+    r"|voyo\.(?:rs|si|cz)/.*[?&]id=(\d+)",
+    re.I,
+)
 
-HRTI_VOD_RE = re.compile(r"hrti\.hrt\.hr/(?:video|videostore|linear)/show/([a-f0-9\-]{36})", re.I)
-HRTI_UUID_RE = re.compile(r"([a-f0-9\-]{36})", re.I)
+HRTI_VOD_RE = re.compile(
+    r"hrti\.hrt\.hr/(?:video(?:/vod)?|videostore|linear|category)/(?:show/)?([a-f0-9\-]{36})",
+    re.I,
+)
 
-RTS_VIDEO_RE = re.compile(r"rtsplaneta\.rs/(?:[^/]+/)?video/show/(\d+)", re.I)
+RTS_VIDEO_RE = re.compile(
+    r"rtsplaneta\.rs/(?:[^/]+/)?video/(?:show/)?(\d+)",
+    re.I,
+)
 
-EON_VOD_RE = re.compile(r"eon\.tv/player/([a-f0-9\-]+)", re.I)
+EON_VOD_RE = re.compile(
+    r"eon\.tv/(?:player|ondemand/detail|vod/detail|series/detail|live|channel)/([^?#]+)",
+    re.I,
+)
 
-HBO_URN_RE = re.compile(r"hbomax\.com/(?:video|episode|page|feature)/([^?#]+)|max\.com/show/([^?#]+)", re.I)
+HBO_URN_RE = re.compile(
+    r"(?:play\.)?(?:hbomax|max)\.com/(?:video|episode|page|feature|show|movie|series)/([^?#]+)"
+    r"|(?:play\.)?(?:hbomax|max)\.com/.*/([a-f0-9\-]{36})",
+    re.I,
+)
 
 # Standard resolution labels (sorted highest first)
 RESOLUTION_LABELS = {
@@ -56,40 +73,51 @@ class SmartParser:
             return {"service": "voyo", "mode": "series", "target_id": m.group(1)}
         m = VOYO_VIDEO_RE.search(url)
         if m:
-            video_id = m.group(1) or m.group(2)
+            video_id = m.group(1) or m.group(2) or m.group(3)
             return {"service": "voyo", "mode": "video", "target_id": video_id}
 
-        # 2. HRTi
-        m = HRTI_VOD_RE.search(url)
-        if m:
-            return {"service": "hrti", "mode": "video", "target_id": m.group(1)}
-        m = HRTI_UUID_RE.search(url)
-        if m:
-            return {"service": "hrti", "mode": "video", "target_id": m.group(1)}
+        # 2. HBO Max / Max (before HRTi to avoid UUID collision)
+        if any(d in url.lower() for d in ("hbomax.com", "max.com")):
+            m = HBO_URN_RE.search(url)
+            if m:
+                raw_id = m.group(1) or m.group(2)
+                # Extract last UUID if path contains multiple segments
+                uuid_m = re.findall(r"[a-f0-9\-]{36}", raw_id, re.I)
+                video_id = uuid_m[-1] if uuid_m else raw_id.rstrip("/").rsplit("/", 1)[-1]
+                return {"service": "hbomax", "mode": "video", "target_id": video_id}
 
-        # 3. RTS Planeta
+        # 3. HRTi (scoped to hrti.hrt.hr domain only)
+        if "hrti.hrt.hr" in url.lower():
+            m = HRTI_VOD_RE.search(url)
+            if m:
+                return {"service": "hrti", "mode": "video", "target_id": m.group(1)}
+            uuid_m = re.search(r"([a-f0-9\-]{36})", url, re.I)
+            if uuid_m:
+                return {"service": "hrti", "mode": "video", "target_id": uuid_m.group(1)}
+
+        # 4. RTS Planeta
         if "rtsplaneta.rs" in url.lower():
+            m = RTS_VIDEO_RE.search(url)
+            if m:
+                return {"service": "rts", "mode": "video", "target_id": m.group(1)}
             ep_match = re.search(r"/episode/(\d+)", url)
             if ep_match:
                 return {"service": "rts", "mode": "video", "target_id": ep_match.group(1)}
-            show_match = re.search(r"/(?:video|show)/show/(\d+)|/video/(\d+)", url)
-            if show_match:
-                vid_id = show_match.group(1) or show_match.group(2)
-                return {"service": "rts", "mode": "video", "target_id": vid_id}
-            serial_match = re.search(r"/serial/(\d+)", url)
+            serial_match = re.search(r"/(?:serial|film)/(\d+)", url)
             if serial_match:
                 return {"service": "rts", "mode": "video", "target_id": serial_match.group(1)}
 
-        # 4. EON TV
-        m = EON_VOD_RE.search(url)
-        if m:
-            return {"service": "eon", "mode": "vod", "target_id": m.group(1)}
-
-        # 5. HBO Max
-        m = HBO_URN_RE.search(url)
-        if m:
-            video_id = m.group(1) or m.group(2)
-            return {"service": "hbomax", "mode": "video", "target_id": video_id}
+        # 5. EON TV
+        if "eon.tv" in url.lower():
+            m = EON_VOD_RE.search(url)
+            if m:
+                target_id = m.group(1).rstrip("/")
+                if "/live/" in url.lower() or "/channel/" in url.lower():
+                    return {"service": "eon", "mode": "live", "target_id": target_id}
+                if "/series/" in url.lower():
+                    return {"service": "eon", "mode": "series", "target_id": target_id}
+                return {"service": "eon", "mode": "vod", "target_id": target_id}
+            return {"service": "eon", "mode": "vod", "target_id": url}
 
         # 6. Generic URLs (Universal Downloader - yt-dlp supported sites)
         if url.lower().startswith("http://") or url.lower().startswith("https://"):
@@ -222,16 +250,17 @@ class SmartParser:
             }
 
         except Exception as ex:
-            logger.warning(f"yt-dlp metadata extraction failed: {ex}")
+            logger.warning("yt-dlp metadata extraction failed: %s", ex)
             from urllib.parse import urlparse
             domain = urlparse(target_id).netloc.replace("www.", "")
             return {
                 "success": True,
+                "metadata_partial": True,
                 "service": "ytdlp",
                 "mode": "video",
                 "target_id": target_id,
                 "title": f"Video sa {domain}",
-                "description": f"Započnite preuzimanje sa adrese: {target_id[:80]}",
+                "description": f"Metapodaci nisu dostupni — preuzimanje je i dalje moguće.",
                 "thumbnail": ""
             }
 
@@ -272,28 +301,33 @@ class SmartParser:
                     }
 
             elif service == "hrti":
-                series_info = HrtiAdapter.get_series_episodes(target_id)
-                if series_info and series_info.get("items"):
-                    episodes = []
-                    for item in series_info["items"]:
-                        episodes.append({
-                            "id": item.get("id"),
-                            "title": item.get("title"),
-                            "season": 1,
-                            "episode": 0,
-                            "length_mins": 0,
-                            "drm": False,
-                            "has_subs": False
-                        })
-                    return {
-                        "success": True,
-                        "service": "hrti",
-                        "mode": "series",
-                        "target_id": target_id,
-                        "title": f"HRTi Serija (ID: {target_id})",
-                        "description": "Preuzmite epizode sa HRTi.",
-                        "episodes": episodes
-                    }
+                try:
+                    series_info = HrtiAdapter.get_series_episodes(target_id)
+                    if (series_info
+                            and series_info.get("success") is not False
+                            and series_info.get("items")):
+                        episodes = []
+                        for item in series_info["items"]:
+                            episodes.append({
+                                "id": item.get("id"),
+                                "title": item.get("title"),
+                                "season": 1,
+                                "episode": 0,
+                                "length_mins": 0,
+                                "drm": False,
+                                "has_subs": False
+                            })
+                        return {
+                            "success": True,
+                            "service": "hrti",
+                            "mode": "series",
+                            "target_id": target_id,
+                            "title": f"HRTi Serija (ID: {target_id})",
+                            "description": "Preuzmite epizode sa HRTi.",
+                            "episodes": episodes
+                        }
+                except Exception as exc:
+                    logger.warning("HRTi series lookup failed for %s: %s", target_id, exc)
                 return {
                     "success": True,
                     "service": "hrti",
@@ -309,9 +343,9 @@ class SmartParser:
                     return {
                         "success": True,
                         "service": "eon",
-                        "mode": "vod",
+                        "mode": mode,
                         "target_id": target_id,
-                        "title": info.get("title", f"EON VOD {target_id}"),
+                        "title": info.get("title", f"EON {mode.upper()} {target_id}"),
                         "description": info.get("description", ""),
                         "thumbnail": info.get("thumbnail", ""),
                         "episodes": info.get("episodes", [])
@@ -320,10 +354,10 @@ class SmartParser:
                     return {
                         "success": True,
                         "service": "eon",
-                        "mode": "vod",
+                        "mode": mode,
                         "target_id": target_id,
-                        "title": f"EON VOD (ID: {target_id})",
-                        "description": "Započnite preuzimanje EON VOD naslova."
+                        "title": f"EON {mode.upper()} (ID: {target_id})",
+                        "description": "Započnite preuzimanje EON naslova."
                     }
 
             elif service == "rts":
@@ -361,7 +395,7 @@ class SmartParser:
                 return SmartParser._extract_ytdlp_metadata(target_id)
 
         except Exception as e:
-            logger.exception(f"Error fetching metadata for {url}")
+            logger.exception("Error fetching metadata for %s", url)
             return {"success": False, "error": f"Greška tokom preuzimanja detalja: {str(e)}"}
 
         return {"success": False, "error": "URL nije podržan."}

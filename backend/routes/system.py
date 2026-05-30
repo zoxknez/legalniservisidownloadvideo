@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from pathlib import Path
 from typing import Dict, Optional, Any
 
 from fastapi import APIRouter, HTTPException
@@ -84,10 +85,25 @@ async def get_system_status():
 
     metrics = await loop.run_in_executor(None, _get_system_metrics)
 
+    from backend.services.drm_manager import drm_manager
+
+    drm_report = await loop.run_in_executor(None, drm_manager.get_health_report)
+    wvd_meta = drm_report.get("wvd_metadata") or {}
+    drm_status = {
+        "cdm_ready": drm_report.get("cdm_ready", False),
+        "legacy_mode": drm_report.get("legacy_mode", False),
+        "wvd_file": drm_report.get("wvd_file"),
+        "security_level_name": wvd_meta.get("security_level_name"),
+        "key_cache_alive": (drm_report.get("key_cache") or {}).get("alive_entries", 0),
+    }
+
+    from backend.services.browser_cookies import browser_sync_supported
+
     return {
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
         "transcode_mode": config.get_transcode_mode(),
+        "browser_sync_supported": browser_sync_supported(),
         "server": {
             "api_key_configured": bool(get_api_key()),
             "localhost_bypass": os.environ.get("VIDEODOWNLOAD_LOCALHOST_BYPASS", "true").lower()
@@ -103,6 +119,7 @@ async def get_system_status():
             "hbomax": hbomax,
         },
         "system_metrics": metrics,
+        "drm": drm_status,
     }
 
 
@@ -113,15 +130,41 @@ class ConfigUpdate(BaseModel):
     sniffer: Optional[Dict[str, Any]] = None
 
 
+_VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
+
+
 @router.post("/api/config")
 def update_config(data: ConfigUpdate):
-    if data.output_dir:
-        config.set_output_dir(data.output_dir)
-    if data.transcode_mode:
-        config.set_transcode_mode(data.transcode_mode)
+    if data.output_dir is not None:
+        out = (data.output_dir or "").strip()
+        if not out:
+            raise HTTPException(status_code=400, detail="Izlazni folder ne sme biti prazan.")
+        try:
+            Path(out).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Ne mogu kreirati output folder: {exc}") from exc
+        config.set_output_dir(out)
+    if data.transcode_mode is not None:
+        mode = (data.transcode_mode or "off").strip().lower()
+        if mode not in _VALID_TRANSCODE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nepoznat transcode_mode '{mode}'. Dozvoljeno: off, hevc, av1.",
+            )
+        config.set_transcode_mode(mode)
+    wvd_updated = False
     if data.binaries:
         for name, path in data.binaries.items():
             config.update_binary_path(name, path)
+            if name == "device_wvd":
+                wvd_updated = True
+        if wvd_updated:
+            try:
+                from backend.services.drm_manager import drm_manager
+
+                drm_manager.reload()
+            except Exception as exc:
+                logger.warning("CDM reload after device_wvd update failed: %s", exc)
     if data.sniffer is not None:
         config.data.setdefault("sniffer", {}).update(data.sniffer)
         config.save()
@@ -136,11 +179,20 @@ def update_config(data: ConfigUpdate):
 
 @router.get("/api/smart-detect")
 async def smart_detect(url: str):
+    url = url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL parametar je obavezan.")
     loop = asyncio.get_running_loop()
-    res = await asyncio.wait_for(
-        loop.run_in_executor(None, SmartParser.get_metadata, url),
-        timeout=60.0,
-    )
+    try:
+        res = await asyncio.wait_for(
+            loop.run_in_executor(None, SmartParser.get_metadata, url),
+            timeout=60.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Analiza URL-a je istekla (timeout 60s).")
+    except Exception as exc:
+        logger.exception("smart-detect error for %s", url)
+        raise HTTPException(status_code=503, detail=f"Greška pri analizi: {exc}")
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error"))
     return res
@@ -149,6 +201,58 @@ async def smart_detect(url: str):
 class SessionImportRequest(BaseModel):
     service: str
     session_data: str
+
+
+class CredentialsClearRequest(BaseModel):
+    service: str
+
+
+class ApiKeyUpdate(BaseModel):
+    api_key: str
+
+
+@router.post("/api/credentials/migrate")
+def migrate_credentials():
+    """Move plaintext secrets from config.json / native files into OS keyring."""
+    from backend.credentials_store import migrate_legacy_keyring, migrate_plaintext_config
+
+    try:
+        report = migrate_plaintext_config(config)
+        legacy = migrate_legacy_keyring()
+        return {"success": True, "report": report, "legacy_moved": legacy}
+    except Exception as e:
+        logger.exception("credential migrate failed")
+        raise HTTPException(status_code=500, detail=f"Greška pri migraciji: {e}") from e
+
+
+@router.post("/api/credentials/clear")
+def clear_credentials(req: CredentialsClearRequest):
+    from backend.credentials_store import clear_service_credentials
+
+    try:
+        result = clear_service_credentials(req.service, config)
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("clear credentials failed for %s", req.service)
+        raise HTTPException(status_code=500, detail=f"Greška pri brisanju kredencijala: {e}") from e
+
+
+@router.post("/api/config/api-key")
+def update_api_key(body: ApiKeyUpdate):
+    from backend.server_settings import api_key_from_env, set_api_key
+
+    if api_key_from_env():
+        raise HTTPException(
+            status_code=409,
+            detail="API ključ je podešen preko VIDEODOWNLOAD_API_KEY — promenite ga u okruženju servera.",
+        )
+    key = (body.api_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="API ključ ne sme biti prazan.")
+    set_api_key(key)
+    return {"success": True, "api_key_configured": True}
 
 
 @router.post("/api/config/import-session")
@@ -175,10 +279,23 @@ def import_session(req: SessionImportRequest):
 @router.post("/api/config/auto-sync-browser")
 async def auto_sync_browser():
     try:
-        from backend.services.browser_cookies import sync_all_supported_services
+        from backend.services.browser_cookies import browser_sync_supported, sync_all_supported_services
+
+        if not browser_sync_supported():
+            return {
+                "success": False,
+                "unsupported_platform": True,
+                "synced_any": False,
+                "browser_locked": False,
+                "services": {s: False for s in ("voyo", "hrti", "rtsplaneta", "eon")},
+                "message": (
+                    "Automatska sinhronizacija iz pretraživača je dostupna samo na Windows-u "
+                    "(Chrome/Edge/Brave + DPAPI)."
+                ),
+            }
 
         sync_report = sync_all_supported_services()
-        services = sync_report.get("services", sync_report)
+        services = sync_report.get("services", {})
         browser_locked = bool(sync_report.get("browser_locked"))
         synced_any = any(services.values()) if isinstance(services, dict) else False
 
@@ -188,13 +305,20 @@ async def auto_sync_browser():
                 "Zatvorite pretraživač potpuno pa pokušajte ponovo."
             )
         elif synced_any:
-            message = "Sinhronizacija sesija uspešno završena!"
+            synced_names = [k.upper() for k, v in services.items() if v]
+            message = f"Sinhronizacija uspešna za: {', '.join(synced_names)}."
+            if services.get("eon"):
+                message += (
+                    " EON: sačuvani su browser kolačići — serial i broj uređaja i dalje "
+                    "podešavate ručno ispod."
+                )
         else:
             message = "Nisu pronađene aktivne sesije u pretraživačima."
 
         return {
-            "success": True,
+            "success": synced_any or not browser_locked,
             "report": services,
+            "services": services,
             "synced_any": synced_any,
             "browser_locked": browser_locked,
             "message": message,

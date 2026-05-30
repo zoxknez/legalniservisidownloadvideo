@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { useCallback, useRef, useState } from "react";
+import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { SmartDetectData, SmartEpisode } from "../../types/app";
 import type { ShowToastFn } from "../domainTypes";
@@ -12,25 +12,33 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [smartUrl, setSmartUrl] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
   const [smartData, setSmartData] = useState<SmartDetectData | null>(null);
-  const [smartSelectedEpisodes, setSmartSelectedEpisodes] = useState<number[]>([]);
+  const [smartSelectedEpisodes, setSmartSelectedEpisodes] = useState<(number | string)[]>([]);
   const [smartEpisodesRange, setSmartEpisodesRange] = useState("");
   const [smartResolution, setSmartResolution] = useState("1080p");
   const [smartSubs, setSmartSubs] = useState("sr,hr,mk,bs,sl");
   const [smartRtsVerbose, setSmartRtsVerbose] = useState(false);
+  const [smartRtsStartEp, setSmartRtsStartEp] = useState("");
+  const [smartRtsEndEp, setSmartRtsEndEp] = useState("");
   const [smartAudioOnly, setSmartAudioOnly] = useState(false);
   const [smartUseAria2, setSmartUseAria2] = useState(false);
+  const [smartSubmitting, setSmartSubmitting] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleSmartDetect = useCallback(
     async (urlStr: string) => {
       const val = urlStr.trim();
       if (!val) return;
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setSmartLoading(true);
       setSmartData(null);
       setSmartSelectedEpisodes([]);
       try {
-        const res = await apiFetch(`/api/smart-detect?url=${encodeURIComponent(val)}`);
-        const data = await res.json();
+        const res = await apiFetch(`/api/smart-detect?url=${encodeURIComponent(val)}`, { timeoutMs: 65_000, signal: controller.signal });
         if (res.ok) {
+          const data = await res.json();
           setSmartData(data);
           if (data.episodes && data.episodes.length > 0) {
             setSmartSelectedEpisodes(data.episodes.map((ep: SmartEpisode) => ep.id));
@@ -60,19 +68,32 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           }
           showToast("Link uspešno prepoznat i analiziran!", "success");
         } else {
-          showToast(data.detail || "URL nije prepoznat.", "error");
+          const msg = await parseApiError(res, "URL nije prepoznat.");
+          showToast(msg, "error");
         }
       } catch (e) {
+        if (controller.signal.aborted) return;
         showToast(errorMessage(e, "Greška na serveru"), "error");
       } finally {
-        setSmartLoading(false);
+        if (!controller.signal.aborted) setSmartLoading(false);
       }
     },
     [showToast],
   );
 
+  const debouncedDetect = useCallback(
+    (urlStr: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        handleSmartDetect(urlStr);
+      }, 600);
+    },
+    [handleSmartDetect],
+  );
+
   const startSmartDownload = useCallback(async () => {
-    if (!smartData) return;
+    if (!smartData || smartSubmitting) return;
+    setSmartSubmitting(true);
     try {
       showToast("Pokretanje pametnog preuzimanja...", "info");
       let res: Response;
@@ -90,15 +111,20 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
       }
 
       if (smartData.service === "voyo") {
+        const voyoBody: Record<string, unknown> = {
+          target: smartData.target_id,
+          mode: smartData.mode,
+          resolution: smartResolution,
+        };
+        if (smartData.mode === "series" && smartData.episodes && smartSelectedEpisodes.length > 0) {
+          voyoBody.video_ids = smartSelectedEpisodes.map(id => Number(id));
+        } else if (epRange) {
+          voyoBody.episodes = epRange;
+        }
         res = await apiFetch(`/api/voyo/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            target: smartData.target_id,
-            mode: smartData.mode,
-            episodes: epRange,
-            resolution: smartResolution,
-          }),
+          body: JSON.stringify(voyoBody),
         });
       } else if (smartData.service === "hrti") {
         if (smartData.episodes && smartSelectedEpisodes.length > 0) {
@@ -144,15 +170,15 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           }),
         });
       } else if (smartData.service === "rts" || smartData.service === "rtsplaneta") {
-        const start = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[0], 10) : undefined;
-        const end = smartEpisodesRange ? parseInt(smartEpisodesRange.split("-")[1], 10) : undefined;
+        const start = smartRtsStartEp ? parseInt(smartRtsStartEp, 10) : undefined;
+        const end = smartRtsEndEp ? parseInt(smartRtsEndEp, 10) : undefined;
         res = await apiFetch(`/api/rts/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            target_url: smartUrl,
-            start_ep: start,
-            end_ep: end,
+            target_url: smartUrl.trim(),
+            start_ep: Number.isNaN(start) ? undefined : start,
+            end_ep: Number.isNaN(end) ? undefined : end,
             verbose: smartRtsVerbose,
           }),
         });
@@ -182,7 +208,6 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         return;
       }
 
-      const data = await res.json();
       if (res.ok) {
         showToast("Preuzimanje uspešno dodato u red!", "success");
         setSmartUrl("");
@@ -191,18 +216,24 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         setSmartAudioOnly(false);
         setSmartUseAria2(false);
       } else {
-        showToast(data.detail || "Greška pri pokretanju preuzimanja.", "error");
+        const msg = await parseApiError(res, "Greška pri pokretanju preuzimanja.");
+        showToast(msg, "error");
       }
     } catch (e) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setSmartSubmitting(false);
     }
   }, [
     showToast,
     smartAudioOnly,
     smartData,
     smartEpisodesRange,
+    smartSubmitting,
     smartResolution,
     smartRtsVerbose,
+    smartRtsStartEp,
+    smartRtsEndEp,
     smartSelectedEpisodes,
     smartSubs,
     smartUrl,
@@ -226,11 +257,17 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setSmartSubs,
     smartRtsVerbose,
     setSmartRtsVerbose,
+    smartRtsStartEp,
+    setSmartRtsStartEp,
+    smartRtsEndEp,
+    setSmartRtsEndEp,
     smartAudioOnly,
     setSmartAudioOnly,
     smartUseAria2,
     setSmartUseAria2,
+    smartSubmitting,
     handleSmartDetect,
+    debouncedDetect,
     startSmartDownload,
   };
 }

@@ -29,7 +29,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
   const [importLoading, setImportLoading] = useState(false);
   const [autoSyncLoading, setAutoSyncLoading] = useState(false);
 
-  const deviceWvdInfo = status?.binaries.device_wvd;
+  const deviceWvdInfo = status?.binaries?.device_wvd;
 
   const subscribeStatusLoaded = useCallback((listener: (data: AppStatus) => void) => {
     statusListenersRef.current.add(listener);
@@ -56,11 +56,14 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         for (const listener of statusListenersRef.current) {
           listener(data);
         }
+      } else {
+        showToast(await parseApiError(res, "Status servera nije dostupan."), "error");
       }
     } catch (e) {
       console.error("Failed to fetch system status:", e);
+      showToast(errorMessage(e, "Ne mogu učitati status servera."), "error");
     }
-  }, []);
+  }, [showToast]);
 
   const fetchTranscodeDiagnostics = useCallback(async () => {
     try {
@@ -98,7 +101,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         setImportSessionData("");
         await fetchStatus();
       } else {
-        showToast(data.detail || "Greška pri uvozu sesije.", "error");
+        showToast(await parseApiError(res, "Greška pri uvozu sesije."), "error");
       }
     } catch (e) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
@@ -113,14 +116,10 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
       const res = await apiFetch(`/api/config/auto-sync-browser`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        if (data.synced_any) {
-          const successes = Object.entries(data.report || {})
-            .filter(([, success]) => success)
-            .map(([service]) =>
-              service.replace(".rs", "").replace(".hrt.hr", "").replace(".tv", "").toUpperCase(),
-            )
-            .join(", ");
-          showToast(data.message || `Sinhronizacija uspešna za: ${successes}!`, "success");
+        if (data.unsupported_platform) {
+          showToast(data.message || "Sinhronizacija nije podržana na ovom sistemu.", "error");
+        } else if (data.synced_any) {
+          showToast(data.message || "Sinhronizacija sesija završena.", "success");
         } else {
           showToast(
             data.message ||
@@ -151,17 +150,18 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         }),
       });
       if (res.ok) {
-        showToast("Podešavanja uspešno sačuvana!");
+        showToast("Podešavanja uspešno sačuvana!", "success");
         setSaveFeedback(true);
         setTimeout(() => setSaveFeedback(false), 2500);
         await fetchStatus();
+        void fetchTranscodeDiagnostics();
       } else {
-        showToast("Greška pri čuvanju podešavanja", "error");
+        showToast(await parseApiError(res, "Greška pri čuvanju podešavanja."), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
-  }, [binariesPaths, fetchStatus, outputDir, showToast, transcodeMode]);
+  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, outputDir, showToast, transcodeMode]);
 
   const handleSaveDeviceWvdPath = useCallback(async () => {
     try {
@@ -171,11 +171,15 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         body: JSON.stringify({ binaries: { device_wvd: binariesPaths.device_wvd || "" } }),
       });
       if (res.ok) {
-        showToast("Putanja do device.wvd je sacuvana.");
+        showToast("Putanja do device.wvd je sačuvana; CDM je osvežen.", "success");
         await fetchStatus();
+        try {
+          await apiFetch("/api/drm/reload", { method: "POST" });
+        } catch {
+          /* config POST already reloads CDM on backend */
+        }
       } else {
-        const data = await res.json().catch(() => null);
-        showToast(data?.detail || "Greska pri cuvanju device.wvd putanje", "error");
+        showToast(await parseApiError(res, "Greška pri čuvanju device.wvd putanje."), "error");
       }
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greska na serveru"), "error");
@@ -192,13 +196,13 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         });
         const data = await res.json();
         if (res.ok) {
-          showToast(`Kredencijali za ${service.toUpperCase()} uspesno sacuvani!`);
+          showToast(`Kredencijali za ${service.toUpperCase()} uspešno sačuvani!`, "success");
           if (data.warning) {
             showToast(data.warning, "info");
           }
           await fetchStatus();
         } else {
-          showToast(data.detail || "Greška pri prijavi", "error");
+          showToast(await parseApiError(res, data.detail || "Greška pri prijavi."), "error");
         }
       } catch (e: unknown) {
         showToast(errorMessage(e, "Greška na serveru"), "error");
@@ -219,6 +223,90 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
   }, [showToast]);
+
+  const [clearingService, setClearingService] = useState<string | null>(null);
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const [migratingCredentials, setMigratingCredentials] = useState(false);
+
+  const handleClearCredentials = useCallback(
+    async (service: string): Promise<boolean> => {
+      setClearingService(service);
+      try {
+        const res = await apiFetch("/api/credentials/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ service }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showToast(data.message || "Kredencijali obrisani.", "success");
+          await fetchStatus();
+          return true;
+        }
+        showToast(await parseApiError(res, "Greška pri brisanju kredencijala."), "error");
+        return false;
+      } catch (e: unknown) {
+        showToast(errorMessage(e, "Greška na serveru"), "error");
+        return false;
+      } finally {
+        setClearingService(null);
+      }
+    },
+    [fetchStatus, showToast],
+  );
+
+  const handleMigrateCredentials = useCallback(async () => {
+    setMigratingCredentials(true);
+    try {
+      const res = await apiFetch("/api/credentials/migrate", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const migrated = (data.report?.migrated as string[] | undefined)?.length ?? 0;
+        const native = (data.report?.native as string[] | undefined)?.length ?? 0;
+        const legacy = (data.legacy_moved as string[] | undefined)?.length ?? 0;
+        const total = migrated + native + legacy;
+        showToast(
+          total > 0
+            ? `Migracija završena (${total} polja prebačeno u keyring).`
+            : "Nema plaintext tajni za migraciju — sve je već u keyring-u.",
+          total > 0 ? "success" : "info",
+        );
+        await fetchStatus();
+      } else {
+        showToast(await parseApiError(res, "Greška pri migraciji kredencijala."), "error");
+      }
+    } catch (e: unknown) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setMigratingCredentials(false);
+    }
+  }, [fetchStatus, showToast]);
+
+  const handleSaveApiKeyToServer = useCallback(async () => {
+    const key = apiKeyInput.trim();
+    if (!key) {
+      showToast("Unesite API ključ pre čuvanja na server.", "error");
+      return;
+    }
+    setSavingApiKey(true);
+    try {
+      const res = await apiFetch("/api/config/api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key }),
+      });
+      if (res.ok) {
+        showToast("API ključ sačuvan na serveru (config.json).", "success");
+        await fetchStatus();
+      } else {
+        showToast(await parseApiError(res, "Greška pri čuvanju API ključa."), "error");
+      }
+    } catch (e: unknown) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setSavingApiKey(false);
+    }
+  }, [apiKeyInput, fetchStatus, showToast]);
 
   const [guardedSaveConfig, savingConfig] = useActionGuard(handleSaveConfig);
   const [guardedSubmitLogin, submittingLogin] = useActionGuard(submitLogin);
@@ -255,6 +343,12 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     handleSaveConfig: guardedSaveConfig,
     savingConfig,
     handleSaveDeviceWvdPath,
+    handleClearCredentials,
+    clearingService,
+    handleSaveApiKeyToServer,
+    savingApiKey,
+    handleMigrateCredentials,
+    migratingCredentials,
     submitLogin: guardedSubmitLogin,
     submittingLogin,
     openOutputFolder,

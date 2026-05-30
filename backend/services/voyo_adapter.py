@@ -1,6 +1,7 @@
 import logging
+import re
+import time
 from typing import Dict, Any, List
-from pathlib import Path
 
 from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
 from backend.jobs.inprocess import build_job
@@ -33,7 +34,6 @@ class VoyoAdapter:
         if not email and stored_token:
             email = creds.get("email", "") if (creds := config.get_credentials("voyo")) else ""
 
-        import time
         now = time.time()
         if (
             _VOYO_CACHE.get("email") == email
@@ -73,6 +73,7 @@ class VoyoAdapter:
     @staticmethod
     def login(email: str, password: str) -> Dict[str, Any]:
         """Verify login, save to both ~/.voyo/config.json and app settings."""
+        global _VOYO_CACHE
         try:
             vcfg = VoyoConfig()
             vcfg.set_credentials(email, password)
@@ -81,8 +82,16 @@ class VoyoAdapter:
             auth.login(email, password)
             vcfg.update_device_id(auth.state.device_id)
             
-            # Sync with our app config
             config.update_credentials("voyo", {"email": email, "password": password})
+
+            _VOYO_CACHE = {
+                "email": email,
+                "authenticated": True,
+                "nickname": auth.state.nickname,
+                "subscribed": auth.state.is_subscribed,
+                "profile_id": auth.state.profile_id,
+                "last_check": time.time(),
+            }
             
             return {
                 "success": True,
@@ -90,6 +99,7 @@ class VoyoAdapter:
                 "subscribed": auth.state.is_subscribed
             }
         except Exception as e:
+            _VOYO_CACHE = {}
             return {"success": False, "error": str(e)}
 
     @staticmethod
@@ -133,7 +143,6 @@ class VoyoAdapter:
         fetches the video metadata, reads ``meta.voyokey`` (e.g. ``CAT_50``)
         and retries with that category ID.
         """
-        import re
         auth = VoyoAdapter._make_auth()
 
         # Extract numeric id from URL or plain number
@@ -170,7 +179,6 @@ class VoyoAdapter:
     @staticmethod
     def get_series_info(series_id: int) -> Dict[str, Any]:
         """Fetch series catalog items (episodes) grouped by season."""
-        import re
         try:
             category = VoyoAdapter.resolve_to_category(str(series_id))
             items = category.get("items", [])
@@ -221,7 +229,6 @@ class VoyoAdapter:
     @staticmethod
     def make_download_cmd(target: str, mode: str, episodes_range: str = "", resolution: str = "1080p") -> List[str]:
         """Queue an in-process Voyo download job."""
-        import re
         target = target.strip()
         is_url = bool(re.match(r"^https?://", target, re.IGNORECASE))
         params: Dict[str, Any] = {
@@ -256,7 +263,7 @@ class VoyoAdapter:
             downloader = VoyoDownloader(auth, out_dir, resolution)
             return downloader.download_video(video_id)
         except Exception as e:
-            logging.error(f"Download failed: {e}")
+            logger.error("Voyo download failed: %s", e)
             return False
 
     @staticmethod
@@ -280,5 +287,5 @@ class VoyoAdapter:
             downloader = VoyoDownloader(auth, out_dir, resolution)
             return downloader.download_series(series_id, episodes_range)
         except Exception as e:
-            logging.error(f"Series download failed: {e}")
+            logger.error("Voyo series download failed: %s", e)
             return 0, 0
