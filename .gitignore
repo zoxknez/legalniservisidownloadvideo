@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+*.pyo
 .videodownload/
 output/
 temp/
@@ -10,10 +11,13 @@ scratch_*.json
 temp_user_msg.txt
 extracted_*.txt
 *.db
+*.db-shm
+*.db-wal
 *.log
 .env
 .venv/
 venv/
-__pycache__/
 node_modules/
 frontend/dist/
+frontend/lint-out.txt
+lint-out.txt
