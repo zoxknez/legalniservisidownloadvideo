@@ -10,10 +10,10 @@
 | RTS Planeta | `backend.core.services.rtsplaneta.rtsplaneta_downloader` | `rtsplaneta_auth` (in-process) |
 | HBO Max | `backend.core.services.hbomax.hbomax_downloader` | `hbomax_auth` |
 
-Red preuzimanja pokreće:
+Red preuzimanja pokreće **in-process** poslove preko `backend/jobs/` (bez subprocessa za glavne servise):
 
-- **In-process** (bez subprocessa): Voyo, HBO Max — vidi `backend/jobs/`
-- **Subprocess** `python -m <modul>`: HRTi, EON, RTS, yt-dlp
+- **In-process**: Voyo, HBO Max, HRTi, EON, RTS — vidi `backend/jobs/*_job.py` i `build_job()` u adapterima
+- **Subprocess** `python -m <modul>` / yt-dlp: legacy shim skripte u rootu i Smart (yt-dlp) mod
 
 ## Root skripte
 

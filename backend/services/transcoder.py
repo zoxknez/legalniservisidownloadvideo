@@ -167,7 +167,13 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
                 pass
         return None
 
-def find_and_transcode_completed(title: str, output_dir: str, codec: str = "hevc"):
+def find_and_transcode_completed(
+    title: str,
+    output_dir: str,
+    codec: str = "hevc",
+    on_start=None,
+    on_complete=None,
+):
     """
     Scans the output directory for a file matching the downloaded title
     and initiates the transcoding pipeline in the background.
@@ -201,11 +207,21 @@ def find_and_transcode_completed(title: str, output_dir: str, codec: str = "hevc
         if best_file:
             # We found the completed file! Start the transcode in a background thread
             logger.info(f"Triggering background compression ({codec}) for: {best_file.name}")
-            threading.Thread(
-                target=run_transcode,
-                args=(str(best_file), codec),
-                daemon=True
-            ).start()
+            if on_start:
+                try:
+                    on_start(str(best_file))
+                except Exception as cb_err:
+                    logger.debug("Transcode on_start callback failed: %s", cb_err)
+
+            def _worker():
+                result = run_transcode(str(best_file), codec)
+                if on_complete:
+                    try:
+                        on_complete(result)
+                    except Exception as cb_err:
+                        logger.debug("Transcode on_complete callback failed: %s", cb_err)
+
+            threading.Thread(target=_worker, daemon=True).start()
     except Exception as e:
         logger.error(f"Error searching for transcode target for title '{title}': {e}")
 

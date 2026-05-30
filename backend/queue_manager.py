@@ -7,6 +7,7 @@ import sys
 import logging
 import sqlite3
 import json
+import threading
 from typing import Dict, Any, List, Set, Optional
 from fastapi import WebSocket
 from pathlib import Path
@@ -238,6 +239,7 @@ class DownloadItem:
         self.eta = ""
         self.logs: List[str] = []
         self.process: asyncio.subprocess.Process = None
+        self.cancel_event = threading.Event()
         self.retry_count = 0
         self.created_at = datetime.now()
 
@@ -291,6 +293,29 @@ class DownloadQueueManager:
         except Exception as e:
             logger.warning(f"Could not load persisted downloads: {e}")
 
+    async def resume_pending_downloads(self):
+        """Re-queue downloads that were pending or interrupted before restart."""
+        to_resume: List[DownloadItem] = []
+        async with self.lock:
+            for item in self.items.values():
+                if item.status not in ("pending", "downloading"):
+                    continue
+                if item.status == "downloading":
+                    item.status = "pending"
+                    item.progress = 0.0
+                    item.speed = ""
+                    item.eta = ""
+                    item.logs.append("\n[Resuming after server restart]")
+                    self.db.save_download(item)
+                to_resume.append(item)
+
+        for item in to_resume:
+            logger.info("Resuming download: %s (%s)", item.title, item.id)
+            asyncio.create_task(self._process_download(item.id))
+
+        if to_resume:
+            await self.broadcast_state()
+
     async def register_websocket(self, websocket: WebSocket):
         """Register a WebSocket connection."""
         await websocket.accept()
@@ -341,6 +366,33 @@ class DownloadQueueManager:
             except Exception:
                 disconnected.append(ws)
         
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
+    async def broadcast_transcode_update(
+        self,
+        item_id: str,
+        title: str,
+        status: str,
+        detail: str = "",
+    ):
+        if not self.active_websockets:
+            return
+        payload = {
+            "type": "transcode_update",
+            "data": {
+                "item_id": item_id,
+                "title": title,
+                "status": status,
+                "detail": detail,
+            },
+        }
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
         for ws in disconnected:
             self.unregister_websocket(ws)
 
@@ -462,12 +514,10 @@ class DownloadQueueManager:
                 for item in scheduled_items:
                     if item["status"] == "scheduled" and current_time_str >= item["start_time"]:
                         logger.info(f"Triggering scheduled recording: {item['title']} on {item['channel_name']}")
-                        
-                        # 1. Update status in db
-                        item["status"] = "completed"
+
+                        item["status"] = "triggering"
                         self.db.save_scheduled(item)
-                        
-                        # 2. Build live capture command using EonAdapter
+
                         from backend.services.eon_adapter import EonAdapter
                         try:
                             cmd = EonAdapter.make_download_cmd(
@@ -476,12 +526,14 @@ class DownloadQueueManager:
                                 duration=item["duration"],
                                 play=False
                             )
-                            # 3. Add task to active queue!
-                            await self.add_download(
+                            task_id = await self.add_download(
                                 service="eon",
                                 title=f"DVR Snimanje: {item['title']}",
                                 cmd=cmd
                             )
+                            item["status"] = "completed"
+                            item["task_id"] = task_id
+                            self.db.save_scheduled(item)
                         except Exception as cmd_err:
                             logger.error(f"Failed to build DVR command: {cmd_err}")
                             item["status"] = "failed"
@@ -517,6 +569,7 @@ class DownloadQueueManager:
             if item.status in ("pending", "downloading"):
                 item.status = "cancelled"
                 item.logs.append("\n[Download cancelled by user]")
+                item.cancel_event.set()
                 if item.process:
                     try:
                         item.process.terminate()
@@ -583,19 +636,35 @@ class DownloadQueueManager:
         if eta_match:
             item.eta = eta_match.group(1).strip()
 
-    async def _wait_for_slot(self):
-        """Wait until a download slot is available (rate limiting)."""
+    async def _wait_for_slot(self, item: DownloadItem) -> bool:
+        """Wait until a download slot is available. Returns False if cancelled while waiting."""
         while self.running_count >= MAX_CONCURRENT_DOWNLOADS:
+            if item.status == "cancelled" or item.cancel_event.is_set():
+                return False
             await asyncio.sleep(0.5)
+        return True
+
+    def _is_cancelled(self, item: DownloadItem) -> bool:
+        return item.status == "cancelled" or item.cancel_event.is_set()
 
     async def _process_download(self, item_id: str):
         """Process a single download with retry logic and rate limiting."""
         item = self.items.get(item_id)
         if not item:
             return
+        if self._is_cancelled(item):
+            async with self.lock:
+                item.status = "cancelled"
+                self.db.save_download(item)
+            await self.broadcast_state()
+            return
 
-        # Wait for a free slot
-        await self._wait_for_slot()
+        if not await self._wait_for_slot(item):
+            async with self.lock:
+                item.status = "cancelled"
+                self.db.save_download(item)
+            await self.broadcast_state()
+            return
 
         async with self.lock:
             self.running_count += 1
@@ -603,6 +672,8 @@ class DownloadQueueManager:
         success = False
         try:
             while item.retry_count < MAX_RETRIES:
+                if self._is_cancelled(item):
+                    break
                 async with self.lock:
                     item.status = "downloading"
                     item.logs.append(f"\n[Attempt {item.retry_count + 1}/{MAX_RETRIES}]")
@@ -611,15 +682,18 @@ class DownloadQueueManager:
 
                 try:
                     success = await self._run_download_process(item)
+                    if self._is_cancelled(item):
+                        break
                     if success:
                         break
-                    else:
-                        item.retry_count += 1
-                        if item.retry_count < MAX_RETRIES:
-                            item.logs.append(f"\n[Retrying... (attempt {item.retry_count + 1}/{MAX_RETRIES})]")
-                            await asyncio.sleep(2)
+                    item.retry_count += 1
+                    if item.retry_count < MAX_RETRIES and not self._is_cancelled(item):
+                        item.logs.append(f"\n[Retrying... (attempt {item.retry_count + 1}/{MAX_RETRIES})]")
+                        await asyncio.sleep(2)
                 except Exception as e:
                     logger.error(f"Download process error: {e}")
+                    if self._is_cancelled(item):
+                        break
                     item.retry_count += 1
         finally:
             async with self.lock:
@@ -627,31 +701,63 @@ class DownloadQueueManager:
 
         # Final status update
         async with self.lock:
-            if item.status != "cancelled":
-                if item.retry_count < MAX_RETRIES and success:
-                    item.status = "finished"
-                    item.progress = 100.0
-                    item.logs.append("\n[✓ Download completed successfully!]")
-                    
-                    # Trigger background HEVC/AV1 hardware-accelerated transcoding!
-                    try:
-                        trans_mode = config.get_transcode_mode()
-                        if trans_mode and trans_mode != "off":
-                            from backend.services.transcoder import find_and_transcode_completed
-                            from backend.jobs.inprocess import get_output_dir_from_cmd
-                            output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
-                            find_and_transcode_completed(item.title, output_dir_val, trans_mode)
-                    except Exception as trans_err:
-                        logger.error(f"Failed to initiate automatic transcode: {trans_err}")
-                else:
-                    item.status = "failed"
-                    item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
-                    
-                    # Clean up partial leftovers on final failure
-                    from backend.jobs.inprocess import get_output_dir_from_cmd
-                    output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
-                    clean_temp_files(item.title, output_dir)
-                    
+            if self._is_cancelled(item):
+                item.status = "cancelled"
+                self.db.save_download(item)
+                await self.broadcast_state()
+                return
+            if item.retry_count < MAX_RETRIES and success:
+                item.status = "finished"
+                item.progress = 100.0
+                item.logs.append("\n[✓ Download completed successfully!]")
+
+                try:
+                    trans_mode = config.get_transcode_mode()
+                    if trans_mode and trans_mode != "off":
+                        from backend.services.transcoder import find_and_transcode_completed
+                        from backend.jobs.inprocess import get_output_dir_from_cmd
+                        output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
+                        loop = asyncio.get_running_loop()
+
+                        def on_start(path: str) -> None:
+                            item.logs.append(f"\n[Transcode started: {path}]")
+                            asyncio.run_coroutine_threadsafe(
+                                self.broadcast_transcode_update(
+                                    item.id, item.title, "started", path
+                                ),
+                                loop,
+                            )
+                            asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+
+                        def on_complete(result: Optional[str]) -> None:
+                            status = "finished" if result else "failed"
+                            detail = result or "Transcode failed"
+                            item.logs.append(f"\n[Transcode {status}: {detail}]")
+                            asyncio.run_coroutine_threadsafe(
+                                self.broadcast_transcode_update(
+                                    item.id, item.title, status, detail
+                                ),
+                                loop,
+                            )
+                            asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+
+                        find_and_transcode_completed(
+                            item.title,
+                            output_dir_val,
+                            trans_mode,
+                            on_start=on_start,
+                            on_complete=on_complete,
+                        )
+                except Exception as trans_err:
+                    logger.error(f"Failed to initiate automatic transcode: {trans_err}")
+            else:
+                item.status = "failed"
+                item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
+
+                from backend.jobs.inprocess import get_output_dir_from_cmd
+                output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
+                clean_temp_files(item.title, output_dir)
+
             self.db.save_download(item)
 
         await self.broadcast_state()
@@ -667,6 +773,9 @@ class DownloadQueueManager:
 
         def log_line(line: str) -> None:
             nonlocal last_broadcast
+            if item.cancel_event.is_set():
+                from backend.jobs.exceptions import JobCancelled
+                raise JobCancelled("Download cancelled by user")
             scrubbed = redact_log_line(line)
             item.logs.append(scrubbed)
             self._parse_progress(scrubbed, item)
@@ -677,8 +786,12 @@ class DownloadQueueManager:
 
         def run_sync() -> bool:
             try:
-                return execute_job(payload, log_line)
+                return execute_job(payload, log_line, item.cancel_event)
             except Exception as exc:
+                from backend.jobs.exceptions import JobCancelled
+                if isinstance(exc, JobCancelled):
+                    log_line("INFO Preuzimanje otkazano od strane korisnika.")
+                    return False
                 log_line(f"ERROR {exc}")
                 logger.exception("In-process job failed")
                 return False
@@ -716,6 +829,17 @@ class DownloadQueueManager:
                 # Read output with timeout
                 async with asyncio.timeout(DOWNLOAD_TIMEOUT):
                     while True:
+                        if item.cancel_event.is_set():
+                            if item.process and item.process.returncode is None:
+                                try:
+                                    item.process.terminate()
+                                    await asyncio.sleep(0.5)
+                                    if item.process.returncode is None:
+                                        item.process.kill()
+                                except OSError as kill_err:
+                                    logger.debug(f"Process kill after cancel: {kill_err}")
+                            from backend.jobs.exceptions import JobCancelled
+                            raise JobCancelled("Download cancelled by user")
                         line_bytes = await item.process.stdout.readline()
                         if not line_bytes:
                             break
@@ -741,13 +865,16 @@ class DownloadQueueManager:
                         await asyncio.sleep(0.5)
                         if item.process.returncode is None:
                             item.process.kill()
-                    except:
-                        pass
+                    except OSError as kill_err:
+                        logger.debug(f"Process kill on timeout: {kill_err}")
                 return False
 
             return item.process.returncode == 0
 
         except Exception as e:
+            from backend.jobs.exceptions import JobCancelled
+            if isinstance(e, JobCancelled):
+                return False
             item.logs.append(f"\n[Error]: {str(e)}")
             logger.error(f"Error running download: {e}")
             return False

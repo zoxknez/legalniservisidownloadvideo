@@ -15,50 +15,59 @@ class VoyoAdapter:
     def get_auth_status() -> Dict[str, Any]:
         """Check if Voyo has valid credentials and if login succeeds."""
         global _VOYO_CACHE
+        from backend.credentials_store import get_secret
+
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
-        
-        # If not in ~/.voyo/config.json, check our app config
+
         if not email or not password:
             creds = config.get_credentials("voyo")
-            email = creds.get("email", "")
-            password = creds.get("password", "")
+            email = creds.get("email", "") or email
+            password = creds.get("password", "") or password
             if email and password:
                 vcfg.set_credentials(email, password)
-        
-        if not email or not password:
+
+        stored_token = get_secret("voyo", "token")
+        if not email and not stored_token:
             return {"authenticated": False, "email": "", "error": "No credentials stored"}
+        if not email and stored_token:
+            email = creds.get("email", "") if (creds := config.get_credentials("voyo")) else ""
 
         import time
         now = time.time()
-        if _VOYO_CACHE.get("email") == email and (now - _VOYO_CACHE.get("last_check", 0)) < 600:
+        if (
+            _VOYO_CACHE.get("email") == email
+            and _VOYO_CACHE.get("authenticated") is True
+            and (now - _VOYO_CACHE.get("last_check", 0)) < 600
+        ):
             return {
                 "authenticated": True,
                 "email": email,
                 "nickname": _VOYO_CACHE.get("nickname", ""),
                 "subscribed": _VOYO_CACHE.get("subscribed", False),
-                "profile_id": _VOYO_CACHE.get("profile_id", 0)
+                "profile_id": _VOYO_CACHE.get("profile_id", 0),
             }
 
         try:
             auth = VoyoAuth()
             if device_id:
                 auth.state.device_id = device_id
-                auth.session.headers['device-id'] = device_id
-            
-            auth.login(email, password)
+                auth.session.headers["device-id"] = device_id
+
+            auth.authenticate(email, password)
             vcfg.update_device_id(auth.state.device_id)
-            
+
             status = {
                 "authenticated": True,
                 "email": email,
                 "nickname": auth.state.nickname,
                 "subscribed": auth.state.is_subscribed,
-                "profile_id": auth.state.profile_id
+                "profile_id": auth.state.profile_id,
             }
-            _VOYO_CACHE = {**status, "last_check": now}
+            _VOYO_CACHE = {**status, "last_check": now, "authenticated": True}
             return status
         except Exception as e:
+            _VOYO_CACHE = {"email": email, "last_check": now, "authenticated": False}
             return {"authenticated": False, "email": email, "error": str(e)}
 
     @staticmethod

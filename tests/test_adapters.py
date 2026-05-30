@@ -41,12 +41,13 @@ def test_inprocess_job_roundtrip():
     assert parse_job(cmd)["action"] == "video"
 
 
-def test_hrti_download_cmd_uses_module():
-    from backend.core.services.runner import HRTI_DOWNLOADER
+def test_hrti_download_cmd_uses_inprocess():
     from backend.services.hrti_adapter import HrtiAdapter
     cmd = HrtiAdapter.make_download_cmd("uuid-test", title="Film")
-    assert HRTI_DOWNLOADER in " ".join(cmd)
-    assert "--ref-id" in cmd
+    assert cmd[0] == "@inprocess"
+    payload = json.loads(cmd[1])
+    assert payload["service"] == "hrti"
+    assert payload["params"]["ref_id"] == "uuid-test"
 
 
 def test_eon_engine_health():

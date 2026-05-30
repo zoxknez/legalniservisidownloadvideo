@@ -1,21 +1,3 @@
-import os
-
-import pytest
-from fastapi.testclient import TestClient
-
-from backend.config import config
-from backend.main import app
-
-
-@pytest.fixture()
-def client(monkeypatch):
-    monkeypatch.setenv("VIDEODOWNLOAD_LOCALHOST_BYPASS", "false")
-    config.data.setdefault("server", {})["api_key"] = "test-secret-key"
-    config.save()
-    with TestClient(app) as c:
-        yield c
-
-
 def test_health_is_public(client):
     r = client.get("/api/health")
     assert r.status_code == 200

@@ -45,9 +45,11 @@ SITE_ID = 30005   # voyo.rs site identifier
 
 class ChromeTLSAdapter(HTTPAdapter):
     """Custom HTTPAdapter that forces urllib3 to use a customized SSL Context matching Chrome."""
+
     def init_poolmanager(self, *args, **kwargs):
         import ssl
         from urllib3.util.ssl_ import create_urllib3_context
+
         context = create_urllib3_context()
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.maximum_version = ssl.TLSVersion.TLSv1_3
@@ -60,16 +62,43 @@ class ChromeTLSAdapter(HTTPAdapter):
             )
         except Exception:
             pass
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = context
+        kwargs["cert_reqs"] = ssl.CERT_NONE
+        kwargs["assert_hostname"] = False
         return super().init_poolmanager(*args, **kwargs)
 
-def _make_session() -> requests.Session:
+    def cert_verify(self, conn, url, verify, cert):
+        """Avoid requests/urllib3 toggling verify_mode on a context with check_hostname=True."""
+        import ssl
+
+        conn.cert_reqs = ssl.CERT_NONE
+        conn.ca_certs = None
+        conn.ca_cert_dir = None
+        conn.assert_hostname = False
+
+
+def _make_session():
+    """Build HTTP session for Voyo API (curl_cffi preferred, Chrome TLS fallback)."""
+    try:
+        from curl_cffi import requests as cffi_requests
+
+        session = cffi_requests.Session(impersonate="chrome131")
+        logger.debug("VoyoAuth using curl_cffi session (chrome131)")
+        return session
+    except ImportError:
+        logger.debug("curl_cffi not installed; using requests ChromeTLSAdapter")
+
     session = requests.Session()
-    retry = Retry(total=3, backoff_factor=1,
-                  status_forcelist=[429, 500, 502, 503, 504])
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
     adapter = ChromeTLSAdapter(max_retries=retry)
-    session.mount('https://', adapter)
-    session.mount('http://', adapter)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
     return session
 
 
@@ -112,15 +141,22 @@ class VoyoAuth:
         self.state   = AuthState()
         self.session = _make_session()
         self.session.headers.update(self.DEFAULT_HEADERS)
-        self.session.verify = False
         self._nonce  = 130          # increments with each GQL call (like browser)
-
-        # Stable device-id (UUID) – sent with every request
-        self.state.device_id = str(uuid.uuid4())
-        self.session.headers['device-id'] = self.state.device_id
 
         if config_file and Path(config_file).exists():
             self._load_config(config_file)
+        else:
+            try:
+                cfg = VoyoConfig()
+                _, _, device_id = cfg.get_credentials()
+                if device_id:
+                    self.state.device_id = device_id
+            except Exception:
+                pass
+
+        if not self.state.device_id:
+            self.state.device_id = str(uuid.uuid4())
+        self.session.headers['device-id'] = self.state.device_id
 
     # ── internal helpers ─────────────────────────────────────────────────────
 
@@ -163,6 +199,36 @@ class VoyoAuth:
 
     # ── auth ─────────────────────────────────────────────────────────────────
 
+    def restore_session_token(self, token: str) -> bool:
+        """Validate and activate an imported session token (browser / bookmarklet)."""
+        token = (token or '').strip()
+        if not token:
+            return False
+        self.state.token = token
+        self.state.device_linked = True
+        try:
+            profiles = self.get_profiles()
+            if profiles:
+                self.state.profile_id = profiles[0].get('profileId', 0)
+                logger.info('Voyo session restored from imported token')
+                return True
+        except Exception as e:
+            logger.warning(f'Voyo token validation failed: {e}')
+        self.state.token = ''
+        self.state.device_linked = False
+        return False
+
+    def authenticate(self, email: str, password: str) -> Dict[str, Any]:
+        """Password login, or token restore when a session token is stored."""
+        from backend.credentials_store import get_secret
+
+        stored_token = get_secret('voyo', 'token')
+        if stored_token and self.restore_session_token(stored_token):
+            return {'token': self.state.token, 'nickname': self.state.nickname}
+        if not email or not password:
+            raise RuntimeError('Voyo credentials are not configured.')
+        return self.login(email, password)
+
     def login(self, email: str, password: str) -> Dict[str, Any]:
         """
         Authenticate with Voyo.rs (3-step flow).
@@ -186,7 +252,7 @@ class VoyoAuth:
 
         # Step 1 – master login
         query = (
-            f'{{ login ( email: "{email}" password: "{password}" siteId: {SITE_ID} )'
+            f'{{ login ( email: {json.dumps(email)} password: {json.dumps(password)} siteId: {SITE_ID} )'
             f' {{ token nickname avatar email deviceId profileId id isSubscribed'
             f' emailStatus phoneStatus }} }}'
         )

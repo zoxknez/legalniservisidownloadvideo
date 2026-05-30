@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+import threading
 
 from backend.config import config
 from backend.core.services.hbomax.hbomax_auth import HBOMaxAuth
 from backend.core.services.hbomax.hbomax_downloader import HBOMaxDownloader
+from backend.jobs.exceptions import JobCancelled
 from backend.jobs.inprocess import LogFn, capture_job_output
+
+
+def _check_cancelled(cancel_event: Optional[threading.Event]) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise JobCancelled("Download cancelled by user")
 
 
 def _parse_subs(raw: str) -> List[str]:
@@ -42,9 +49,16 @@ def _build_downloader(market: str, workers: int = 16) -> HBOMaxDownloader:
     return dl
 
 
-def run_hbo_job(action: str, params: Dict[str, Any], log_fn: LogFn) -> bool:
+def run_hbo_job(
+    action: str,
+    params: Dict[str, Any],
+    log_fn: LogFn,
+    cancel_event: Optional[threading.Event] = None,
+) -> bool:
     market = (params.get("market") or config.get_credentials("hbomax").get("market") or "emea").strip()
     workers = int(params.get("workers") or 16)
+
+    _check_cancelled(cancel_event)
 
     with capture_job_output(log_fn, ["HBOMaxDownloader", "backend.core.services.hbomax", ""]):
         if action == "login":

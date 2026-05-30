@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from backend.config import config
 from backend.core.services.rtsplaneta.rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
-from backend.core.services.runner import RTS_DOWNLOADER, python_module_cmd
+from backend.jobs.inprocess import build_job
 
 logger = logging.getLogger(__name__)
 CWD = Path(__file__).parent.parent.parent.resolve()
@@ -37,14 +37,16 @@ class RtsAdapter:
         end_ep: int = None,
         verbose: bool = False,
     ) -> List[str]:
-        cmd = python_module_cmd(RTS_DOWNLOADER, "-i", target_url)
+        params: Dict[str, Any] = {
+            "target_url": target_url,
+            "output_dir": config.get_output_dir(),
+            "verbose": verbose,
+        }
         if start_ep is not None:
-            cmd += ["--start", str(start_ep)]
+            params["start_ep"] = start_ep
         if end_ep is not None:
-            cmd += ["--end", str(end_ep)]
-        if verbose:
-            cmd.append("-v")
-        return cmd
+            params["end_ep"] = end_ep
+        return build_job("rtsplaneta", "download", params)
 
     @staticmethod
     def get_video_info(video_id: str) -> Dict[str, Any]:

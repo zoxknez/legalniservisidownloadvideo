@@ -66,7 +66,10 @@ async def lifespan(app: FastAPI):
 
             loop = asyncio.get_running_loop()
             report = await loop.run_in_executor(None, sync_all_supported_services)
-            if any(report.values()):
+            if isinstance(report, dict) and report.get("services"):
+                if any(report["services"].values()):
+                    logger.info("Browser sesije sinhronizovane pri startu: %s", report["services"])
+            elif isinstance(report, dict) and any(report.values()):
                 logger.info("Browser sesije sinhronizovane pri startu: %s", report)
         except Exception as exc:
             logger.debug("Browser sync pri startu preskočen: %s", exc)
@@ -74,6 +77,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_startup_browser_sync())
     logger.info("Initializing background daemons...")
     scheduler_task = asyncio.create_task(queue_manager.scheduler_daemon_loop())
+    await queue_manager.resume_pending_downloads()
     yield
     scheduler_task.cancel()
     try:
@@ -730,6 +734,26 @@ async def rts_download(req: RtsDownloadRequest):
     task_id = await queue_manager.add_download("rtsplaneta", title, cmd)
     return {"success": True, "task_id": task_id}
 
+
+@app.get("/api/rts/video-info")
+def rts_video_info(url: str = "", video_id: str = ""):
+    """Fetch RTS Planeta metadata for a video URL or numeric ID."""
+    from backend.core.services.rtsplaneta.rtsplaneta_downloader import RTSPlanetaDownloader
+
+    vid = video_id.strip()
+    if url.strip():
+        try:
+            vid = RTSPlanetaDownloader().extract_video_id(url.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not vid:
+        raise HTTPException(status_code=400, detail="Provide url or video_id query parameter.")
+
+    result = RtsAdapter.get_video_info(vid)
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("error", "Video not found"))
+    return result
+
 # ── HBO Max Routes ────────────────────────────────────────────────────────────
 
 class HboLoginRequest(BaseModel):
@@ -799,6 +823,39 @@ async def retry_download(req: CancelRequest):
 async def clear_completed():
     await queue_manager.clear_completed()
     return {"success": True}
+
+
+@app.get("/api/queue")
+async def get_queue():
+    """REST fallback for download queue state (WebSocket is primary)."""
+    return {"items": [item.to_dict() for item in queue_manager.items.values()]}
+
+
+@app.post("/api/open-output-folder")
+def open_output_folder():
+    """Open the configured output directory in the system file manager."""
+    import subprocess
+    import sys
+
+    path = Path(config.get_output_dir())
+    if not path.exists():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"Output folder cannot be created: {exc}") from exc
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Cannot open folder: {exc}") from exc
+
+    return {"success": True, "path": str(path)}
+
 
 # ── Zero-Friction Sniffer & Browser Auto-Sync ──────────────────────────────────
 
@@ -871,15 +928,27 @@ async def auto_sync_browser():
     try:
         from backend.services.browser_cookies import sync_all_supported_services
         sync_report = sync_all_supported_services()
-        
-        # Check if at least one service was successfully synced
-        synced_any = any(sync_report.values())
-        
+        services = sync_report.get("services", sync_report)
+        browser_locked = bool(sync_report.get("browser_locked"))
+
+        synced_any = any(services.values()) if isinstance(services, dict) else False
+
+        if browser_locked and not synced_any:
+            message = (
+                "Chrome/Edge/Brave baza kolačića je zaključana. "
+                "Zatvorite pretraživač potpuno pa pokušajte ponovo."
+            )
+        elif synced_any:
+            message = "Sinhronizacija sesija uspešno završena!"
+        else:
+            message = "Nisu pronađene aktivne sesije u pretraživačima."
+
         return {
             "success": True,
-            "report": sync_report,
+            "report": services,
             "synced_any": synced_any,
-            "message": "Sinhronizacija sesija uspešno završena!" if synced_any else "Nisu pronađene aktivne sesije u pretraživačima."
+            "browser_locked": browser_locked,
+            "message": message,
         }
     except Exception as e:
         logger.error(f"Error during browser auto-sync: {e}")

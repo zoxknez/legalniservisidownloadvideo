@@ -6,12 +6,36 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from backend.config import config
+from backend.config import CONFIG_DIR, PROJECT_ROOT, config
 from backend.core.services.eon import EONEngine
-from backend.core.services.runner import EON_DOWNLOADER, python_module_cmd
+from backend.jobs.inprocess import build_job
 
 logger = logging.getLogger(__name__)
-CWD = Path(__file__).parent.parent.parent.resolve()
+CWD = PROJECT_ROOT
+
+_EON_CATALOG_NAMES = (
+    "eon_channels.json",
+    "eon_series.json",
+    "eon_vod.json",
+    "eon_epg.json",
+    "eon_api.json",
+)
+
+
+def _migrate_eon_catalog_files() -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    for name in _EON_CATALOG_NAMES:
+        src = CWD / name
+        dst = CONFIG_DIR / name
+        if src.exists() and not dst.exists():
+            try:
+                shutil.copy2(src, dst)
+                logger.info("EON katalog migriran: %s -> %s", name, dst)
+            except OSError as exc:
+                logger.warning("EON migracija %s nije uspela: %s", name, exc)
+
+
+_migrate_eon_catalog_files()
 
 _eon_health_cache: Dict[str, Any] = {}
 _eon_health_cache_ts: float = 0.0
@@ -25,7 +49,7 @@ def _invalidate_health_cache() -> None:
 
 
 class EonAdapter:
-    ENGINE_MODULE = EON_DOWNLOADER
+    ENGINE_MODULE = "backend.core.services.eon.eon_downloader"
     SUPPORTED_MODES = {"vod", "series", "live"}
     REQUIRED_PACKAGES = {
         "requests": "requests",
@@ -36,11 +60,11 @@ class EonAdapter:
         "xmltodict": "xmltodict",
         "pywidevine": "pywidevine",
     }
-    CHANNEL_CATALOG = CWD / "eon_channels.json"
-    SERIES_CATALOG = CWD / "eon_series.json"
-    VOD_CATALOG = CWD / "eon_vod.json"
-    EPG_CATALOG = CWD / "eon_epg.json"
-    API_CONFIG = CWD / "eon_api.json"
+    CHANNEL_CATALOG = CONFIG_DIR / "eon_channels.json"
+    SERIES_CATALOG = CONFIG_DIR / "eon_series.json"
+    VOD_CATALOG = CONFIG_DIR / "eon_vod.json"
+    EPG_CATALOG = CONFIG_DIR / "eon_epg.json"
+    API_CONFIG = CONFIG_DIR / "eon_api.json"
     CHANNEL_CATALOG_EXAMPLE = CWD / "eon_channels.example.json"
     SERIES_CATALOG_EXAMPLE = CWD / "eon_series.example.json"
     VOD_CATALOG_EXAMPLE = CWD / "eon_vod.example.json"
@@ -380,20 +404,18 @@ class EonAdapter:
 
         cls._require_ready()
 
-        cmd = python_module_cmd(cls.ENGINE_MODULE)
-        if mode == "vod":
-            cmd += ["--vod", cls._normalize_vod_target(target), "-v", "-o", config.get_output_dir()]
-        elif mode == "series":
-            cmd += ["--series", target, "-o", config.get_output_dir()]
-            if episodes:
-                cmd += ["--episodes", episodes]
-        elif mode == "live":
-            cmd += ["--live", "-c", target, "--duration", str(duration), "-o", config.get_output_dir()]
-            if play:
-                cmd.append("--play")
-                if player_path.strip():
-                    cmd += ["--player", player_path.strip()]
-        return cmd
+        params: Dict[str, Any] = {
+            "target": cls._normalize_vod_target(target) if mode == "vod" else target,
+            "output_dir": config.get_output_dir(),
+        }
+        if episodes:
+            params["episodes"] = episodes
+        if mode == "live":
+            params["duration"] = duration
+            params["play"] = play
+            if player_path.strip():
+                params["player_path"] = player_path.strip()
+        return build_job("eon", mode, params)
 
     @classmethod
     def resolve_stream(cls, target: str, kind: str = "live") -> Dict[str, Any]:

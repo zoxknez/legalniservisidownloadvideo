@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+import threading
 
 from backend.config import config
 from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
+from backend.jobs.exceptions import JobCancelled
 from backend.jobs.inprocess import LogFn, capture_job_output
+
+
+def _check_cancelled(cancel_event: Optional[threading.Event]) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise JobCancelled("Download cancelled by user")
 
 
 def _authenticated_downloader(resolution: str) -> VoyoDownloader:
@@ -18,28 +25,40 @@ def _authenticated_downloader(resolution: str) -> VoyoDownloader:
         password = creds.get("password", "")
         if email and password:
             vcfg.set_credentials(email, password)
-    if not email or not password:
-        raise RuntimeError("Voyo credentials are not configured.")
 
     auth = VoyoAuth()
     if device_id:
         auth.state.device_id = device_id
         auth.session.headers["device-id"] = device_id
-    auth.login(email, password)
+
+    from backend.credentials_store import get_secret
+    has_token = bool(get_secret("voyo", "token"))
+    if not has_token and (not email or not password):
+        raise RuntimeError("Voyo credentials are not configured.")
+
+    auth.authenticate(email, password)
     vcfg.update_device_id(auth.state.device_id)
 
     out_dir = config.get_output_dir()
     return VoyoDownloader(auth, out_dir, resolution)
 
 
-def run_voyo_job(action: str, params: Dict[str, Any], log_fn: LogFn) -> bool:
+def run_voyo_job(
+    action: str,
+    params: Dict[str, Any],
+    log_fn: LogFn,
+    cancel_event: Optional[threading.Event] = None,
+) -> bool:
     resolution = params.get("resolution") or "1080p"
     target = str(params.get("target", "")).strip()
     episodes = str(params.get("episodes") or "").strip()
     is_url = bool(re.match(r"^https?://", target, re.IGNORECASE))
 
+    _check_cancelled(cancel_event)
+
     with capture_job_output(log_fn, ["VoyoDownloader", "backend.core.services.voyo", ""]):
         downloader = _authenticated_downloader(resolution)
+        _check_cancelled(cancel_event)
 
         if action == "video":
             if is_url:

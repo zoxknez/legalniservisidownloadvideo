@@ -1,12 +1,11 @@
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
 from backend.config import config
 from backend.core.services.hrti import HRTIAuth, HRTIBrowser
-from backend.core.services.runner import HRTI_DOWNLOADER, python_module_cmd
+from backend.jobs.inprocess import build_job
 
 logger = logging.getLogger(__name__)
 
@@ -27,23 +26,34 @@ class HrtiAdapter:
 
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
+        from backend.credentials_store import get_secret
+
+        email = ""
         cfg_path = Path.home() / ".hrti" / "config.json"
         if cfg_path.exists():
             try:
                 import json
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                h_email = data.get("email") or data.get("username", "")
-                if h_email:
-                    return {"authenticated": True, "email": h_email}
+                email = data.get("email") or data.get("username", "")
             except Exception:
                 pass
 
         app_creds = config.get_credentials("hrti")
-        email = app_creds.get("email", "")
-        password = app_creds.get("password", "")
-        if email and password:
+        if not email:
+            email = app_creds.get("email", "")
+
+        password = get_secret("hrti", "password") or app_creds.get("password", "")
+        token = get_secret("hrti", "token")
+
+        if email and (password or token):
             return {"authenticated": True, "email": email}
+        if email:
+            return {
+                "authenticated": False,
+                "email": email,
+                "error": "Lozinka ili token nisu sačuvani u keyringu.",
+            }
         return {"authenticated": False, "email": "", "error": "No credentials stored"}
 
     @staticmethod
@@ -133,13 +143,13 @@ class HrtiAdapter:
 
     @staticmethod
     def make_download_cmd(ref_id: str, title: str = "", workers: int = 16) -> List[str]:
-        cmd = python_module_cmd(HRTI_DOWNLOADER, "--ref-id", ref_id)
-        if title:
-            cmd += ["--title", title]
-        cmd += ["-o", config.get_output_dir()]
-        wvd_path = config.check_binaries_status().get("device_wvd", {}).get("path", "")
-        if wvd_path and os.path.exists(wvd_path):
-            cmd += ["-d", wvd_path]
-        if workers and workers != 16:
-            cmd += ["-w", str(workers)]
-        return cmd
+        return build_job(
+            "hrti",
+            "download",
+            {
+                "ref_id": ref_id,
+                "title": title,
+                "workers": workers,
+                "output_dir": config.get_output_dir(),
+            },
+        )

@@ -31,6 +31,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests that require network access",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -69,3 +69,19 @@ export async function apiFetch(
   const headers = buildApiHeaders(init?.headers);
   return fetch(resolveApiUrl(path), { ...init, headers });
 }
+
+/** Parse FastAPI error detail from a failed response. */
+export async function parseApiError(res: Response, fallback = "Greška na serveru"): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data?.detail === "string") return data.detail;
+    if (Array.isArray(data?.detail)) {
+      return data.detail.map((d: { msg?: string }) => d.msg || String(d)).join("; ");
+    }
+    if (typeof data?.message === "string") return data.message;
+    if (typeof data?.error === "string") return data.error;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}

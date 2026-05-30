@@ -8,7 +8,12 @@ from backend.config import config
 from backend.jobs.inprocess import LogFn, capture_job_output
 
 
-def run_sniffer_job(action: str, params: Dict[str, Any], log_fn: LogFn) -> bool:
+def run_sniffer_job(
+    action: str,
+    params: Dict[str, Any],
+    log_fn: LogFn,
+    cancel_event=None,
+) -> bool:
     if action != "direct":
         log_fn(f"ERROR Nepoznata sniffer akcija: {action}")
         return False

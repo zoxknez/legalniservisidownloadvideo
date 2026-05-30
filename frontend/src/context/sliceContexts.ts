@@ -1,0 +1,44 @@
+import { createSliceContext } from "./createSliceContext";
+import type { AppShellSlice } from "./appStore";
+import type { AppConfigSlice } from "../hooks/domains/useAppConfig";
+import type { DownloadQueueSlice } from "../hooks/domains/useDownloadQueue";
+import type { EonSlice } from "../hooks/domains/useEon";
+import type { HboSlice } from "../hooks/domains/useHbo";
+import type { HrtiSlice } from "../hooks/domains/useHrti";
+import type { RtsSlice } from "../hooks/domains/useRts";
+import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
+import type { SnifferSlice } from "../hooks/domains/useSniffer";
+import type { VoyoSlice } from "../hooks/domains/useVoyo";
+
+const shell = createSliceContext<AppShellSlice>("AppShell");
+const queue = createSliceContext<DownloadQueueSlice>("DownloadQueue");
+const config = createSliceContext<AppConfigSlice>("AppConfig");
+const voyo = createSliceContext<VoyoSlice>("Voyo");
+const hrti = createSliceContext<HrtiSlice>("Hrti");
+const eon = createSliceContext<EonSlice>("Eon");
+const rts = createSliceContext<RtsSlice>("Rts");
+const hbo = createSliceContext<HboSlice>("Hbo");
+const smart = createSliceContext<SmartDashboardSlice>("SmartDashboard");
+const sniffer = createSliceContext<SnifferSlice>("Sniffer");
+
+export const AppShellSliceProvider = shell.Provider;
+export const DownloadQueueSliceProvider = queue.Provider;
+export const AppConfigSliceProvider = config.Provider;
+export const VoyoSliceProvider = voyo.Provider;
+export const HrtiSliceProvider = hrti.Provider;
+export const EonSliceProvider = eon.Provider;
+export const RtsSliceProvider = rts.Provider;
+export const HboSliceProvider = hbo.Provider;
+export const SmartDashboardSliceProvider = smart.Provider;
+export const SnifferSliceProvider = sniffer.Provider;
+
+export const useAppShellSlice = shell.useSlice;
+export const useDownloadQueueSlice = queue.useSlice;
+export const useAppConfigSlice = config.useSlice;
+export const useVoyoSlice = voyo.useSlice;
+export const useHrtiSlice = hrti.useSlice;
+export const useEonSlice = eon.useSlice;
+export const useRtsSlice = rts.useSlice;
+export const useHboSlice = hbo.useSlice;
+export const useSmartDashboardSlice = smart.useSlice;
+export const useSnifferSlice = sniffer.useSlice;

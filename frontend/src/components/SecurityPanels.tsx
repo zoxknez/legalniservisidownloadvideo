@@ -9,7 +9,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { apiFetch } from "../lib/api";
-import { SESSION_CONSOLE_SCRIPTS } from "../lib/sessionConsoleScripts";
+import { buildSessionConsoleScripts } from "../lib/sessionConsoleScripts";
 
 export interface CredentialFieldStatus {
   configured: boolean;
@@ -306,7 +306,7 @@ export function WvdInstallerPanel({
 }
 
 export function SessionConsoleScriptHint({ service }: { service: string }) {
-  const script = SESSION_CONSOLE_SCRIPTS[service];
+  const script = buildSessionConsoleScripts()[service];
   if (!script) return null;
 
   const copyCode = () => {

@@ -8,7 +8,7 @@ import tempfile
 import logging
 from ctypes import wintypes
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from Crypto.Cipher import AES
 
 logger = logging.getLogger("BrowserCookies")
@@ -91,11 +91,12 @@ def _decrypt_cookie_value(encrypted_value: bytes, key: bytes) -> str:
         logger.debug(f"Failed to decrypt cookie value: {e}")
         return ""
 
-def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> List[Dict[str, str]]:
+def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> Tuple[List[Dict[str, str]], bool]:
     """Query and decrypt cookies from a specific Chromium database file."""
     cookies = []
+    browser_locked = False
     if not db_path.exists():
-        return cookies
+        return cookies, browser_locked
 
     # Copy database to temporary file to avoid locking issues when browser is open
     temp_dir = tempfile.gettempdir()
@@ -133,8 +134,22 @@ def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> L
             })
             
         conn.close()
+    except PermissionError:
+        browser_locked = True
+        logger.warning(
+            "Cookies baza je zaključana (%s) — zatvorite Chrome/Edge/Brave pa pokušajte ponovo.",
+            db_path,
+        )
     except Exception as e:
-        logger.error(f"Error querying SQLite database {db_path}: {e}")
+        err = str(e).lower()
+        if "permission denied" in err or "being used by another process" in err:
+            browser_locked = True
+            logger.warning(
+                "Cookies baza je zaključana (%s) — zatvorite pretraživač pa pokušajte ponovo.",
+                db_path,
+            )
+        else:
+            logger.error(f"Error querying SQLite database {db_path}: {e}")
     finally:
         if temp_db_path.exists():
             try:
@@ -142,14 +157,14 @@ def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> L
             except Exception:
                 pass
                 
-    return cookies
+    return cookies, browser_locked
 
 
-def get_browser_cookies(domains: List[str]) -> Dict[str, List[Dict[str, str]]]:
+def get_browser_cookies(domains: List[str]) -> Tuple[Dict[str, List[Dict[str, str]]], bool]:
     """
     Search all chromium installations and user profiles for specific domain cookies.
     Returns:
-        Dict mapping service domain -> list of cookie dicts {"name": ..., "value": ...}
+        (results dict, browser_locked flag)
     """
     appdata = Path(os.environ.get('LOCALAPPDATA', ''))
     
@@ -161,6 +176,7 @@ def get_browser_cookies(domains: List[str]) -> Dict[str, List[Dict[str, str]]]:
     }
     
     results = {d: [] for d in domains}
+    browser_locked = False
     
     for browser_name, user_data_path in browsers.items():
         if not user_data_path.exists():
@@ -189,7 +205,9 @@ def get_browser_cookies(domains: List[str]) -> Dict[str, List[Dict[str, str]]]:
             for cookie_path in cookie_paths:
                 if cookie_path.exists():
                     logger.debug(f"Found cookies db at: {cookie_path}")
-                    extracted = _extract_cookies_from_db(cookie_path, key, domains)
+                    extracted, locked = _extract_cookies_from_db(cookie_path, key, domains)
+                    if locked:
+                        browser_locked = True
                     
                     # Group by target domains
                     for cookie in extracted:
@@ -206,9 +224,9 @@ def get_browser_cookies(domains: List[str]) -> Dict[str, List[Dict[str, str]]]:
                                     # Update with fresh value
                                     existing[0]["value"] = cookie["value"]
                                     
-    return results
+    return results, browser_locked
 
-def sync_all_supported_services() -> Dict[str, bool]:
+def sync_all_supported_services() -> Dict[str, Any]:
     """
     Grabs session cookies for premium video services and automatically syncs them
     into local configuration files (~/.rtsplaneta/config.json, ~/.voyo/config.json, etc.)
@@ -216,7 +234,7 @@ def sync_all_supported_services() -> Dict[str, bool]:
     targets = ["rtsplaneta.rs", "eon.tv", "voyo.rs", "hrti.hrt.hr"]
     logger.info("Initializing Browser Auto-Sync sequence...")
     
-    extracted = get_browser_cookies(targets)
+    extracted, browser_locked = get_browser_cookies(targets)
     sync_report = {t: False for t in targets}
     
     # 1. RTS Planeta
@@ -286,7 +304,7 @@ def sync_all_supported_services() -> Dict[str, bool]:
             except Exception as e:
                 logger.error(f"Failed to store HRTi token: {e}")
 
-    return sync_report
+    return {"services": sync_report, "browser_locked": browser_locked}
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
