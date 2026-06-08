@@ -19,10 +19,13 @@ cat_struct.json
 backend/static/assets/
 backend/static/index.html
 
-# Widevine CDM (user-provided; install via Settings or binaries/)
+# Widevine CDM & binaries (user-provided or downloaded; install via Settings or binaries/)
 device.wvd
 **/device.wvd
 *.wvd
+binaries/*.exe
+binaries/*.zip
+binaries/*.7z
 
 # EON local config (templates: eon_*.example.json stay in repo)
 eon_api.json

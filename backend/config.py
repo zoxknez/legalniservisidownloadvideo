@@ -124,7 +124,17 @@ class AppConfig:
             self.save()
 
     def get_binary_path(self, binary_name: str) -> str:
-        return self.data["binaries"].get(binary_name, binary_name)
+        configured = self.data["binaries"].get(binary_name, binary_name)
+        if shutil.which(configured):
+            return configured
+        ext = ".exe" if os.name == "nt" else ""
+        local_path = PROJECT_ROOT / "binaries" / f"{binary_name}{ext}"
+        if local_path.exists():
+            return str(local_path.resolve())
+        local_configured = PROJECT_ROOT / "binaries" / f"{configured}{ext}"
+        if local_configured.exists():
+            return str(local_configured.resolve())
+        return configured
 
     def get_output_dir(self) -> str:
         d = self.data.get("output_dir")
@@ -205,23 +215,26 @@ class AppConfig:
                 found = True
                 resolved_path = shutil.which(path)
             else:
+                # Local binaries fallback
+                ext = ".exe" if os.name == "nt" else ""
+                windows_hints = [
+                    str(PROJECT_ROOT / "binaries" / f"{name}{ext}"),
+                    str(PROJECT_ROOT / "binaries" / f"{path}{ext}"),
+                ]
+                
                 # Common Windows directories
-                windows_hints = []
                 if name == "mkvmerge":
-                    windows_hints = [
+                    windows_hints.extend([
                         r"C:\Program Files\MKVToolNix\mkvmerge.exe",
                         r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe"
-                    ]
+                    ])
                 elif name == "mp4decrypt":
-                    windows_hints = [
-                        str(PROJECT_ROOT / "binaries" / "mp4decrypt.exe"),
-                        str(PROJECT_ROOT / "mp4decrypt.exe")
-                    ]
+                    windows_hints.append(str(PROJECT_ROOT / "mp4decrypt.exe"))
 
                 for hint in windows_hints:
                     if Path(hint).exists():
                         found = True
-                        resolved_path = hint
+                        resolved_path = str(Path(hint).resolve())
                         break
             
             status[name] = {"found": found, "path": resolved_path}
