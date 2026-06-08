@@ -31,9 +31,6 @@ export function AboutTab() {
 
         <div>
           <h3 className="font-extrabold text-lg text-white m-0 tracking-wide">o0o0o0o</h3>
-          <span className="text-[10px] font-black tracking-wider text-pink-400 uppercase bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20 mt-1 inline-block">
-            Glavni Programer
-          </span>
         </div>
 
         <div className="w-full border-t border-white/[0.04] pt-4 mt-2">

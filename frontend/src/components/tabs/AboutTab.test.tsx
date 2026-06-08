@@ -7,6 +7,5 @@ describe("AboutTab", () => {
 
     expect(screen.getByRole("heading", { name: /O Aplikaciji/i })).toBeInTheDocument();
     expect(screen.getByText("o0o0o0o")).toBeInTheDocument();
-    expect(screen.getByText(/Glavni Programer/i)).toBeInTheDocument();
   });
 });
