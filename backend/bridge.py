@@ -11,7 +11,7 @@ from backend.config import PROJECT_ROOT
 logger = logging.getLogger(__name__)
 
 USERSCRIPT_PATH = PROJECT_ROOT / "userscripts" / "videodownload-bridge.user.js"
-DEFAULT_BACKEND = "http://127.0.0.1:8000"
+DEFAULT_BACKEND = "http://127.0.0.1:8200"
 
 
 def get_backend_url() -> str:

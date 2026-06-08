@@ -14,6 +14,7 @@ describe("useVoyo", () => {
 
   it("loads series data when search succeeds", async () => {
     const series = {
+      success: true,
       id: 42,
       title: "Test Series",
       episodes: [{ id: 1, title: "Ep 1", number: 1 }],
@@ -39,7 +40,7 @@ describe("useVoyo", () => {
       expect(result.current.voyoSeriesData).toEqual(series);
     });
     expect(result.current.selectedVoyoEpisodes).toEqual([1]);
-    expect(apiFetch).toHaveBeenCalledWith("/api/voyo/series/12345");
+    expect(apiFetch).toHaveBeenCalledWith("/api/voyo/resolve?target=12345");
   });
 
   it("shows toast when search fails", async () => {

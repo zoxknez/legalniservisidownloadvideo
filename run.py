@@ -62,7 +62,7 @@ def ensure_frontend_built(project_root: Path) -> None:
 
 def main():
     host = "127.0.0.1"
-    port = 8000
+    port = 8200
     project_root = Path(__file__).resolve().parent
 
     ensure_frontend_built(project_root)

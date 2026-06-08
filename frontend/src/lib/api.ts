@@ -6,8 +6,8 @@ export function getApiHost(): string {
   const { hostname, port } = window.location;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     if (port === "5173") return ""; // Vite dev proxy
-    if (port === "8000") return "";
-    return "http://127.0.0.1:8000";
+    if (port === "8200") return "";
+    return `http://127.0.0.1:${port || "8200"}`;
   }
   return "";
 }
@@ -55,7 +55,7 @@ export function buildWebSocketUrl(path = "/ws"): string {
     window.location.hostname === "127.0.0.1"
       ? window.location.port === "5173"
         ? "localhost:5173"
-        : "localhost:8000"
+        : `localhost:${window.location.port || "8200"}`
       : window.location.host;
   const key = getStoredApiKey();
   const qs = key ? `?api_key=${encodeURIComponent(key)}` : "";

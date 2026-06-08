@@ -26,7 +26,7 @@ def test_bridge_userscript_served():
     r = client.get("/api/bridge/userscript.js")
     assert r.status_code == 200
     assert "UserScript" in r.text
-    assert "127.0.0.1:8000" in r.text
+    assert "127.0.0.1:8200" in r.text
     assert "__BACKEND_URL__" not in r.text
 
 
