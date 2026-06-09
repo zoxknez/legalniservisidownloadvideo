@@ -36,3 +36,35 @@ def test_hrti_auth_true_when_keyring_has_password():
         status = HrtiAdapter.get_auth_status()
         assert status["authenticated"] is True
         assert status["email"] == "user@hrti.hr"
+
+
+def test_hrti_register_device_retry_on_already_used(tmp_path):
+    from backend.core.services.hrti.hrti_auth import HRTIAuth
+    from unittest.mock import MagicMock
+
+    auth = HRTIAuth(config_path=str(tmp_path / "config.json"))
+    auth.state.device_id = "initial-device-id"
+    auth.state.token = "test-token"
+    auth.state.ip_address = "127.0.0.1"
+
+    # Mock the session.post method
+    mock_responses = [
+        MagicMock(
+            status_code=200,
+            json=lambda: {"ErrorCode": 1, "ErrorDescription": "Device is already used on another customer!"}
+        ),
+        MagicMock(
+            status_code=200,
+            json=lambda: {"ErrorCode": 0, "Result": {"ReferenceId": "mock-ref-id"}}
+        )
+    ]
+
+    with patch.object(auth.session, "post", side_effect=mock_responses) as mock_post:
+        auth._register_device()
+        
+        # Verify post was called twice
+        assert mock_post.call_count == 2
+        # Verify the device ID was changed (since it was initial-device-id before)
+        assert auth.state.device_id != "initial-device-id"
+        assert auth.state.aviion_ref_id == "mock-ref-id"
+

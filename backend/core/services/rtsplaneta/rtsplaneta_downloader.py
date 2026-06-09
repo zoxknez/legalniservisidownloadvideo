@@ -834,7 +834,20 @@ class RTSPlanetaDownloader:
         logger.info(f"Video ID: {video_id}")
 
         video_info = self.get_video_info(video_id)
-        title = video_info.get('video', [{}])[0].get('title', {}).get('title_long', f'video_{video_id}')
+        video_list = video_info.get('video', [])
+        title = f'video_{video_id}'
+        if video_list:
+            video = video_list[0]
+            raw_title = video.get("title", "")
+            if isinstance(raw_title, dict):
+                title = (
+                    raw_title.get("title_long")
+                    or raw_title.get("title_medium")
+                    or raw_title.get("original_title")
+                    or f'video_{video_id}'
+                )
+            elif isinstance(raw_title, str) and raw_title:
+                title = raw_title
         logger.info(f"Title: {title}")
 
         mpd_info = self.get_mpd_info(video_id)

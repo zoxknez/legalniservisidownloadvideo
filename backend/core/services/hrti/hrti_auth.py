@@ -235,7 +235,7 @@ class HRTIAuth:
 
         return result["Customer"]
 
-    def _register_device(self):
+    def _register_device(self, retry_on_used_device: bool = True):
         """
         Register device with aviion backend.
         Uses HRTI Token as Authorization: Client.
@@ -264,7 +264,13 @@ class HRTIAuth:
         resp.raise_for_status()
         data = resp.json()
         if data.get("ErrorCode", -1) != 0:
-            raise Exception(f"RegisterDevice failed: {data.get('ErrorDescription')}")
+            error_desc = data.get("ErrorDescription", "")
+            if retry_on_used_device and "already used on another customer" in error_desc.lower():
+                logger.warning("Device ID already registered to another customer. Generating a new one and retrying...")
+                self.state.device_id = str(uuid.uuid4())
+                self._save_config()
+                return self._register_device(retry_on_used_device=False)
+            raise Exception(f"RegisterDevice failed: {error_desc}")
         self.state.aviion_ref_id = data["Result"].get("ReferenceId", "")
         logger.info(f"Device registered. ReferenceId: {self.state.aviion_ref_id}")
 
