@@ -18,6 +18,7 @@ winportabl/*.wvd
 winportabl/binaries/*.exe
 winportabl/binaries/*.zip
 winportabl/binaries/*.7z
+/VideoDownloadServisi-Portable.zip
 
 # Scratch / agent artifacts
 scratch/
