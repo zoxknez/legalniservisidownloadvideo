@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -130,7 +131,52 @@ export function SettingsTab() {
     startHboLogin,
     hboSubmitting,
     hboAuth,
+    ytdlpUpdating,
+    handleUpdateYtdlp,
+    ytdlpNameTemplate,
+    setYtdlpNameTemplate,
+    maxConcurrentDownloads,
+    setMaxConcurrentDownloads,
   } = useSettingsTab();
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    () => localStorage.getItem("notifications_enabled") === "true"
+  );
+  const [notificationPermission, setNotificationPermission] = useState(
+    () => typeof window !== "undefined" && "Notification" in window ? Notification.permission : "default"
+  );
+
+  const handleToggleNotifications = async () => {
+    if (!("Notification" in window)) {
+      showToast("Vaš pretraživač ne podržava desktop obaveštenja.", "error");
+      return;
+    }
+
+    if (notificationsEnabled) {
+      localStorage.setItem("notifications_enabled", "false");
+      setNotificationsEnabled(false);
+      showToast("Desktop obaveštenja onemogućena.", "info");
+    } else {
+      let permission = Notification.permission;
+      if (permission === "default") {
+        permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+      }
+
+      if (permission === "granted") {
+        localStorage.setItem("notifications_enabled", "true");
+        setNotificationsEnabled(true);
+        showToast("Desktop obaveštenja uspešno omogućena!", "success");
+        new Notification("Obaveštenja aktivirana", {
+          body: "Sada ćete dobijati obaveštenja o završenim preuzetim fajlovima i transkodovanju.",
+        });
+      } else {
+        localStorage.setItem("notifications_enabled", "false");
+        setNotificationsEnabled(false);
+        showToast("Dozvola za obaveštenja je odbijena u brauzeru.", "error");
+      }
+    }
+  };
   return (
 <div key="settings" className="tab-content tab-content-settings">
     <div className="tab-page-header tab-header-settings mb-8">
@@ -317,6 +363,67 @@ export function SettingsTab() {
           <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2 border-t border-white/[0.04] pt-4">
+          <div>
+            <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">Šablon Imena Fajla (yt-dlp)</label>
+            <input
+              type="text"
+              value={ytdlpNameTemplate}
+              onChange={(e) => setYtdlpNameTemplate(e.target.value)}
+              placeholder="%(title)s.%(ext)s"
+              className="input-premium font-mono text-xs w-full"
+              style={cssVars({"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"})}
+            />
+            <p className="text-[10px] text-text-muted mt-1.5 leading-relaxed">
+              * Određuje format imena fajla za yt-dlp. Podržani placeholderi: 
+              <br />
+              <code className="font-mono bg-white/5 px-1 rounded">%(title)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(uploader)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(id)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(ext)s</code>
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">Maksimalan Broj Istovremenih Preuzimanja</label>
+            <select
+              value={maxConcurrentDownloads}
+              onChange={(e) => setMaxConcurrentDownloads(parseInt(e.target.value, 10))}
+              className="input-premium font-semibold text-xs py-2 px-3 rounded-lg bg-black/45 text-white border border-white/10 outline-none w-full focus:border-indigo-500 focus:shadow-[0_0_10px_rgba(99,102,241,0.25)] transition-all"
+            >
+              {[1, 2, 3, 4, 5].map((num) => (
+                <option key={num} value={num}>
+                  {num} {num === 1 ? "aktivno preuzimanje" : num < 5 ? "aktivna preuzimanja" : "aktivnih preuzimanja"}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-text-muted mt-1.5">
+              * Globalni limit aktivnih preuzimanja u redu. Ostala preuzimanja će čekati slobodan slot.
+            </p>
+          </div>
+        </div>
+
+        <div className="border-t border-white/[0.04] pt-4">
+          <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">Desktop i Browser Notifikacije</label>
+          <div className="flex items-center gap-4 flex-wrap">
+            <button
+              type="button"
+              onClick={handleToggleNotifications}
+              className={`py-2 px-4 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${
+                notificationsEnabled && notificationPermission === "granted"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                  : "bg-white/5 text-text-secondary border-white/10 hover:bg-white/10"
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${notificationsEnabled && notificationPermission === "granted" ? "bg-emerald-400 animate-pulse" : "bg-text-muted"}`} />
+              {notificationsEnabled && notificationPermission === "granted" ? "Notifikacije: Omogućene" : "Omogući desktop notifikacije"}
+            </button>
+            <span className="text-[10px] text-text-muted">
+              Status dozvole u brauzeru: <strong className="text-white">{notificationPermission.toUpperCase()}</strong>
+            </span>
+          </div>
+          <p className="text-[10px] text-text-muted mt-1.5">
+            * Slanje sistemskih obaveštenja kada se preuzimanje ili hardverska kompresija završi ili ne uspe.
+          </p>
+        </div>
+
         <div>
           <label>API ključ (LAN / udaljeni pristup)</label>
           <input
@@ -481,6 +588,29 @@ export function SettingsTab() {
                 showToast={showToast}
               />
             );})}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2.5 bg-black/20 p-4 rounded-xl border border-white/[0.04] max-w-md">
+            <h5 className="font-bold text-xs text-indigo-300 uppercase tracking-wider">Ažuriranje zavisnosti alata</h5>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-white">yt-dlp biblioteka</span>
+                <span className="text-[10px] text-text-secondary">Preuzmite najnovije popravke direktno sa pip-a.</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdateYtdlp}
+                disabled={ytdlpUpdating}
+                className="py-1.5 px-4 rounded-lg text-[10px] font-black tracking-wider uppercase bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {ytdlpUpdating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                )}
+                {ytdlpUpdating ? "Ažuriranje..." : "Ažuriraj yt-dlp"}
+              </button>
+            </div>
           </div>
         </div>
 

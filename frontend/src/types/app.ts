@@ -58,6 +58,8 @@ export interface AppStatus {
   binaries: Record<string, BinaryStatus>;
   output_dir: string;
   transcode_mode?: string;
+  ytdlp_name_template?: string;
+  max_concurrent_downloads?: number;
   browser_sync_supported?: boolean;
   server?: {
     api_key_configured?: boolean;

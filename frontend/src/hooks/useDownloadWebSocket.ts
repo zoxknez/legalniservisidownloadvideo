@@ -43,6 +43,7 @@ export function useDownloadWebSocket({
 }: UseDownloadWebSocketOptions): void {
   const showToastRef = useRef(showToast);
   const fetchStatusRef = useRef(fetchStatus);
+  const prevQueueRef = useRef<DownloadTask[]>([]);
 
   useEffect(() => {
     showToastRef.current = showToast;
@@ -69,6 +70,7 @@ export function useDownloadWebSocket({
         if (res.ok) {
           const queue = (await res.json()) as DownloadTask[];
           setDownloads(queue);
+          prevQueueRef.current = queue;
         }
       } catch {
         /* best effort */
@@ -113,6 +115,27 @@ export function useDownloadWebSocket({
             const updated = queue.find((d) => d.id === current.id);
             if (updated) setSelectedTask(updated);
           }
+
+          // Trigger browser notification on completed/failed downloads
+          const notificationsEnabled = localStorage.getItem("notifications_enabled") === "true";
+          if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+            for (const task of queue) {
+              const prev = prevQueueRef.current.find((t) => t.id === task.id);
+              if (prev && prev.status !== task.status) {
+                if (task.status === "finished") {
+                  new Notification("Preuzimanje završeno", {
+                    body: `Uspešno preuzet fajl:\n${task.title}`,
+                  });
+                } else if (task.status === "failed") {
+                  new Notification("Preuzimanje neuspešno", {
+                    body: `Greška pri preuzimanju:\n${task.title}`,
+                  });
+                }
+              }
+            }
+          }
+          prevQueueRef.current = queue;
+
         } else if (payload.type === "sniffer_update") {
           const { service, type, url, headers, title } = payload.data as SnifferCapture;
           setSniffedItems((prev) => {
@@ -175,8 +198,20 @@ export function useDownloadWebSocket({
             showToastRef.current(`🎬 Kompresija u toku: ${title || detail}`, "info");
           } else if (status === "finished") {
             showToastRef.current(`✓ Kompresija završena: ${title}`, "success");
+            const notificationsEnabled = localStorage.getItem("notifications_enabled") === "true";
+            if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+              new Notification("Kompresija završena", {
+                body: `Video uspešno komprimovan:\n${title}`,
+              });
+            }
           } else if (status === "failed") {
             showToastRef.current(`Kompresija nije uspela: ${title}`, "error");
+            const notificationsEnabled = localStorage.getItem("notifications_enabled") === "true";
+            if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+              new Notification("Kompresija neuspešna", {
+                body: `Greška pri kompresiji:\n${title}`,
+              });
+            }
           }
         } else if (payload.type === "session_imported") {
           const { services, message } = (payload.data || {}) as {

@@ -30,6 +30,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [ytdlpEmbedThumbnail, setYtdlpEmbedThumbnail] = useState(false);
   const [ytdlpEmbedMetadata, setYtdlpEmbedMetadata] = useState(false);
   const [ytdlpLimitRate, setYtdlpLimitRate] = useState("");
+  const [ytdlpHardsub, setYtdlpHardsub] = useState(false);
   
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -211,6 +212,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             subs: smartSubs,
             audio_only: smartAudioOnly,
             use_aria2: smartUseAria2,
+            hardsub: ytdlpHardsub,
             cookies_browser: ytdlpCookiesBrowser || null,
             impersonate_browser: ytdlpImpersonate,
             proxy: ytdlpProxy || null,
@@ -232,6 +234,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         setSmartSelectedEpisodes([]);
         setSmartAudioOnly(false);
         setSmartUseAria2(false);
+        setYtdlpHardsub(false);
         setYtdlpCookiesBrowser("");
         setYtdlpImpersonate(false);
         setYtdlpProxy("");
@@ -262,6 +265,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     smartSubs,
     smartUrl,
     smartUseAria2,
+    ytdlpHardsub,
     ytdlpCookiesBrowser,
     ytdlpImpersonate,
     ytdlpProxy,
@@ -296,6 +300,8 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setSmartAudioOnly,
     smartUseAria2,
     setSmartUseAria2,
+    ytdlpHardsub,
+    setYtdlpHardsub,
     ytdlpCookiesBrowser,
     setYtdlpCookiesBrowser,
     ytdlpImpersonate,

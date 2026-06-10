@@ -103,6 +103,8 @@ async def get_system_status():
         "binaries": binaries,
         "output_dir": config.get_output_dir(),
         "transcode_mode": config.get_transcode_mode(),
+        "ytdlp_name_template": config.get_ytdlp_name_template(),
+        "max_concurrent_downloads": config.get_max_concurrent_downloads(),
         "browser_sync_supported": browser_sync_supported(),
         "server": {
             "api_key_configured": bool(get_api_key()),
@@ -128,6 +130,8 @@ class ConfigUpdate(BaseModel):
     transcode_mode: str = None
     binaries: Dict[str, str] = None
     sniffer: Optional[Dict[str, Any]] = None
+    ytdlp_name_template: Optional[str] = None
+    max_concurrent_downloads: Optional[int] = None
 
 
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
@@ -152,6 +156,10 @@ def update_config(data: ConfigUpdate):
                 detail=f"Nepoznat transcode_mode '{mode}'. Dozvoljeno: off, hevc, av1.",
             )
         config.set_transcode_mode(mode)
+    if data.ytdlp_name_template is not None:
+        config.set_ytdlp_name_template(data.ytdlp_name_template)
+    if data.max_concurrent_downloads is not None:
+        config.set_max_concurrent_downloads(data.max_concurrent_downloads)
     wvd_updated = False
     if data.binaries:
         for name, path in data.binaries.items():
@@ -172,6 +180,8 @@ def update_config(data: ConfigUpdate):
         "success": True,
         "output_dir": config.get_output_dir(),
         "transcode_mode": config.get_transcode_mode(),
+        "ytdlp_name_template": config.get_ytdlp_name_template(),
+        "max_concurrent_downloads": config.get_max_concurrent_downloads(),
         "binaries": config.data["binaries"],
         "sniffer": config.data.get("sniffer", {}),
     }
@@ -352,3 +362,36 @@ def open_output_folder():
         raise HTTPException(status_code=500, detail=f"Cannot open folder: {exc}") from exc
 
     return {"success": True, "path": str(path)}
+
+
+@router.post("/api/system/update-ytdlp")
+async def update_ytdlp():
+    import sys
+    import subprocess
+
+    logger.info("Starting yt-dlp update process...")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", "-U", "yt-dlp",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+        stdout, _ = await proc.communicate()
+        output = stdout.decode("utf-8", errors="ignore")
+        success = (proc.returncode == 0)
+
+        if success:
+            logger.info("yt-dlp updated successfully.")
+            message = "yt-dlp je uspešno ažuriran na najnoviju verziju."
+        else:
+            logger.error(f"yt-dlp update failed: {output}")
+            message = "Ažuriranje yt-dlp-a nije uspelo."
+
+        return {
+            "success": success,
+            "message": message,
+            "output": output
+        }
+    except Exception as e:
+        logger.error(f"Error during yt-dlp update: {e}")
+        raise HTTPException(status_code=500, detail=f"Greška tokom ažuriranja: {str(e)}")

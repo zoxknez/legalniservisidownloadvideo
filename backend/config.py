@@ -18,6 +18,8 @@ DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / "output")
 DEFAULT_CONFIG = {
     "output_dir": DEFAULT_OUTPUT_DIR,
     "transcode_mode": "off",
+    "ytdlp_name_template": "%(title)s.%(ext)s",
+    "max_concurrent_downloads": 2,
     "server": {
         "api_key": ""
     },
@@ -153,6 +155,23 @@ class AppConfig:
 
     def set_transcode_mode(self, mode: str):
         self.data["transcode_mode"] = mode
+        self.save()
+
+    def get_ytdlp_name_template(self) -> str:
+        return self.data.get("ytdlp_name_template", "%(title)s.%(ext)s")
+
+    def set_ytdlp_name_template(self, tmpl: str):
+        self.data["ytdlp_name_template"] = tmpl
+        self.save()
+
+    def get_max_concurrent_downloads(self) -> int:
+        try:
+            return int(self.data.get("max_concurrent_downloads", 2))
+        except (ValueError, TypeError):
+            return 2
+
+    def set_max_concurrent_downloads(self, limit: int):
+        self.data["max_concurrent_downloads"] = int(limit)
         self.save()
 
     def set_credential(self, service: str, key: str, value: str):

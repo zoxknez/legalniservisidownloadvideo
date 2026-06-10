@@ -28,6 +28,9 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
   const [importSessionData, setImportSessionData] = useState("");
   const [importLoading, setImportLoading] = useState(false);
   const [autoSyncLoading, setAutoSyncLoading] = useState(false);
+  const [ytdlpUpdating, setYtdlpUpdating] = useState(false);
+  const [ytdlpNameTemplate, setYtdlpNameTemplate] = useState("%(title)s.%(ext)s");
+  const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
 
   const deviceWvdInfo = status?.binaries?.device_wvd;
 
@@ -47,6 +50,12 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         setOutputDir(data.output_dir);
         if (data.transcode_mode) {
           setTranscodeMode(data.transcode_mode);
+        }
+        if (data.ytdlp_name_template) {
+          setYtdlpNameTemplate(data.ytdlp_name_template);
+        }
+        if (data.max_concurrent_downloads) {
+          setMaxConcurrentDownloads(data.max_concurrent_downloads);
         }
         const paths: Record<string, string> = {};
         for (const [name, info] of Object.entries(data.binaries)) {
@@ -147,6 +156,8 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
           output_dir: outputDir,
           transcode_mode: transcodeMode,
           binaries: binariesPaths,
+          ytdlp_name_template: ytdlpNameTemplate,
+          max_concurrent_downloads: maxConcurrentDownloads,
         }),
       });
       if (res.ok) {
@@ -161,7 +172,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
-  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, outputDir, showToast, transcodeMode]);
+  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, outputDir, showToast, transcodeMode, ytdlpNameTemplate, maxConcurrentDownloads]);
 
   const handleSaveDeviceWvdPath = useCallback(async () => {
     try {
@@ -308,6 +319,25 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     }
   }, [apiKeyInput, fetchStatus, showToast]);
 
+  const handleUpdateYtdlp = useCallback(async () => {
+    setYtdlpUpdating(true);
+    showToast("Ažuriranje yt-dlp alata je započeto...", "info");
+    try {
+      const res = await apiFetch(`/api/system/update-ytdlp`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(data.message || "yt-dlp je uspešno ažuriran!", "success");
+      } else {
+        showToast(data.message || "Ažuriranje yt-dlp-a nije uspelo.", "error");
+      }
+      await fetchStatus();
+    } catch (e: unknown) {
+      showToast(errorMessage(e, "Greška na serveru"), "error");
+    } finally {
+      setYtdlpUpdating(false);
+    }
+  }, [fetchStatus, showToast]);
+
   const [guardedSaveConfig, savingConfig] = useActionGuard(handleSaveConfig);
   const [guardedSubmitLogin, submittingLogin] = useActionGuard(submitLogin);
 
@@ -334,6 +364,12 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     setImportLoading,
     autoSyncLoading,
     setAutoSyncLoading,
+    ytdlpUpdating,
+    handleUpdateYtdlp,
+    ytdlpNameTemplate,
+    setYtdlpNameTemplate,
+    maxConcurrentDownloads,
+    setMaxConcurrentDownloads,
     deviceWvdInfo,
     fetchStatus,
     subscribeStatusLoaded,

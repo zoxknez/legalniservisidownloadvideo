@@ -157,6 +157,7 @@ class DownloadDatabase:
                     eta TEXT DEFAULT '',
                     logs TEXT DEFAULT '[]',
                     retry_count INTEGER DEFAULT 0,
+                    metadata TEXT DEFAULT '{}',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -171,6 +172,13 @@ class DownloadDatabase:
                     status TEXT DEFAULT 'scheduled'
                 )
             """)
+            
+            # Auto-migrate: Add metadata column if missing
+            try:
+                conn.execute("ALTER TABLE downloads ADD COLUMN metadata TEXT DEFAULT '{}'")
+            except sqlite3.OperationalError:
+                pass  # Already exists
+                
             conn.commit()
     
     def save_download(self, item: 'DownloadItem'):
@@ -179,12 +187,13 @@ class DownloadDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO downloads 
-                    (id, service, title, cmd, status, progress, speed, eta, logs, retry_count, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, service, title, cmd, status, progress, speed, eta, logs, retry_count, metadata, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     item.id, item.service, item.title, json.dumps(item.cmd),
                     item.status, item.progress, item.speed, item.eta,
-                    json.dumps(item.logs), item.retry_count, datetime.now().isoformat()
+                    json.dumps(item.logs), item.retry_count, json.dumps(item.metadata),
+                    datetime.now().isoformat()
                 ))
                 conn.commit()
         except Exception as e:
@@ -250,11 +259,12 @@ class DownloadDatabase:
 class DownloadItem:
     """Represents a single download task."""
     
-    def __init__(self, service: str, title: str, cmd: List[str]):
+    def __init__(self, service: str, title: str, cmd: List[str], metadata: Optional[Dict[str, Any]] = None):
         self.id = str(uuid.uuid4())
         self.service = service
         self.title = title
         self.cmd = cmd
+        self.metadata = metadata or {}
         self.status: str = DownloadStatus.PENDING
         self.progress = 0.0
         self.speed = ""
@@ -276,6 +286,7 @@ class DownloadItem:
             "eta": self.eta,
             "logs": self.logs[-200:],  # Keep last 200 lines
             "retry_count": self.retry_count,
+            "metadata": self.metadata,
             "created_at": self.created_at.isoformat()
         }
 
@@ -304,7 +315,13 @@ class DownloadQueueManager:
         try:
             downloads = self.db.load_downloads()
             for dl in downloads:
-                item = DownloadItem(dl['service'], dl['title'], json.loads(dl['cmd']))
+                metadata = {}
+                if 'metadata' in dl and dl['metadata']:
+                    try:
+                        metadata = json.loads(dl['metadata'])
+                    except Exception:
+                        pass
+                item = DownloadItem(dl['service'], dl['title'], json.loads(dl['cmd']), metadata)
                 item.id = dl['id']
                 item.status = dl['status']
                 item.progress = dl['progress']
@@ -575,7 +592,7 @@ class DownloadQueueManager:
         normalized = json.dumps([service] + [a for a in cmd if a not in SENSITIVE_CLI_FLAGS], sort_keys=False)
         return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
-    async def add_download(self, service: str, title: str, cmd: List[str]) -> str:
+    async def add_download(self, service: str, title: str, cmd: List[str], metadata: Optional[Dict[str, Any]] = None) -> str:
         """Add a new download to the queue. Rejects duplicates that are already active."""
         fingerprint = self._job_fingerprint(service, cmd)
         async with self.lock:
@@ -585,7 +602,7 @@ class DownloadQueueManager:
                         logger.info("Duplicate download rejected: %s (%s)", title, service)
                         return existing.id
 
-            item = DownloadItem(service, title, cmd)
+            item = DownloadItem(service, title, cmd, metadata)
             self.items[item.id] = item
             logger.info("Added download: %s (%s)", title, service)
             self.db.save_download(item)
@@ -692,7 +709,7 @@ class DownloadQueueManager:
 
     async def _wait_for_slot(self, item: DownloadItem) -> bool:
         """Wait until a download slot is available. Returns False if cancelled while waiting."""
-        while self.running_count >= MAX_CONCURRENT_DOWNLOADS:
+        while self.running_count >= config.get_max_concurrent_downloads():
             if item.status == DownloadStatus.CANCELLED or item.cancel_event.is_set():
                 return False
             await asyncio.sleep(0.5)
@@ -768,46 +785,7 @@ class DownloadQueueManager:
                 item.status = DownloadStatus.FINISHED
                 item.progress = 100.0
                 item.logs.append("\n[✓ Download completed successfully!]")
-
-                try:
-                    trans_mode = config.get_transcode_mode()
-                    if trans_mode and trans_mode != "off":
-                        from backend.services.transcoder import find_and_transcode_completed
-                        from backend.jobs.inprocess import get_output_dir_from_cmd
-                        output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
-                        loop = asyncio.get_running_loop()
-
-                        def on_start(path: str) -> None:
-                            item.logs.append(f"\n[Transcode started: {path}]")
-                            asyncio.run_coroutine_threadsafe(
-                                self.broadcast_transcode_update(
-                                    item.id, item.title, "started", path
-                                ),
-                                loop,
-                            )
-                            asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
-
-                        def on_complete(result: Optional[str]) -> None:
-                            status = "finished" if result else "failed"
-                            detail = result or "Transcode failed"
-                            item.logs.append(f"\n[Transcode {status}: {detail}]")
-                            asyncio.run_coroutine_threadsafe(
-                                self.broadcast_transcode_update(
-                                    item.id, item.title, status, detail
-                                ),
-                                loop,
-                            )
-                            asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
-
-                        find_and_transcode_completed(
-                            item.title,
-                            output_dir_val,
-                            trans_mode,
-                            on_start=on_start,
-                            on_complete=on_complete,
-                        )
-                except Exception as trans_err:
-                    logger.error(f"Failed to initiate automatic transcode: {trans_err}")
+                self._run_post_download_steps(item)
             else:
                 item.status = DownloadStatus.FAILED
                 item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
@@ -819,6 +797,81 @@ class DownloadQueueManager:
             self.db.save_download(item)
 
         await self.broadcast_state()
+
+    def _run_post_download_steps(self, item: DownloadItem):
+        """Runs post-download processing: first hardsub (if requested), then transcode (if enabled)."""
+        from backend.jobs.inprocess import get_output_dir_from_cmd
+        output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
+        loop = asyncio.get_running_loop()
+
+        def start_transcoding():
+            try:
+                trans_mode = config.get_transcode_mode()
+                if trans_mode and trans_mode != "off":
+                    from backend.services.transcoder import find_and_transcode_completed
+
+                    def on_transcode_start(path: str) -> None:
+                        item.logs.append(f"\n[Transcode started: {path}]")
+                        asyncio.run_coroutine_threadsafe(
+                            self.broadcast_transcode_update(
+                                item.id, item.title, "started", path
+                            ),
+                            loop,
+                        )
+                        asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+
+                    def on_transcode_complete(result: Optional[str]) -> None:
+                        status = "finished" if result else "failed"
+                        detail = result or "Transcode failed"
+                        item.logs.append(f"\n[Transcode {status}: {detail}]")
+                        asyncio.run_coroutine_threadsafe(
+                            self.broadcast_transcode_update(
+                                item.id, item.title, status, detail
+                            ),
+                            loop,
+                        )
+                        asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+
+                    find_and_transcode_completed(
+                        item.title,
+                        output_dir_val,
+                        trans_mode,
+                        on_start=on_transcode_start,
+                        on_complete=on_transcode_complete,
+                    )
+            except Exception as trans_err:
+                logger.error(f"Failed to initiate automatic transcode: {trans_err}")
+
+        if item.metadata.get("hardsub"):
+            try:
+                from backend.services.hardsub import find_and_burn_subtitles
+                binaries = config.check_binaries_status()
+                ffmpeg_path = binaries.get("ffmpeg", {}).get("path") or "ffmpeg"
+
+                def on_hardsub_start(video_path: str, subtitle_path: str) -> None:
+                    item.logs.append(f"\n[Hardsub started: burning {os.path.basename(subtitle_path)} into {os.path.basename(video_path)}]")
+                    asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+
+                def on_hardsub_complete(result: Optional[str]) -> None:
+                    if result:
+                        item.logs.append(f"\n[✓ Hardsub completed: {os.path.basename(result)}]")
+                    else:
+                        item.logs.append(f"\n[✗ Hardsub failed]")
+                    asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
+                    start_transcoding()
+
+                find_and_burn_subtitles(
+                    item.title,
+                    output_dir_val,
+                    ffmpeg_path=ffmpeg_path,
+                    on_start=on_hardsub_start,
+                    on_complete=on_hardsub_complete
+                )
+            except Exception as hardsub_err:
+                logger.error(f"Failed to initiate hardsub: {hardsub_err}")
+                start_transcoding()
+        else:
+            start_transcoding()
 
     async def _run_inprocess_job(self, item: DownloadItem) -> bool:
         """Run a Python in-process download job (Voyo, HBO Max, …)."""

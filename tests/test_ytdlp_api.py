@@ -83,3 +83,44 @@ def test_ytdlp_download_default_options(client):
         assert "--embed-thumbnail" not in cmd
         assert "--embed-metadata" not in cmd
         assert "--limit-rate" not in cmd
+
+
+def test_ytdlp_download_hardsub_and_template(client):
+    payload = {
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "subs": "en,sr",
+        "hardsub": True
+    }
+
+    with patch("backend.routes.ytdlp.config") as mock_config, \
+         patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download:
+        
+        mock_config.get_output_dir.return_value = "C:/mock_output"
+        mock_config.get_ytdlp_name_template.return_value = "%(uploader)s - %(title)s.%(ext)s"
+        mock_add_download.return_value = "ytdlp-task-hardsub"
+        
+        r = client.post(
+            "/api/ytdlp/download",
+            headers={"X-API-Key": "test-secret-key"},
+            json=payload
+        )
+        
+        assert r.status_code == 200
+        mock_add_download.assert_called_once()
+        args = mock_add_download.call_args[0]
+        
+        # Check service and title
+        assert args[0] == "ytdlp"
+        assert args[1].startswith("Univerzalni")
+        
+        # Check command
+        cmd = args[2]
+        assert "--convert-subs" in cmd
+        assert "srt" in cmd
+        
+        # Verify custom name template was used
+        assert any("%(uploader)s - %(title)s.%(ext)s" in arg for arg in cmd)
+        
+        # Verify metadata hardsub was passed as keyword argument
+        kwargs = mock_add_download.call_args.kwargs
+        assert kwargs.get("metadata") == {"hardsub": True}

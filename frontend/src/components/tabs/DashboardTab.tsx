@@ -63,6 +63,8 @@ export function DashboardTab() {
     setYtdlpEmbedMetadata,
     ytdlpLimitRate,
     setYtdlpLimitRate,
+    ytdlpHardsub,
+    setYtdlpHardsub,
   } = useSmartDashboardTab();
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -439,6 +441,26 @@ export function DashboardTab() {
                           >
                             Isključi sve prevode
                           </button>
+                        </div>
+                      </div>
+                    )}
+                    {smartData.service === "ytdlp" && (
+                      <div className="mt-3.5 flex items-center gap-2 bg-black/30 p-3 rounded-lg border border-white/[0.05]">
+                        <input
+                          id="ytdlpHardsub"
+                          type="checkbox"
+                          checked={ytdlpHardsub}
+                          disabled={!smartSubs.trim()}
+                          onChange={e => setYtdlpHardsub(e.target.checked)}
+                          className="w-4 h-4 rounded text-blue-500 bg-black/40 border-glass cursor-pointer focus:ring-blue-500"
+                        />
+                        <div className="flex flex-col">
+                          <label htmlFor="ytdlpHardsub" className="text-xs font-bold text-white cursor-pointer select-none">
+                            Zapeci prevod u video (Hardsub)
+                          </label>
+                          <span className="text-[10px] text-text-secondary">
+                            Trajno ugrađuje prevod (SRT) u sliku koristeći FFMPEG. Zahteva bar jedan izabran jezik.
+                          </span>
                         </div>
                       </div>
                     )}

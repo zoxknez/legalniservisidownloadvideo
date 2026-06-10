@@ -18,6 +18,7 @@ class YtdlpDownloadRequest(BaseModel):
     subs: str = ""
     audio_only: bool = False
     use_aria2: bool = False
+    hardsub: bool = False
     
     cookies_browser: Optional[str] = None
     impersonate_browser: bool = False
@@ -35,11 +36,17 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
 
     cmd = ["python", "-m", "yt_dlp", url, "--no-playlist"]
 
+    name_tmpl = config.get_ytdlp_name_template() or "%(title)s.%(ext)s"
     if req.audio_only:
-        output_tmpl = os.path.join(output_dir, "%(title)s.mp3")
+        if "%(ext)s" in name_tmpl:
+            name_tmpl = name_tmpl.replace("%(ext)s", "mp3")
+        else:
+            if not name_tmpl.endswith(".mp3"):
+                name_tmpl = name_tmpl + ".mp3"
+        output_tmpl = os.path.join(output_dir, name_tmpl)
         cmd.extend(["-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", output_tmpl])
     else:
-        output_tmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
+        output_tmpl = os.path.join(output_dir, name_tmpl)
         _res_match = re.search(r"(\d+)p", req.resolution)
         if _res_match:
             res_val = _res_match.group(1)
@@ -54,6 +61,8 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
 
     if req.subs:
         cmd.extend(["--write-subs", "--write-auto-subs", "--sub-langs", req.subs, "--embed-subs"])
+        if req.hardsub:
+            cmd.extend(["--convert-subs", "srt"])
     cmd.extend(["--sponsorblock-remove", "all"])
 
     if req.use_aria2:
@@ -88,5 +97,10 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
 
     domain = urlparse(url).netloc.replace("www.", "")
     title = f"Univerzalni ({domain}): {url[:40]}"
-    task_id = await queue_manager.add_download("ytdlp", title, cmd)
+    task_id = await queue_manager.add_download(
+        "ytdlp",
+        title,
+        cmd,
+        metadata={"hardsub": True} if req.hardsub else None
+    )
     return {"success": True, "task_id": task_id}
