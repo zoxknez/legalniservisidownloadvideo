@@ -423,6 +423,8 @@ label {
 .min-h-96 { min-height: 24rem !important; }
 .max-w-md { max-width: 28rem !important; }
 .max-w-4xl { max-width: 56rem !important; }
+.max-w-5xl { max-width: 64rem !important; }
+.mx-auto { margin-left: auto !important; margin-right: auto !important; }
 
 /* Paddings & Margins */
 .p-1 { padding: 0.25rem !important; }

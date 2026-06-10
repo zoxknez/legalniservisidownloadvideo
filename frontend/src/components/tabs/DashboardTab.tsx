@@ -219,7 +219,7 @@ export function DashboardTab() {
       </div>
     </div>
 
-    <div className="flex flex-col gap-5 max-w-4xl mx-auto w-full">
+    <div className="flex flex-col gap-5 w-full">
 
       {/* ── Loading skeleton while analyzing ── */}
       {smartLoading && !smartData && (
@@ -953,7 +953,7 @@ export function DashboardTab() {
     </div>
 
     {/* ── Platform Capabilities Info Console ── */}
-    <div className="mt-2 w-full max-w-5xl mx-auto flex flex-col gap-3">
+    <div className="mt-2 w-full flex flex-col gap-3">
       <div className="flex items-center gap-2 border-b border-white/[0.04] pb-2.5">
         <Info className="w-4 h-4 text-indigo-400" />
         <h3 className="font-extrabold text-[11px] text-white tracking-widest uppercase">Mogućnosti i Status Platformi</h3>
