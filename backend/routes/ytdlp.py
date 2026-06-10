@@ -27,6 +27,11 @@ class YtdlpDownloadRequest(BaseModel):
     embed_thumbnail: bool = False
     embed_metadata: bool = False
     limit_rate: Optional[str] = None
+    
+    sponsorblock_mode: str = "remove"  # "remove", "mark", "disabled"
+    split_chapters: bool = False
+    download_playlist: bool = False
+    playlist_items: Optional[str] = None
 
 
 @router.post("/download")
@@ -34,7 +39,11 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
     url = req.url.strip()
     output_dir = config.get_output_dir()
 
-    cmd = ["python", "-m", "yt_dlp", url, "--no-playlist"]
+    cmd = ["python", "-m", "yt_dlp", url]
+    if not req.download_playlist:
+        cmd.append("--no-playlist")
+    elif req.playlist_items and req.playlist_items.strip():
+        cmd.extend(["--playlist-items", req.playlist_items.strip()])
 
     name_tmpl = config.get_ytdlp_name_template() or "%(title)s.%(ext)s"
     if req.audio_only:
@@ -63,7 +72,14 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
         cmd.extend(["--write-subs", "--write-auto-subs", "--sub-langs", req.subs, "--embed-subs"])
         if req.hardsub:
             cmd.extend(["--convert-subs", "srt"])
-    cmd.extend(["--sponsorblock-remove", "all"])
+            
+    if req.sponsorblock_mode == "remove":
+        cmd.extend(["--sponsorblock-remove", "all"])
+    elif req.sponsorblock_mode == "mark":
+        cmd.extend(["--sponsorblock-mark", "all"])
+
+    if req.split_chapters:
+        cmd.append("--split-chapters")
 
     if req.use_aria2:
         aria2_status = config.check_binaries_status().get("aria2c", {})

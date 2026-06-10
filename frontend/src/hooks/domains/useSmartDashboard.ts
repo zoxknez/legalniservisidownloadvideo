@@ -32,6 +32,11 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [ytdlpLimitRate, setYtdlpLimitRate] = useState("");
   const [ytdlpHardsub, setYtdlpHardsub] = useState(false);
   
+  const [ytdlpSponsorblockMode, setYtdlpSponsorblockMode] = useState("remove");
+  const [ytdlpSplitChapters, setYtdlpSplitChapters] = useState(false);
+  const [ytdlpDownloadPlaylist, setYtdlpDownloadPlaylist] = useState(false);
+  const [ytdlpPlaylistItems, setYtdlpPlaylistItems] = useState("");
+  
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -220,6 +225,10 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             embed_thumbnail: ytdlpEmbedThumbnail,
             embed_metadata: ytdlpEmbedMetadata,
             limit_rate: ytdlpLimitRate || null,
+            sponsorblock_mode: ytdlpSponsorblockMode,
+            split_chapters: ytdlpSplitChapters,
+            download_playlist: ytdlpDownloadPlaylist,
+            playlist_items: ytdlpPlaylistItems || null,
           }),
         });
       } else {
@@ -242,6 +251,10 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         setYtdlpEmbedThumbnail(false);
         setYtdlpEmbedMetadata(false);
         setYtdlpLimitRate("");
+        setYtdlpSponsorblockMode("remove");
+        setYtdlpSplitChapters(false);
+        setYtdlpDownloadPlaylist(false);
+        setYtdlpPlaylistItems("");
       } else {
         const msg = await parseApiError(res, "Greška pri pokretanju preuzimanja.");
         showToast(msg, "error");
@@ -273,6 +286,10 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     ytdlpEmbedThumbnail,
     ytdlpEmbedMetadata,
     ytdlpLimitRate,
+    ytdlpSponsorblockMode,
+    ytdlpSplitChapters,
+    ytdlpDownloadPlaylist,
+    ytdlpPlaylistItems,
   ]);
 
   return {
@@ -316,6 +333,14 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setYtdlpEmbedMetadata,
     ytdlpLimitRate,
     setYtdlpLimitRate,
+    ytdlpSponsorblockMode,
+    setYtdlpSponsorblockMode,
+    ytdlpSplitChapters,
+    setYtdlpSplitChapters,
+    ytdlpDownloadPlaylist,
+    setYtdlpDownloadPlaylist,
+    ytdlpPlaylistItems,
+    setYtdlpPlaylistItems,
     smartSubmitting,
     handleSmartDetect,
     debouncedDetect,

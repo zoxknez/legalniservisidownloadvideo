@@ -124,3 +124,63 @@ def test_ytdlp_download_hardsub_and_template(client):
         # Verify metadata hardsub was passed as keyword argument
         kwargs = mock_add_download.call_args.kwargs
         assert kwargs.get("metadata") == {"hardsub": True}
+
+
+def test_ytdlp_new_features(client):
+    # Test SponsorBlock mark, split chapters, and playlist items
+    payload = {
+        "url": "https://www.youtube.com/playlist?list=PL123",
+        "sponsorblock_mode": "mark",
+        "split_chapters": True,
+        "download_playlist": True,
+        "playlist_items": "1-3,5"
+    }
+
+    with patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download:
+        mock_add_download.return_value = "ytdlp-task-new"
+
+        r = client.post(
+            "/api/ytdlp/download",
+            headers={"X-API-Key": "test-secret-key"},
+            json=payload
+        )
+
+        assert r.status_code == 200
+        mock_add_download.assert_called_once()
+        cmd = mock_add_download.call_args[0][2]
+
+        # Verify playlist flags are added and --no-playlist is absent
+        assert "--no-playlist" not in cmd
+        assert "--playlist-items" in cmd
+        assert "1-3,5" in cmd
+
+        # Verify SponsorBlock mark was used instead of remove
+        assert "--sponsorblock-mark" in cmd
+        assert "all" in cmd
+        assert "--sponsorblock-remove" not in cmd
+
+        # Verify split chapters is present
+        assert "--split-chapters" in cmd
+
+    # Test SponsorBlock disabled
+    payload_disabled = {
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "sponsorblock_mode": "disabled"
+    }
+
+    with patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download:
+        mock_add_download.return_value = "ytdlp-task-disabled"
+
+        r = client.post(
+            "/api/ytdlp/download",
+            headers={"X-API-Key": "test-secret-key"},
+            json=payload_disabled
+        )
+
+        assert r.status_code == 200
+        cmd = mock_add_download.call_args[0][2]
+
+        # Verify SponsorBlock flags are completely absent
+        assert "--sponsorblock-remove" not in cmd
+        assert "--sponsorblock-mark" not in cmd
+

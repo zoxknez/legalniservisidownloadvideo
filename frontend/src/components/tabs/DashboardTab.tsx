@@ -65,6 +65,14 @@ export function DashboardTab() {
     setYtdlpLimitRate,
     ytdlpHardsub,
     setYtdlpHardsub,
+    ytdlpSponsorblockMode,
+    setYtdlpSponsorblockMode,
+    ytdlpSplitChapters,
+    setYtdlpSplitChapters,
+    ytdlpDownloadPlaylist,
+    setYtdlpDownloadPlaylist,
+    ytdlpPlaylistItems,
+    setYtdlpPlaylistItems,
   } = useSmartDashboardTab();
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -587,6 +595,34 @@ export function DashboardTab() {
                               className="ytdlp-advanced-input"
                             />
                           </div>
+                          <div className="ytdlp-advanced-field">
+                            <label>SponsorBlock podešavanje</label>
+                            <CustomSelect
+                              value={
+                                ytdlpSponsorblockMode === "remove" ? "Ukloni sponzore" :
+                                ytdlpSponsorblockMode === "mark" ? "Samo obeleži" :
+                                "Isključeno"
+                              }
+                              options={["Ukloni sponzore", "Samo obeleži", "Isključeno"]}
+                              onChange={(val) => {
+                                if (val === "Ukloni sponzore") setYtdlpSponsorblockMode("remove");
+                                else if (val === "Samo obeleži") setYtdlpSponsorblockMode("mark");
+                                else setYtdlpSponsorblockMode("disabled");
+                              }}
+                            />
+                          </div>
+                          <div className="ytdlp-advanced-field">
+                            <label style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.5 }}>Opseg videa iz plejliste</label>
+                            <input
+                              type="text"
+                              value={ytdlpPlaylistItems}
+                              onChange={e => setYtdlpPlaylistItems(e.target.value)}
+                              placeholder={ytdlpDownloadPlaylist ? "npr. 1-5, 10" : "Prvo omogući plejliste"}
+                              disabled={!ytdlpDownloadPlaylist}
+                              className="ytdlp-advanced-input"
+                              style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.5, cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
+                            />
+                          </div>
                         </div>
 
                         <div className="ytdlp-advanced-checkboxes">
@@ -645,6 +681,34 @@ export function DashboardTab() {
                             </div>
                             <span className="text-xs font-semibold text-white">Ugradi metapodatke i poglavlja</span>
                           </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpSplitChapters}
+                              onChange={e => setYtdlpSplitChapters(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpSplitChapters ? "checked" : ""}`} style={ytdlpSplitChapters ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Podeli video po poglavljima (Split Chapters)</span>
+                          </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpDownloadPlaylist}
+                              onChange={e => setYtdlpDownloadPlaylist(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpDownloadPlaylist ? "checked" : ""}`} style={ytdlpDownloadPlaylist ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Preuzmi celu plejlistu</span>
+                          </label>
                         </div>
                       </div>
                     )}
@@ -686,6 +750,10 @@ export function DashboardTab() {
                   setYtdlpEmbedThumbnail(false);
                   setYtdlpEmbedMetadata(false);
                   setYtdlpLimitRate("");
+                  setYtdlpSponsorblockMode("remove");
+                  setYtdlpSplitChapters(false);
+                  setYtdlpDownloadPlaylist(false);
+                  setYtdlpPlaylistItems("");
                   setAdvancedOpen(false);
                 }}
                 disabled={smartSubmitting}
