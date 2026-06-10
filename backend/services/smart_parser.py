@@ -140,8 +140,8 @@ class SmartParser:
                 'skip_download': True,
                 'quiet': True,
                 'no_warnings': True,
-                # Isti client kao download komanda — vidimo iste formate (uklj. 4K/8K)
-                'extractor_args': {'youtube': {'player_client': ['android', 'mweb']}},
+                # Isti client kao download komanda — tv_embedded+ios ne trebaju PO Token
+                'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'ios']}},
                 # Request all formats so we see every available resolution
                 'listformats': False,
                 # Don't limit format selection — we want the full formats list
