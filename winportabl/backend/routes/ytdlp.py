@@ -39,11 +39,11 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
     url = req.url.strip()
     output_dir = config.get_output_dir()
 
-    # tv_embedded + ios ne zahtijevaju PO Token i daju pun pristup DASH formatima (4K/8K)
-    # android je blokiran SABR eksperimentom, mweb zahtijeva GVS PO Token
+    # Koristimo node JS runtime i remote solver script da uspješno riješimo n-challenge i PO Tokene na svim klijentima
     cmd = [
         "python", "-m", "yt_dlp", url,
-        "--extractor-args", "youtube:player_client=tv_embedded,ios",
+        "--js-runtimes", "node",
+        "--remote-components", "ejs:github",
         "--retries", "5",
         "--fragment-retries", "5",
         "--retry-sleep", "exp=1:4",

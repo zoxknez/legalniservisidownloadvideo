@@ -140,8 +140,11 @@ class SmartParser:
                 'skip_download': True,
                 'quiet': True,
                 'no_warnings': True,
-                # Isti client kao download komanda — tv_embedded+ios ne trebaju PO Token
-                'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'ios']}},
+                # Koristimo node JS runtime i remote solver script da uspješno riješimo n-challenge i PO Tokene na svim klijentima
+                'js_runtimes': {'node': {}},
+                'remote_components': {'ejs:github'},
+                # Ne ograničavamo client za metadata — yt-dlp uzima sve dostupne formate
+                # (tv_embedded/ios su potrebni samo za download, ne za listing formata)
                 # Request all formats so we see every available resolution
                 'listformats': False,
                 # Don't limit format selection — we want the full formats list
