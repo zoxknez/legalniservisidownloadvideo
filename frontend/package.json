@@ -1,7 +1,7 @@
 {
   "name": "o0o0o0o-downloader",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "o0o0o0o",
   "type": "module",
   "scripts": {

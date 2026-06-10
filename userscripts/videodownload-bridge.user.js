@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Video Download Servisi — Bridge (Sniffer + Sesije)
 // @namespace    https://github.com/videodownloadservisi
-// @version      2.0.0
+// @version      2.1.0
 // @description  Automatski šalje sesije i snifuje MPD/license URL-ove u lokalnu aplikaciju.
 // @author       Video Download Servisi
 // @match        *://*.max.com/*
