@@ -7,7 +7,17 @@ __pycache__/
 .videodownload/
 output/
 temp/
-winportabl/
+# Exclude only local environment, data, and output folders within winportabl
+winportabl/.venv/
+winportabl/.videodownload/
+winportabl/output/
+winportabl/temp/
+winportabl/device.wvd
+winportabl/**/device.wvd
+winportabl/*.wvd
+winportabl/binaries/*.exe
+winportabl/binaries/*.zip
+winportabl/binaries/*.7z
 
 # Scratch / agent artifacts
 scratch/
