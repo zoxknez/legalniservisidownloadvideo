@@ -39,7 +39,14 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
     url = req.url.strip()
     output_dir = config.get_output_dir()
 
-    cmd = ["python", "-m", "yt_dlp", url]
+    # Android client ne zahtijeva JS runtime (Deno/Node) - eliminira upozorenje
+    cmd = [
+        "python", "-m", "yt_dlp", url,
+        "--extractor-args", "youtube:player_client=android,mweb",
+        "--retries", "5",
+        "--fragment-retries", "5",
+        "--retry-sleep", "exp=1:4",
+    ]
     if not req.download_playlist:
         cmd.append("--no-playlist")
     elif req.playlist_items and req.playlist_items.strip():
@@ -69,7 +76,13 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
         cmd.extend(["-f", format_spec, "-o", output_tmpl, "--merge-output-format", "mp4"])
 
     if req.subs:
-        cmd.extend(["--write-subs", "--write-auto-subs", "--sub-langs", req.subs, "--embed-subs"])
+        cmd.extend([
+            "--write-subs", "--write-auto-subs",
+            "--sub-langs", req.subs,
+            "--embed-subs",
+            "--sleep-subtitles", "2",   # anti-429: pauza između subtitle req.
+            "--ignore-errors",           # nastavi download i ako sub greška
+        ])
         if req.hardsub:
             cmd.extend(["--convert-subs", "srt"])
             
