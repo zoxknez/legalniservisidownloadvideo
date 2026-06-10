@@ -574,6 +574,9 @@ export function DashboardTab() {
                               options={["Bez uvoza", "Chrome", "Edge", "Firefox", "Brave"]}
                               onChange={(val) => setYtdlpCookiesBrowser(val === "Bez uvoza" ? "" : val.toLowerCase())}
                             />
+                            <span className="text-[10px] text-text-muted">
+                              Čita sesiju iz izabranog pretraživača za preuzimanje privatnog/zaštićenog sadržaja.
+                            </span>
                           </div>
                           <div className="ytdlp-advanced-field">
                             <label>Proksi (Proxy) URL</label>
@@ -584,6 +587,9 @@ export function DashboardTab() {
                               placeholder="npr. http://127.0.0.1:8080"
                               className="ytdlp-advanced-input"
                             />
+                            <span className="text-[10px] text-text-muted">
+                              Rutira preuzimanje kroz proxy server (npr. socks5://127.0.0.1:1080).
+                            </span>
                           </div>
                           <div className="ytdlp-advanced-field">
                             <label>Limit brzine preuzimanja</label>
@@ -594,6 +600,9 @@ export function DashboardTab() {
                               placeholder="npr. 50K ili 5M"
                               className="ytdlp-advanced-input"
                             />
+                            <span className="text-[10px] text-text-muted">
+                              Ograničava maksimalnu brzinu preuzimanja (npr. 500K ili 5M za MB/s).
+                            </span>
                           </div>
                           <div className="ytdlp-advanced-field">
                             <label>SponsorBlock podešavanje</label>
@@ -610,6 +619,9 @@ export function DashboardTab() {
                                 else setYtdlpSponsorblockMode("disabled");
                               }}
                             />
+                            <span className="text-[10px] text-text-muted">
+                              Uklanja ili samo vizuelno označava sponzorisane delove na YouTube-u.
+                            </span>
                           </div>
                           <div className="ytdlp-advanced-field">
                             <label style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.5 }}>Opseg videa iz plejliste</label>
@@ -622,92 +634,113 @@ export function DashboardTab() {
                               className="ytdlp-advanced-input"
                               style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.5, cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
                             />
+                            <span className="text-[10px] text-text-muted" style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.5 }}>
+                              Preuzima samo selektovane stavke (npr. 1-3, 5). Ostavite prazno za sve.
+                            </span>
                           </div>
                         </div>
 
                         <div className="ytdlp-advanced-checkboxes">
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpImpersonate}
                               onChange={e => setYtdlpImpersonate(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpImpersonate ? "checked" : ""}`} style={ytdlpImpersonate ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpImpersonate ? "checked" : ""}`} style={ytdlpImpersonate ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Browser Impersonation (Chrome)</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Browser Impersonation (Chrome)</span>
+                              <span className="text-[10px] text-text-muted">Imitira otiske TLS-a i HTTP/2 Chrome pretraživača radi izbegavanja bot zaštita.</span>
+                            </div>
                           </label>
 
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpGeoBypass}
                               onChange={e => setYtdlpGeoBypass(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpGeoBypass ? "checked" : ""}`} style={ytdlpGeoBypass ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpGeoBypass ? "checked" : ""}`} style={ytdlpGeoBypass ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Geo-Bypass (Zaobilaženje restrikcija)</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Geo-Bypass (Zaobilaženje restrikcija)</span>
+                              <span className="text-[10px] text-text-muted">Šalje lažna geo-lokacijska zaglavlja kako bi pokušao da zaobiđe regionalne blokade.</span>
+                            </div>
                           </label>
 
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpEmbedThumbnail}
                               onChange={e => setYtdlpEmbedThumbnail(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpEmbedThumbnail ? "checked" : ""}`} style={ytdlpEmbedThumbnail ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpEmbedThumbnail ? "checked" : ""}`} style={ytdlpEmbedThumbnail ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Ugradi sličicu (Thumbnail) u video</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Ugradi sličicu (Thumbnail) u video</span>
+                              <span className="text-[10px] text-text-muted">Integriše naslovnu sliku (poster) direktno u preuzeti video ili audio fajl.</span>
+                            </div>
                           </label>
 
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpEmbedMetadata}
                               onChange={e => setYtdlpEmbedMetadata(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpEmbedMetadata ? "checked" : ""}`} style={ytdlpEmbedMetadata ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpEmbedMetadata ? "checked" : ""}`} style={ytdlpEmbedMetadata ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Ugradi metapodatke i poglavlja</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Ugradi metapodatke i poglavlja</span>
+                              <span className="text-[10px] text-text-muted">Upisuje tagove (naslov, autor, opis) i vremenska poglavlja unutar fajla.</span>
+                            </div>
                           </label>
 
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpSplitChapters}
                               onChange={e => setYtdlpSplitChapters(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpSplitChapters ? "checked" : ""}`} style={ytdlpSplitChapters ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpSplitChapters ? "checked" : ""}`} style={ytdlpSplitChapters ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Podeli video po poglavljima (Split Chapters)</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Podeli video po poglavljima (Split Chapters)</span>
+                              <span className="text-[10px] text-text-muted">Automatski seče i čuva svako poglavlje kao zaseban video ili audio fajl.</span>
+                            </div>
                           </label>
 
-                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer", alignItems: "flex-start" }}>
                             <input
                               type="checkbox"
                               checked={ytdlpDownloadPlaylist}
                               onChange={e => setYtdlpDownloadPlaylist(e.target.checked)}
                             />
-                            <div className={`custom-checkbox-box ${ytdlpDownloadPlaylist ? "checked" : ""}`} style={ytdlpDownloadPlaylist ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                            <div className={`custom-checkbox-box ${ytdlpDownloadPlaylist ? "checked" : ""}`} style={ytdlpDownloadPlaylist ? {background:"#3b82f6", borderColor:"#3b82f6", marginTop:"2px"} : {marginTop:"2px"}}>
                               <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
                                 <polyline points="1.5 5 4 7.5 8.5 2" />
                               </svg>
                             </div>
-                            <span className="text-xs font-semibold text-white">Preuzmi celu plejlistu</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-semibold text-white">Preuzmi celu plejlistu</span>
+                              <span className="text-[10px] text-text-muted">Uključuje preuzimanje cele plejliste ukoliko je unet link plejliste.</span>
+                            </div>
                           </label>
                         </div>
                       </div>
