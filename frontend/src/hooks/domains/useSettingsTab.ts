@@ -3,7 +3,7 @@ import { useAppConfigSlice, useAppShellSlice, useHboSlice, useSnifferSlice } fro
 import { useCredentials } from "./useCredentials";
 
 const CLEAR_SERVICE_LABELS: Record<string, string> = {
-  voyo: "Voyo RS",
+  voyo: "Voyo",
   hrti: "HRTi",
   rts: "RTS Planeta",
   eon: "EON TV",

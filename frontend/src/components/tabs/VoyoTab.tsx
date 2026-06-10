@@ -155,7 +155,7 @@ export function VoyoTab() {
       <div style={{flex:1}}>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-2xl font-extrabold text-white mb-1 flex items-center gap-2.5">
-            <Tv className="w-6 h-6 text-orange-500" /> Voyo RS
+            <Tv className="w-6 h-6 text-orange-500" /> Voyo
           </h2>
           {status?.services.voyo.authenticated && (
             <span className="badge flex items-center gap-1.5 bg-orange-500/10 border-orange-500/30 text-orange-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md">
@@ -163,7 +163,7 @@ export function VoyoTab() {
             </span>
           )}
         </div>
-        <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo.rs platforme uz AES-128 HLS dekripciju. Podržava automatsko preuzimanje titlova i spajanje.</p>
+        <p className="text-text-secondary text-sm">Preuzmite filmove, epizode i cele serije sa Voyo platforme uz AES-128 HLS dekripciju. Podržava automatsko preuzimanje titlova i spajanje.</p>
       </div>
     </div>
 
@@ -208,7 +208,7 @@ export function VoyoTab() {
             )}
             <input
               type="text"
-              placeholder={voyoMode === "video" ? "npr. https://voyo.rs/uspeh-1_50584.html ili ID 50584" : "npr. https://voyo.rs/sadrzaj/reprodukuj?id=52173 ili ID 50"}
+              placeholder={voyoMode === "video" ? "npr. Voyo video URL ili ID" : "npr. Voyo serija URL ili ID"}
               value={voyoTarget}
               onChange={(e) => setVoyoTarget(e.target.value)}
               onKeyDown={(e) => {
@@ -310,7 +310,7 @@ export function VoyoTab() {
               <span className="badge flex items-center gap-1.5 bg-red-500/10 border-red-500/30 text-red-400 font-black px-2.5 py-1 text-[10px] tracking-wider rounded-md w-max">
                 <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping"></span> NIJE PRIJAVLJEN
               </span>
-              <p className="text-xs text-text-secondary leading-relaxed mt-1">Prijavite se u <strong>"Postavkama"</strong> sa vašim Voyo.rs parametrima da biste otključali preuzimanja.</p>
+              <p className="text-xs text-text-secondary leading-relaxed mt-1">Prijavite se u <strong>"Postavkama"</strong> sa vašim Voyo parametrima da biste otključali preuzimanja.</p>
             </div>
           )}
         </div>

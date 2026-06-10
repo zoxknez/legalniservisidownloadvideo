@@ -14,6 +14,7 @@ export interface BinaryStatus {
 export interface ServiceStatus {
   authenticated: boolean;
   ready?: boolean;
+  variant?: string;
   engine_installed?: boolean;
   engine_download_supported?: boolean;
   dependency_ready?: boolean;

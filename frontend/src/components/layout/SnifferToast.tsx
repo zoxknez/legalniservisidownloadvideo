@@ -43,7 +43,7 @@ export function SnifferToast() {
           </span>
           <h4 className="text-sm font-extrabold text-white">
             Presretnut {latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "HBO Max" :
-                        latestSniffed.service === "voyo" ? "Voyo RS" :
+                        latestSniffed.service === "voyo" ? "Voyo" :
                         latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "RTS Planeta" :
                         latestSniffed.service === "eon" ? "EON TV" :
                         latestSniffed.service === "hrti" ? "HRTi" : latestSniffed.service} resurs

@@ -14,6 +14,8 @@ export function useCredentials() {
     setVoyoPassword: voyo.setVoyoPassword,
     showVoyoPass: voyo.showVoyoPass,
     setShowVoyoPass: voyo.setShowVoyoPass,
+    voyoVariant: voyo.voyoVariant,
+    setVoyoVariant: voyo.setVoyoVariant,
     hrtiEmail: hrti.hrtiEmail,
     setHrtiEmail: hrti.setHrtiEmail,
     hrtiPassword: hrti.hrtiPassword,

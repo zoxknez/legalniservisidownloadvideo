@@ -2,7 +2,7 @@ import { Film, Play, Radio, Tv, Zap } from "lucide-react";
 import type { AppStatus } from "../../types/app";
 
 const SERVICES = [
-  { key: "voyo", label: "Voyo RS", icon: Tv, color: "service-voyo", authKey: "authenticated" as const },
+  { key: "voyo", label: "Voyo", icon: Tv, color: "service-voyo", authKey: "authenticated" as const },
   { key: "hrti", label: "HRTi", icon: Film, color: "service-hrti", authKey: "authenticated" as const },
   { key: "eon", label: "EON TV", icon: Play, color: "service-eon", authKey: "ready" as const },
   { key: "rtsplaneta", label: "RTS Planeta", icon: Radio, color: "service-rts", authKey: "authenticated" as const },

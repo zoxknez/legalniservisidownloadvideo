@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class LoginRequest(BaseModel):
     email: str
     password: str
+    variant: Optional[str] = None
 
 
 class SnifferPayload(BaseModel):

@@ -18,6 +18,8 @@ DOMAIN_TO_SERVICE = {
     "rtsplaneta.rs": "rtsplaneta",
     "eon.tv": "eon",
     "voyo.rs": "voyo",
+    "voyo.hr": "voyo",
+    "voyo.rtl.hr": "voyo",
     "hrti.hrt.hr": "hrti",
 }
 
@@ -326,26 +328,60 @@ def sync_all_supported_services() -> Dict[str, Any]:
             except Exception as e:
                 logger.error("Failed to write EON cookie cache: %s", e)
 
-    voyo_cookies = extracted.get("voyo.rs", [])
-    if voyo_cookies:
-        cookie_dict = {c["name"]: c["value"] for c in voyo_cookies if c["value"]}
+    # Voyo RS
+    voyo_rs_cookies = extracted.get("voyo.rs", [])
+    # Voyo HR
+    voyo_hr_cookies = extracted.get("voyo.hr", []) or extracted.get("voyo.rtl.hr", [])
+
+    voyo_token = None
+    voyo_variant = None
+    target_domain = None
+
+    if voyo_hr_cookies:
+        cookie_dict = {c["name"]: c["value"] for c in voyo_hr_cookies if c["value"]}
         voyo_token = cookie_dict.get("token") or cookie_dict.get("s")
         if voyo_token:
-            try:
-                set_secret("voyo", "token", voyo_token)
-                try:
-                    from backend.services.voyo_adapter import _VOYO_CACHE
-                    import time
+            voyo_variant = "hr"
+            target_domain = "voyo.hr"
+    
+    if not voyo_token and voyo_rs_cookies:
+        cookie_dict = {c["name"]: c["value"] for c in voyo_rs_cookies if c["value"]}
+        voyo_token = cookie_dict.get("token") or cookie_dict.get("s")
+        if voyo_token:
+            voyo_variant = "rs"
+            target_domain = "voyo.rs"
 
-                    _VOYO_CACHE["token"] = voyo_token
-                    _VOYO_CACHE["last_check"] = time.time()
-                    _VOYO_CACHE["authenticated"] = True
-                except Exception:
-                    pass
-                domain_report["voyo.rs"] = True
-                logger.info("Voyo RS session token auto-synced (keyring).")
-            except Exception as e:
-                logger.error("Failed to store Voyo token: %s", e)
+    if voyo_token:
+        try:
+            set_secret("voyo", "token", voyo_token)
+            # Update variant in app config and VoyoConfig
+            config.update_credentials("voyo", {"variant": voyo_variant})
+            try:
+                from backend.core.services.voyo.auth import VoyoConfig as _VoyoConfig
+                vc = _VoyoConfig()
+                # Set dummy email or keep existing to store variant in ~/.voyo/config.json
+                email, _, _ = vc.get_credentials()
+                vc.set_credentials(email, "", variant=voyo_variant)
+            except Exception:
+                pass
+
+            try:
+                from backend.services.voyo_adapter import _VOYO_CACHE
+                import time
+
+                _VOYO_CACHE["token"] = voyo_token
+                _VOYO_CACHE["variant"] = voyo_variant
+                _VOYO_CACHE["last_check"] = time.time()
+                _VOYO_CACHE["authenticated"] = True
+            except Exception:
+                pass
+            if target_domain:
+                domain_report[target_domain] = True
+                if target_domain == "voyo.hr" and "voyo.rtl.hr" in extracted:
+                    domain_report["voyo.rtl.hr"] = True
+            logger.info(f"Voyo {voyo_variant.upper()} session token auto-synced (keyring).")
+        except Exception as e:
+            logger.error("Failed to store Voyo token: %s", e)
 
     hrti_cookies = extracted.get("hrti.hrt.hr", [])
     if hrti_cookies:

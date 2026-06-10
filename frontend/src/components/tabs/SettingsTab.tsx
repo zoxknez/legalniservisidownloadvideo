@@ -123,6 +123,8 @@ export function SettingsTab() {
     userscriptPreview,
     voyoEmail,
     voyoPassword,
+    voyoVariant,
+    setVoyoVariant,
     hboMarket,
     setHboMarket,
     startHboLogin,
@@ -535,7 +537,7 @@ export function SettingsTab() {
               options={["voyo", "hrti", "rtsplaneta", "hbomax", "eon"]}
               onChange={(val) => setImportService(val)}
               formatLabel={(val) => {
-                if (val === "voyo") return "Voyo RS";
+                if (val === "voyo") return "Voyo";
                 if (val === "hrti") return "HRTi";
                 if (val === "rtsplaneta") return "RTS Planeta";
                 if (val === "hbomax") return "HBO Max";
@@ -673,8 +675,17 @@ export function SettingsTab() {
           <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-orange-card glow-card-premium transition-all hover:bg-white/[0.03]">
             <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
               <Tv className="w-4 h-4 service-voyo" />
-              Voyo RS prijava
+              Voyo prijava
             </h4>
+            <div>
+              <label>Država / Region</label>
+              <CustomSelect
+                value={voyoVariant}
+                options={["rs", "hr"]}
+                onChange={(val) => setVoyoVariant(val)}
+                formatLabel={(val) => val === "rs" ? "Srbija (Voyo.rs)" : "Hrvatska (Voyo.hr)"}
+              />
+            </div>
             <div>
               <label>Email</label>
               <input type="email" value={voyoEmail} onChange={(e) => setVoyoEmail(e.target.value)} placeholder="email@voyo.rs" className="input-premium" style={cssVars({"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"})} />
@@ -711,7 +722,7 @@ export function SettingsTab() {
             </div>
             <SettingsCredentialFooter
               loginLabel="Prijavi se na Voyo"
-              onLogin={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword })}
+              onLogin={() => submitLogin("voyo", { email: voyoEmail, password: voyoPassword, variant: voyoVariant })}
               onClear={() => void handleClearCredentials("voyo")}
               loginLoading={submittingLogin}
               clearLoading={clearingService === "voyo"}

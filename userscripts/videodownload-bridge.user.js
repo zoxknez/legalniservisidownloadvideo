@@ -75,7 +75,23 @@
         localStorage.getItem('token') ||
         localStorage.getItem('apollo-cache-persist') ||
         '';
-      if (t && t.length > 8) batch.voyo = t;
+      if (t && t.length > 8) {
+        let variant = 'rs';
+        if (host.includes('voyo.hr') || host.includes('rtl.hr')) {
+          variant = 'hr';
+        }
+        if (t.trim().startsWith('{')) {
+          try {
+            const parsed = JSON.parse(t);
+            parsed.variant = variant;
+            batch.voyo = JSON.stringify(parsed);
+          } catch (e) {
+            batch.voyo = JSON.stringify({ token: t, variant: variant });
+          }
+        } else {
+          batch.voyo = JSON.stringify({ token: t, variant: variant });
+        }
+      }
     }
     if (host.includes('hrt.hr')) {
       const t = localStorage.getItem('token') || '';

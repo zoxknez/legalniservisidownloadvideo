@@ -20,23 +20,26 @@ class VoyoAdapter:
 
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
+        variant = vcfg.get_variant()
 
         if not email or not password:
             creds = config.get_credentials("voyo")
             email = creds.get("email", "") or email
             password = creds.get("password", "") or password
+            variant = creds.get("variant", "") or variant
             if email and password:
-                vcfg.set_credentials(email, password)
+                vcfg.set_credentials(email, password, variant=variant)
 
         stored_token = get_secret("voyo", "token")
         if not email and not stored_token:
-            return {"authenticated": False, "email": "", "error": "No credentials stored"}
+            return {"authenticated": False, "email": "", "error": "No credentials stored", "variant": variant}
         if not email and stored_token:
             email = creds.get("email", "") if (creds := config.get_credentials("voyo")) else ""
 
         now = time.time()
         if (
             _VOYO_CACHE.get("email") == email
+            and _VOYO_CACHE.get("variant") == variant
             and _VOYO_CACHE.get("authenticated") is True
             and (now - _VOYO_CACHE.get("last_check", 0)) < 600
         ):
@@ -46,10 +49,12 @@ class VoyoAdapter:
                 "nickname": _VOYO_CACHE.get("nickname", ""),
                 "subscribed": _VOYO_CACHE.get("subscribed", False),
                 "profile_id": _VOYO_CACHE.get("profile_id", 0),
+                "variant": variant,
             }
 
         try:
             auth = VoyoAuth()
+            auth.set_variant(variant)
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers["device-id"] = device_id
@@ -63,29 +68,33 @@ class VoyoAdapter:
                 "nickname": auth.state.nickname,
                 "subscribed": auth.state.is_subscribed,
                 "profile_id": auth.state.profile_id,
+                "variant": variant,
             }
             _VOYO_CACHE = {**status, "last_check": now, "authenticated": True}
             return status
         except Exception as e:
-            _VOYO_CACHE = {"email": email, "last_check": now, "authenticated": False}
-            return {"authenticated": False, "email": email, "error": str(e)}
+            _VOYO_CACHE = {"email": email, "variant": variant, "last_check": now, "authenticated": False}
+            return {"authenticated": False, "email": email, "error": str(e), "variant": variant}
 
     @staticmethod
-    def login(email: str, password: str) -> Dict[str, Any]:
+    def login(email: str, password: str, variant: str = "rs") -> Dict[str, Any]:
         """Verify login, save to both ~/.voyo/config.json and app settings."""
         global _VOYO_CACHE
+        variant = (variant or "rs").lower()
         try:
             vcfg = VoyoConfig()
-            vcfg.set_credentials(email, password)
+            vcfg.set_credentials(email, password, variant=variant)
             
             auth = VoyoAuth()
+            auth.set_variant(variant)
             auth.login(email, password)
             vcfg.update_device_id(auth.state.device_id)
             
-            config.update_credentials("voyo", {"email": email, "password": password})
+            config.update_credentials("voyo", {"email": email, "password": password, "variant": variant})
 
             _VOYO_CACHE = {
                 "email": email,
+                "variant": variant,
                 "authenticated": True,
                 "nickname": auth.state.nickname,
                 "subscribed": auth.state.is_subscribed,
@@ -108,10 +117,12 @@ class VoyoAdapter:
         try:
             vcfg = VoyoConfig()
             email, password, device_id = vcfg.get_credentials()
+            variant = vcfg.get_variant()
             if not email:
                 return []
             
             auth = VoyoAuth()
+            auth.set_variant(variant)
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id
@@ -125,9 +136,11 @@ class VoyoAdapter:
     def _make_auth() -> VoyoAuth:
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
+        variant = vcfg.get_variant()
         if not email:
             raise RuntimeError("No credentials configured")
         auth = VoyoAuth()
+        auth.set_variant(variant)
         if device_id:
             auth.state.device_id = device_id
             auth.session.headers["device-id"] = device_id
@@ -249,10 +262,12 @@ class VoyoAdapter:
         try:
             vcfg = VoyoConfig()
             email, password, device_id = vcfg.get_credentials()
+            variant = vcfg.get_variant()
             if not email:
                 raise RuntimeError("No Voyo credentials configured")
             
             auth = VoyoAuth()
+            auth.set_variant(variant)
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id
@@ -273,10 +288,12 @@ class VoyoAdapter:
         try:
             vcfg = VoyoConfig()
             email, password, device_id = vcfg.get_credentials()
+            variant = vcfg.get_variant()
             if not email:
                 raise RuntimeError("No Voyo credentials configured")
             
             auth = VoyoAuth()
+            auth.set_variant(variant)
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id

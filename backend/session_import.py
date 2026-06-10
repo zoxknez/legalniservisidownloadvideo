@@ -43,6 +43,36 @@ def _extract_token_string(service: str, data: str) -> str:
     return text
 
 
+def _detect_voyo_variant_from_token(token: str) -> str:
+    import base64
+    import json
+    try:
+        parts = token.split('.')
+        if len(parts) == 3:
+            payload_b64 = parts[1]
+            padding = '=' * (4 - len(payload_b64) % 4)
+            payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+            payload = json.loads(payload_bytes)
+            
+            # Check siteId
+            site_id = payload.get("siteId") or payload.get("site_id")
+            if site_id:
+                if int(site_id) == 30057:
+                    return "hr"
+                if int(site_id) == 30005:
+                    return "rs"
+                    
+            # Check iss claim
+            iss = payload.get("iss", "")
+            if "rtl.hr" in iss or "voyo.hr" in iss:
+                return "hr"
+            if "rtlrs" in iss or "voyo.rs" in iss:
+                return "rs"
+    except Exception:
+        pass
+    return "rs"
+
+
 def import_session_for_service(service: str, session_data: str) -> Dict[str, Any]:
     """Import token/session for one service. Raises ValueError on bad input."""
     from backend.credentials_store import set_secret
@@ -55,15 +85,42 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
     if service == "voyo":
         token = _extract_token_string("voyo", data)
         set_secret("voyo", "token", token)
+        
+        # Detect variant
+        voyo_variant = "rs"
+        if data.startswith("{"):
+            try:
+                js = json.loads(data)
+                if isinstance(js, dict) and "variant" in js:
+                    voyo_variant = js["variant"]
+            except Exception:
+                pass
+        
+        if voyo_variant == "rs":
+            voyo_variant = _detect_voyo_variant_from_token(token)
+            
+        from backend.config import config
+        config.update_credentials("voyo", {"variant": voyo_variant})
+        
+        try:
+            from backend.core.services.voyo.auth import VoyoConfig as _VoyoConfig
+            vc = _VoyoConfig()
+            email, _, _ = vc.get_credentials()
+            vc.set_credentials(email, "", variant=voyo_variant)
+        except Exception:
+            pass
+
         try:
             from backend.services.voyo_adapter import _VOYO_CACHE
             import time
 
             _VOYO_CACHE["token"] = token
+            _VOYO_CACHE["variant"] = voyo_variant
             _VOYO_CACHE["last_check"] = time.time()
+            _VOYO_CACHE["authenticated"] = True
         except Exception:
             pass
-        return {"service": service, "message": "Voyo token uvezen (OS keyring)."}
+        return {"service": service, "message": f"Voyo {voyo_variant.upper()} token uvezen (OS keyring)."}
 
     if service == "hrti":
         token = _extract_token_string("hrti", data)

@@ -143,6 +143,13 @@ class VoyoAuth:
         self.session.headers.update(self.DEFAULT_HEADERS)
         self._nonce  = 130          # increments with each GQL call (like browser)
 
+        # Default fallback variant configuration
+        self.variant = 'rs'
+        self.gql_url = self.GQL_URL
+        self.gqlc_url = self.GQLC_URL
+        self.site_id = SITE_ID
+        self.origin = 'https://voyo.rs'
+
         if config_file and Path(config_file).exists():
             self._load_config(config_file)
         else:
@@ -151,12 +158,34 @@ class VoyoAuth:
                 _, _, device_id = cfg.get_credentials()
                 if device_id:
                     self.state.device_id = device_id
+                self.set_variant(cfg.get_variant())
             except Exception:
-                pass
+                self.set_variant('rs')
 
         if not self.state.device_id:
             self.state.device_id = str(uuid.uuid4())
         self.session.headers['device-id'] = self.state.device_id
+
+    def set_variant(self, variant: str):
+        variant = (variant or 'rs').lower()
+        if variant == 'hr':
+            self.variant = 'hr'
+            self.gql_url = 'https://gql.rtl.hr/graphql/?raw'
+            self.gqlc_url = 'https://gqlc.rtl.hr/graphql/?raw'
+            self.site_id = 30057
+            self.origin = 'https://voyo.hr'
+        else:
+            self.variant = 'rs'
+            self.gql_url = 'https://gql.rtlrs-api.com/graphql/?raw'
+            self.gqlc_url = 'https://gqlc.rtlrs-api.com/graphql/?raw'
+            self.site_id = 30005
+            self.origin = 'https://voyo.rs'
+        
+        self.session.headers.update({
+            'Origin': self.origin,
+            'Referer': f'{self.origin}/',
+            'onl-location': f'{self.origin}/',
+        })
 
     # ── internal helpers ─────────────────────────────────────────────────────
 
@@ -167,7 +196,7 @@ class VoyoAuth:
     def _gql(self, query: str, url: str = None,
              extra_headers: dict = None) -> Dict[str, Any]:
         """Execute a GraphQL query/mutation against the authenticated endpoint."""
-        target = url or self.GQL_URL
+        target = url or self.gql_url
         headers = {'onl-nonce': self._next_nonce()}
         # After linkDeviceToUser, the server expects the device token on every call
         # as a raw 'authorization' header (no 'Bearer' prefix — 422.200 rejects that).
@@ -193,9 +222,14 @@ class VoyoAuth:
             if 'device_id' in cfg:
                 self.state.device_id = cfg['device_id']
                 self.session.headers['device-id'] = self.state.device_id
+            if 'variant' in cfg:
+                self.set_variant(cfg['variant'])
+            else:
+                self.set_variant('rs')
             logger.info(f'Loaded config from {config_file}')
         except Exception as e:
             logger.warning(f'Failed to load config: {e}')
+            self.set_variant('rs')
 
     # ── auth ─────────────────────────────────────────────────────────────────
 
@@ -252,7 +286,7 @@ class VoyoAuth:
 
         # Step 1 – master login
         query = (
-            f'{{ login ( email: {json.dumps(email)} password: {json.dumps(password)} siteId: {SITE_ID} )'
+            f'{{ login ( email: {json.dumps(email)} password: {json.dumps(password)} siteId: {self.site_id} )'
             f' {{ token nickname avatar email deviceId profileId id isSubscribed'
             f' emailStatus phoneStatus }} }}'
         )
@@ -395,7 +429,7 @@ class VoyoAuth:
             raise RuntimeError('Not authenticated – call login() first')
 
         query = (
-            f'{{ videoUrlV2( id: {video_id} siteId: {SITE_ID})'
+            f'{{ videoUrlV2( id: {video_id} siteId: {self.site_id})'
             f' {{ url info infoCode license }} }}'
         )
         data = self._gql(query)
@@ -432,7 +466,7 @@ class VoyoAuth:
 
         import urllib.parse
         query_str = f'onl_all_full_voyoCategory(id:{category_id})'
-        url = (f'{self.GQLC_URL}'
+        url = (f'{self.gqlc_url}'
                f'&query={urllib.parse.quote(query_str)}'
                f'&extras={urllib.parse.quote(extras)}')
 
@@ -458,7 +492,7 @@ class VoyoAuth:
         import urllib.parse
         query_str = f'onl_all_full_video(id:{video_id})'
         extras = f'rootCategoryId:0,s:{self.state.token}' if self.state.token else 'rootCategoryId:0'
-        url = (f'{self.GQLC_URL}'
+        url = (f'{self.gqlc_url}'
                f'&query={urllib.parse.quote(query_str)}'
                f'&extras={urllib.parse.quote(extras)}')
 
@@ -502,11 +536,12 @@ class VoyoConfig:
         except Exception:
             pass
 
-    def set_credentials(self, email: str, password: str, device_id: str = ''):
+    def set_credentials(self, email: str, password: str, device_id: str = '', variant: str = 'rs'):
         from backend.credentials_store import set_secret
         self._cfg.update({
             'email': email,
             'device_id': device_id or self._cfg.get('device_id') or str(uuid.uuid4()),
+            'variant': variant,
         })
         self._cfg.pop('password', None)
         self.save()
@@ -522,6 +557,9 @@ class VoyoConfig:
             password,
             self._cfg.get('device_id', ''),
         )
+
+    def get_variant(self) -> str:
+        return self._cfg.get('variant', 'rs')
 
     def has_credentials(self) -> bool:
         email, password, _ = self.get_credentials()

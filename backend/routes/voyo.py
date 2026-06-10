@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/login")
 def voyo_login(req: LoginRequest):
-    res = VoyoAdapter.login(req.email, req.password)
+    res = VoyoAdapter.login(req.email, req.password, variant=req.variant)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error"))
     return res

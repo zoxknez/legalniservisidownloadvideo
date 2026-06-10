@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
         "device_wvd": "device.wvd"
     },
     "credentials": {
-        "voyo": {"email": "", "password": ""},
+        "voyo": {"email": "", "password": "", "variant": "rs"},
         "eon": {"username": "", "password": "", "serial": "", "number": ""},
         "hbomax": {"market": "emea", "token": ""},
         "rtsplaneta": {"email": "", "password": ""},

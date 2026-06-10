@@ -49,7 +49,7 @@ export function DashboardTab() {
   } = useSmartDashboardTab();
 // Service theme config
   const SVC_THEMES: Record<string, {emoji:string; name:string; color:string; glow:string; example:string; exampleLabel:string}> = {
-    voyo:    { emoji:"🟠", name:"Voyo RS",     color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
+    voyo:    { emoji:"🟠", name:"Voyo",        color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
     hrti:    { emoji:"🔵", name:"HRTi",        color:"#06b6d4", glow:"rgba(6,182,212,0.08)",    example:"https://hrti.hrt.hr/video/show/4a3b2c1d-0000-0000-0000-000000000001", exampleLabel:"Video (UUID)" },
     eon:     { emoji:"🟢", name:"EON TV",      color:"#10b981", glow:"rgba(16,185,129,0.08)",   example:"https://eon.tv/player/vod-abc123", exampleLabel:"VOD naslov" },
     rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
@@ -545,7 +545,7 @@ export function DashboardTab() {
         <div className="smart-info-card" style={cssVars({ "--card-brand-color": "#f97316" })}>
           <div className="smart-info-card-title-wrap">
             <div className="smart-info-card-title">
-              <span>🟠</span> Voyo RS
+              <span>🟠</span> Voyo
             </div>
             <div className="smart-info-card-badge text-orange-400 border-orange-500/20">
               1080p · DRM

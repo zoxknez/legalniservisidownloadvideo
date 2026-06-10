@@ -12,6 +12,7 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
   const [voyoEmail, setVoyoEmail] = useState("");
   const [voyoPassword, setVoyoPassword] = useState("");
   const [showVoyoPass, setShowVoyoPass] = useState(false);
+  const [voyoVariant, setVoyoVariant] = useState("rs");
 
   const [voyoMode, setVoyoMode] = useState<"video" | "series">("video");
   const [voyoTarget, setVoyoTarget] = useState("");
@@ -119,6 +120,8 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
     setVoyoPassword,
     showVoyoPass,
     setShowVoyoPass,
+    voyoVariant,
+    setVoyoVariant,
     voyoMode,
     setVoyoMode,
     voyoTarget,

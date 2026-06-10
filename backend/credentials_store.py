@@ -247,7 +247,7 @@ SERVICE_ALIASES = {
 }
 
 _PUBLIC_METADATA_CLEAR = {
-    "voyo": ("email",),
+    "voyo": ("email", "variant"),
     "hrti": ("email",),
     "rtsplaneta": ("email", "username"),
     "eon": ("username", "serial", "number"),

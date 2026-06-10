@@ -93,6 +93,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const svc = data.services;
       voyo.setVoyoEmail(svc?.voyo?.email || "");
       voyo.setVoyoPassword("");
+      if (svc?.voyo?.variant) {
+        voyo.setVoyoVariant(svc.voyo.variant);
+      } else {
+        voyo.setVoyoVariant("rs");
+      }
       hrti.setHrtiEmail(svc?.hrti?.email || "");
       hrti.setHrtiPassword("");
       const rtsEmail = svc?.rtsplaneta?.email;
