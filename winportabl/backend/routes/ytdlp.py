@@ -80,6 +80,9 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
 
     if req.split_chapters:
         cmd.append("--split-chapters")
+        # Define chapter-specific naming template to prevent overwrites
+        chapter_tmpl = os.path.join(output_dir, "%(title)s - %(section_number)02d - %(section_title)s.%(ext)s")
+        cmd.extend(["-o", f"chapter:{chapter_tmpl}"])
 
     if req.use_aria2:
         aria2_status = config.check_binaries_status().get("aria2c", {})

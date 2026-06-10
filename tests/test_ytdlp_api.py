@@ -159,8 +159,9 @@ def test_ytdlp_new_features(client):
         assert "all" in cmd
         assert "--sponsorblock-remove" not in cmd
 
-        # Verify split chapters is present
+        # Verify split chapters is present and has the chapter naming template
         assert "--split-chapters" in cmd
+        assert any("chapter:" in arg for arg in cmd)
 
     # Test SponsorBlock disabled
     payload_disabled = {
