@@ -66,10 +66,18 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
         _res_match = re.search(r"(\d+)p", req.resolution)
         if _res_match:
             res_val = _res_match.group(1)
+            # Format spec logika:
+            # 1. Tražena rezolucija sa AVC+AAC (kompatibilni MP4 kodeci)
+            # 2. Tražena rezolucija sa bilo kojim kodecima
+            # 3. Bila koja rezolucija <= tražene, sa bilo kojim kodecima
+            # 4. Apsolutni fallback — uvijek bestvideo+bestaudio (NIKAD goli 'best' koji je najlošiji)
             format_spec = (
+                f"bestvideo[height={res_val}][vcodec^=avc]+bestaudio[acodec^=mp4a]/"
+                f"bestvideo[height={res_val}]+bestaudio[ext=m4a]/"
+                f"bestvideo[height={res_val}]+bestaudio/"
                 f"bestvideo[height<={res_val}][vcodec^=avc]+bestaudio[acodec^=mp4a]/"
                 f"bestvideo[height<={res_val}]+bestaudio/"
-                f"best[height<={res_val}]/best"
+                f"bestvideo+bestaudio/best"
             )
         else:
             format_spec = "bestvideo+bestaudio/best"
