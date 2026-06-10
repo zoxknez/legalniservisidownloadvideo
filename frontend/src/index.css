@@ -2556,5 +2556,148 @@ textarea {
   }
 }
 
+/* ── yt-dlp Premium Unified Console Layout ── */
+.ytdlp-console-container {
+  width: 100%;
+  margin-top: 10px;
+}
+.ytdlp-console-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+.ytdlp-console-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ytdlp-console-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-left: 2px solid #3b82f6;
+  padding-left: 10px;
+  margin-bottom: 2px;
+}
+.ytdlp-grid-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) {
+  .ytdlp-grid-inputs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .ytdlp-grid-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+.ytdlp-option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ytdlp-option-group label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.ytdlp-option-help {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+.ytdlp-grid-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+@media (max-width: 768px) {
+  .ytdlp-grid-checkboxes {
+    grid-template-columns: 1fr;
+  }
+}
+.ytdlp-checkbox-card {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: flex-start;
+  user-select: none;
+}
+.ytdlp-checkbox-card:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(59, 130, 246, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.ytdlp-checkbox-card.active {
+  background: rgba(59, 130, 246, 0.07);
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.05);
+}
+.ytdlp-checkbox-card.active:hover {
+  background: rgba(59, 130, 246, 0.09);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+/* Collapsible Subtitles Card */
+.ytdlp-collapsible-card {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.ytdlp-collapsible-card.expanded {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+.ytdlp-collapsible-header {
+  padding: 14px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.ytdlp-collapsible-header:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.ytdlp-collapsible-content {
+  padding: 0 18px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Animations */
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.animate-slide-down {
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+
 
 
