@@ -1,5 +1,7 @@
+import { useState } from "react";
 import {
   Check,
+  ChevronDown,
   Copy,
   Download,
   Globe,
@@ -7,6 +9,7 @@ import {
   Loader2,
   Lock,
   Search,
+  Sliders,
   Sparkles,
   Zap,
 } from "lucide-react";
@@ -46,7 +49,23 @@ export function DashboardTab() {
     setSmartRtsEndEp,
     startSmartDownload,
     status,
+    ytdlpCookiesBrowser,
+    setYtdlpCookiesBrowser,
+    ytdlpImpersonate,
+    setYtdlpImpersonate,
+    ytdlpProxy,
+    setYtdlpProxy,
+    ytdlpGeoBypass,
+    setYtdlpGeoBypass,
+    ytdlpEmbedThumbnail,
+    setYtdlpEmbedThumbnail,
+    ytdlpEmbedMetadata,
+    setYtdlpEmbedMetadata,
+    ytdlpLimitRate,
+    setYtdlpLimitRate,
   } = useSmartDashboardTab();
+
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 // Service theme config
   const SVC_THEMES: Record<string, {emoji:string; name:string; color:string; glow:string; example:string; exampleLabel:string}> = {
     voyo:    { emoji:"🟠", name:"Voyo",        color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
@@ -469,36 +488,145 @@ export function DashboardTab() {
               )}
               
               {smartData.service === "ytdlp" && (
-                <div className="flex gap-4 items-center flex-wrap" style={{ marginTop: 24 }}>
-                  <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={smartAudioOnly}
-                      onChange={e => setSmartAudioOnly(e.target.checked)}
-                    />
-                    <div className={`custom-checkbox-box ${smartAudioOnly ? "checked" : ""}`} style={smartAudioOnly ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                      <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                        <polyline points="1.5 5 4 7.5 8.5 2" />
-                      </svg>
-                    </div>
-                    <span className="text-xs font-semibold text-white">Preuzmi samo audio (MP3)</span>
-                  </label>
+                <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "16px", marginTop: "12px" }}>
+                  <div className="flex gap-4 items-center flex-wrap">
+                    <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={smartAudioOnly}
+                        onChange={e => setSmartAudioOnly(e.target.checked)}
+                      />
+                      <div className={`custom-checkbox-box ${smartAudioOnly ? "checked" : ""}`} style={smartAudioOnly ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                        <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                          <polyline points="1.5 5 4 7.5 8.5 2" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-semibold text-white">Preuzmi samo audio (MP3)</span>
+                    </label>
 
-                  <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={smartUseAria2}
-                      onChange={e => setSmartUseAria2(e.target.checked)}
-                    />
-                    <div className={`custom-checkbox-box ${smartUseAria2 ? "checked" : ""}`} style={smartUseAria2 ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                      <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                        <polyline points="1.5 5 4 7.5 8.5 2" />
-                      </svg>
-                    </div>
-                    <span className="text-xs font-semibold text-white flex items-center gap-1">
-                      Aria2 Ubrzanje <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
-                    </span>
-                  </label>
+                    <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={smartUseAria2}
+                        onChange={e => setSmartUseAria2(e.target.checked)}
+                      />
+                      <div className={`custom-checkbox-box ${smartUseAria2 ? "checked" : ""}`} style={smartUseAria2 ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                        <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                          <polyline points="1.5 5 4 7.5 8.5 2" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-semibold text-white flex items-center gap-1">
+                        Aria2 Ubrzanje <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Accordion za napredna podešavanja */}
+                  <div className={`ytdlp-advanced-accordion ${advancedOpen ? "open" : ""}`}>
+                    <button
+                      type="button"
+                      className="ytdlp-advanced-header"
+                      onClick={() => setAdvancedOpen(!advancedOpen)}
+                    >
+                      <span className="ytdlp-advanced-header-title">
+                        <Sliders className="w-4 h-4 text-blue-400" />
+                        Napredna podešavanja preuzimanja (yt-dlp)
+                      </span>
+                      <ChevronDown className={`ytdlp-advanced-chevron w-4 h-4 ${advancedOpen ? "rotated" : ""}`} />
+                    </button>
+                    {advancedOpen && (
+                      <div className="ytdlp-advanced-content">
+                        <div className="ytdlp-advanced-grid">
+                          <div className="ytdlp-advanced-field">
+                            <label>Uvoz kolačića (Cookies)</label>
+                            <CustomSelect
+                              value={ytdlpCookiesBrowser ? (ytdlpCookiesBrowser.charAt(0).toUpperCase() + ytdlpCookiesBrowser.slice(1)) : "Bez uvoza"}
+                              options={["Bez uvoza", "Chrome", "Edge", "Firefox", "Brave"]}
+                              onChange={(val) => setYtdlpCookiesBrowser(val === "Bez uvoza" ? "" : val.toLowerCase())}
+                            />
+                          </div>
+                          <div className="ytdlp-advanced-field">
+                            <label>Proksi (Proxy) URL</label>
+                            <input
+                              type="text"
+                              value={ytdlpProxy}
+                              onChange={e => setYtdlpProxy(e.target.value)}
+                              placeholder="npr. http://127.0.0.1:8080"
+                              className="ytdlp-advanced-input"
+                            />
+                          </div>
+                          <div className="ytdlp-advanced-field">
+                            <label>Limit brzine preuzimanja</label>
+                            <input
+                              type="text"
+                              value={ytdlpLimitRate}
+                              onChange={e => setYtdlpLimitRate(e.target.value)}
+                              placeholder="npr. 50K ili 5M"
+                              className="ytdlp-advanced-input"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="ytdlp-advanced-checkboxes">
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpImpersonate}
+                              onChange={e => setYtdlpImpersonate(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpImpersonate ? "checked" : ""}`} style={ytdlpImpersonate ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Browser Impersonation (Chrome)</span>
+                          </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpGeoBypass}
+                              onChange={e => setYtdlpGeoBypass(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpGeoBypass ? "checked" : ""}`} style={ytdlpGeoBypass ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Geo-Bypass (Zaobilaženje restrikcija)</span>
+                          </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpEmbedThumbnail}
+                              onChange={e => setYtdlpEmbedThumbnail(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpEmbedThumbnail ? "checked" : ""}`} style={ytdlpEmbedThumbnail ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Ugradi sličicu (Thumbnail) u video</span>
+                          </label>
+
+                          <label className="custom-checkbox-wrap" style={{ cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={ytdlpEmbedMetadata}
+                              onChange={e => setYtdlpEmbedMetadata(e.target.checked)}
+                            />
+                            <div className={`custom-checkbox-box ${ytdlpEmbedMetadata ? "checked" : ""}`} style={ytdlpEmbedMetadata ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
+                              <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                                <polyline points="1.5 5 4 7.5 8.5 2" />
+                              </svg>
+                            </div>
+                            <span className="text-xs font-semibold text-white">Ugradi metapodatke i poglavlja</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -522,7 +650,22 @@ export function DashboardTab() {
                 }
               </button>
               <button
-                onClick={() => { setSmartData(null); setSmartUrl(""); setSmartSelectedEpisodes([]); setSmartEpisodesRange(""); setSmartRtsStartEp(""); setSmartRtsEndEp(""); }}
+                onClick={() => {
+                  setSmartData(null);
+                  setSmartUrl("");
+                  setSmartSelectedEpisodes([]);
+                  setSmartEpisodesRange("");
+                  setSmartRtsStartEp("");
+                  setSmartRtsEndEp("");
+                  setYtdlpCookiesBrowser("");
+                  setYtdlpImpersonate(false);
+                  setYtdlpProxy("");
+                  setYtdlpGeoBypass(false);
+                  setYtdlpEmbedThumbnail(false);
+                  setYtdlpEmbedMetadata(false);
+                  setYtdlpLimitRate("");
+                  setAdvancedOpen(false);
+                }}
                 disabled={smartSubmitting}
                 style={{fontSize:"0.75rem", color:"var(--text-muted)", background:"none", border:"none", cursor: smartSubmitting ? "not-allowed" : "pointer", opacity: smartSubmitting ? 0.4 : 1}}
               >✕ Otkaži</button>

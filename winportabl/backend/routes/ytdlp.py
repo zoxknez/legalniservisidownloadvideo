@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter
@@ -17,6 +18,14 @@ class YtdlpDownloadRequest(BaseModel):
     subs: str = ""
     audio_only: bool = False
     use_aria2: bool = False
+    
+    cookies_browser: Optional[str] = None
+    impersonate_browser: bool = False
+    proxy: Optional[str] = None
+    geo_bypass: bool = False
+    embed_thumbnail: bool = False
+    embed_metadata: bool = False
+    limit_rate: Optional[str] = None
 
 
 @router.post("/download")
@@ -54,6 +63,28 @@ async def ytdlp_download(req: YtdlpDownloadRequest):
                 "--external-downloader", aria2_status.get("path"),
                 "--external-downloader-args", "aria2c:-j 16 -x 16 -s 16 -k 1M",
             ])
+
+    # Advanced options
+    if req.cookies_browser:
+        cmd.extend(["--cookies-from-browser", req.cookies_browser])
+
+    if req.impersonate_browser:
+        cmd.extend(["--impersonate", "chrome"])
+
+    if req.proxy and req.proxy.strip():
+        cmd.extend(["--proxy", req.proxy.strip()])
+
+    if req.geo_bypass:
+        cmd.extend(["--geo-bypass"])
+
+    if req.embed_thumbnail:
+        cmd.extend(["--embed-thumbnail"])
+
+    if req.embed_metadata:
+        cmd.extend(["--embed-metadata", "--embed-chapters"])
+
+    if req.limit_rate and req.limit_rate.strip():
+        cmd.extend(["--limit-rate", req.limit_rate.strip()])
 
     domain = urlparse(url).netloc.replace("www.", "")
     title = f"Univerzalni ({domain}): {url[:40]}"

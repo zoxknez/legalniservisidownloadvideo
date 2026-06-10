@@ -21,6 +21,16 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [smartRtsEndEp, setSmartRtsEndEp] = useState("");
   const [smartAudioOnly, setSmartAudioOnly] = useState(false);
   const [smartUseAria2, setSmartUseAria2] = useState(false);
+  
+  // Advanced yt-dlp options
+  const [ytdlpCookiesBrowser, setYtdlpCookiesBrowser] = useState("");
+  const [ytdlpImpersonate, setYtdlpImpersonate] = useState(false);
+  const [ytdlpProxy, setYtdlpProxy] = useState("");
+  const [ytdlpGeoBypass, setYtdlpGeoBypass] = useState(false);
+  const [ytdlpEmbedThumbnail, setYtdlpEmbedThumbnail] = useState(false);
+  const [ytdlpEmbedMetadata, setYtdlpEmbedMetadata] = useState(false);
+  const [ytdlpLimitRate, setYtdlpLimitRate] = useState("");
+  
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -201,6 +211,13 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             subs: smartSubs,
             audio_only: smartAudioOnly,
             use_aria2: smartUseAria2,
+            cookies_browser: ytdlpCookiesBrowser || null,
+            impersonate_browser: ytdlpImpersonate,
+            proxy: ytdlpProxy || null,
+            geo_bypass: ytdlpGeoBypass,
+            embed_thumbnail: ytdlpEmbedThumbnail,
+            embed_metadata: ytdlpEmbedMetadata,
+            limit_rate: ytdlpLimitRate || null,
           }),
         });
       } else {
@@ -215,6 +232,13 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         setSmartSelectedEpisodes([]);
         setSmartAudioOnly(false);
         setSmartUseAria2(false);
+        setYtdlpCookiesBrowser("");
+        setYtdlpImpersonate(false);
+        setYtdlpProxy("");
+        setYtdlpGeoBypass(false);
+        setYtdlpEmbedThumbnail(false);
+        setYtdlpEmbedMetadata(false);
+        setYtdlpLimitRate("");
       } else {
         const msg = await parseApiError(res, "Greška pri pokretanju preuzimanja.");
         showToast(msg, "error");
@@ -238,6 +262,13 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     smartSubs,
     smartUrl,
     smartUseAria2,
+    ytdlpCookiesBrowser,
+    ytdlpImpersonate,
+    ytdlpProxy,
+    ytdlpGeoBypass,
+    ytdlpEmbedThumbnail,
+    ytdlpEmbedMetadata,
+    ytdlpLimitRate,
   ]);
 
   return {
@@ -265,6 +296,20 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setSmartAudioOnly,
     smartUseAria2,
     setSmartUseAria2,
+    ytdlpCookiesBrowser,
+    setYtdlpCookiesBrowser,
+    ytdlpImpersonate,
+    setYtdlpImpersonate,
+    ytdlpProxy,
+    setYtdlpProxy,
+    ytdlpGeoBypass,
+    setYtdlpGeoBypass,
+    ytdlpEmbedThumbnail,
+    setYtdlpEmbedThumbnail,
+    ytdlpEmbedMetadata,
+    setYtdlpEmbedMetadata,
+    ytdlpLimitRate,
+    setYtdlpLimitRate,
     smartSubmitting,
     handleSmartDetect,
     debouncedDetect,

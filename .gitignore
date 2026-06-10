@@ -30,6 +30,8 @@ cat_struct.json
 # Built frontend (vite outDir → backend/static)
 backend/static/assets/
 backend/static/index.html
+winportabl/backend/static/assets/
+winportabl/backend/static/index.html
 
 # Widevine CDM & binaries (user-provided or downloaded; install via Settings or binaries/)
 device.wvd
