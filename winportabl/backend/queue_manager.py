@@ -931,6 +931,7 @@ class DownloadQueueManager:
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=root,
                 env=env,
+                limit=1024 * 1024 * 5,  # 5MB buffer limit to prevent LimitOverrunError
             )
 
             last_broadcast = time.monotonic()
