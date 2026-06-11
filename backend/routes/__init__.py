@@ -9,6 +9,7 @@ from .hrti import router as hrti_router
 from .eon import router as eon_router
 from .rts import router as rts_router
 from .hbo import router as hbo_router
+from .skyshowtime import router as skyshowtime_router
 from .sniffer import router as sniffer_router
 from .bridge import router as bridge_router
 from .scheduler import router as scheduler_router
@@ -27,6 +28,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(eon_router, prefix="/api/eon", tags=["EON"])
     app.include_router(rts_router, prefix="/api/rts", tags=["RTS Planeta"])
     app.include_router(hbo_router, prefix="/api/hbo", tags=["HBO Max"])
+    app.include_router(skyshowtime_router, prefix="/api/skyshowtime", tags=["SkyShowtime"])
     app.include_router(sniffer_router, prefix="/api/sniffer", tags=["Sniffer"])
     app.include_router(bridge_router, prefix="/api/bridge", tags=["Bridge"])
     app.include_router(scheduler_router, prefix="/api/scheduler", tags=["Scheduler"])

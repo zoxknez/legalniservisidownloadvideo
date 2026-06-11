@@ -83,7 +83,7 @@ export function DrmTestKeys({ showToast }: DrmTestKeysProps) {
             value={testService} onChange={e => setTestService(e.target.value)}
             className="w-full bg-white/[0.04] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500/50"
             style={{backgroundColor:"rgba(255,255,255,0.04)"}}>
-            {["manual","hrti","eon","rtsplaneta","hbomax"].map(s => (
+            {["manual","hrti","eon","rtsplaneta","hbomax","skyshowtime"].map(s => (
               <option key={s} value={s} style={{background:"#1a1a2e"}}>{s}</option>
             ))}
           </select>

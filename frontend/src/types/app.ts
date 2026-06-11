@@ -2,7 +2,7 @@ import type { CredentialsSecurityMap } from "../components/SecurityPanels";
 
 export type ToastType = "success" | "error" | "info";
 
-export type ServiceName = "voyo" | "hrti" | "eon" | "rts" | "hbo" | "hbomax" | "yt-dlp";
+export type ServiceName = "voyo" | "hrti" | "eon" | "rts" | "hbo" | "hbomax" | "skyshowtime" | "yt-dlp";
 
 export type DownloadStatus = "pending" | "downloading" | "finished" | "failed" | "cancelled";
 
@@ -115,6 +115,32 @@ export interface VoyoSeriesInfo {
   nbSeasons?: number;
   seasons?: VoyoSeason[];
   episodes: VoyoEpisode[];
+}
+
+export interface SkyShowtimeEpisode {
+  id: string;
+  title: string;
+  season: number;
+  episode: number;
+  length_mins: number;
+  drm: boolean;
+  has_subs?: boolean;
+}
+
+export interface SkyShowtimeSeason {
+  season: number;
+  episodes: SkyShowtimeEpisode[];
+}
+
+export interface SkyShowtimeSeriesInfo {
+  success?: boolean;
+  title: string;
+  description: string;
+  nbSeasons?: number;
+  seasons?: SkyShowtimeSeason[];
+  episodes: SkyShowtimeEpisode[];
+  series_url?: string;
+  slug?: string;
 }
 
 export interface EonMediaItem {

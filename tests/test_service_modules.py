@@ -9,6 +9,7 @@ from backend.core.services.runner import (
     HRTI_DOWNLOADER,
     RTS_DOWNLOADER,
     VOYO_DOWNLOADER,
+    SKYSHOWTIME_DOWNLOADER,
 )
 
 
@@ -21,6 +22,7 @@ from backend.core.services.runner import (
         EON_DOWNLOADER,
         RTS_DOWNLOADER,
         HBO_DOWNLOADER,
+        SKYSHOWTIME_DOWNLOADER,
     ],
 )
 def test_service_modules_import(module: str):

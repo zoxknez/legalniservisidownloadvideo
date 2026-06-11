@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useAppConfigSlice, useAppShellSlice, useHboSlice, useSnifferSlice } from "../../context/appStore";
+import { useAppConfigSlice, useAppShellSlice, useHboSlice, useSkyshowtimeSlice, useSnifferSlice } from "../../context/appStore";
 import { useCredentials } from "./useCredentials";
 
 const CLEAR_SERVICE_LABELS: Record<string, string> = {
@@ -8,6 +8,7 @@ const CLEAR_SERVICE_LABELS: Record<string, string> = {
   rts: "RTS Planeta",
   eon: "EON TV",
   hbomax: "HBO Max",
+  skyshowtime: "SkyShowtime",
 };
 
 const CLEAR_FIELD_MAP: Record<string, (c: ReturnType<typeof useCredentials>) => void> = {
@@ -37,6 +38,7 @@ export function useSettingsTab() {
   const sniffer = useSnifferSlice();
   const credentials = useCredentials();
   const hbo = useHboSlice();
+  const skyshowtime = useSkyshowtimeSlice();
   const { showToast, setActiveTab } = useAppShellSlice();
 
   const handleClearCredentials = useCallback(
@@ -52,8 +54,11 @@ export function useSettingsTab() {
         hbo.setHboMarket("emea");
         hbo.refreshAuth();
       }
+      if (service === "skyshowtime") {
+        skyshowtime.refreshAuth();
+      }
     },
-    [config, credentials, hbo],
+    [config, credentials, hbo, skyshowtime],
   );
 
   return {
@@ -111,6 +116,10 @@ export function useSettingsTab() {
     hboSubmitting: hbo.hboSubmitting,
     hboAuth: hbo.hboAuth,
     refreshHboAuth: hbo.refreshAuth,
+    skyshowtimeAuth: skyshowtime.skyshowtimeAuth,
+    refreshSkyshowtimeAuth: skyshowtime.refreshAuth,
+    startSkyshowtimeBrowserSync: skyshowtime.startSkyshowtimeBrowserSync,
+    skyshowtimeSubmitting: skyshowtime.skyshowtimeSubmitting,
     ...credentials,
   };
 }

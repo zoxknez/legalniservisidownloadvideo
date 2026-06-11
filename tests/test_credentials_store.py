@@ -103,3 +103,24 @@ def test_clear_service_credentials(temp_config, fake_keyring):
 def test_clear_service_unknown_raises(temp_config):
     with pytest.raises(ValueError, match="Nepoznat servis"):
         cs.clear_service_credentials("unknown-svc", temp_config)
+
+
+def test_clear_skyshowtime_native_files(temp_config, fake_keyring, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    sky_dir = tmp_path / ".skyshowtime"
+    sky_dir.mkdir(parents=True)
+    (sky_dir / "tokens.json").write_text('{"user_token":"x"}', encoding="utf-8")
+    (sky_dir / "cookies.txt").write_text("# cookies", encoding="utf-8")
+
+    cs.save_service_credentials(
+        "skyshowtime",
+        {"token": "secret", "territory": "RS", "expiry": "2099"},
+        config_module=temp_config,
+    )
+
+    result = cs.clear_service_credentials("skyshowtime", temp_config)
+
+    assert result["service"] == "skyshowtime"
+    assert not (sky_dir / "tokens.json").exists()
+    assert not (sky_dir / "cookies.txt").exists()
+    assert temp_config.get_credentials("skyshowtime").get("territory", "") == ""

@@ -10,6 +10,7 @@ import {
   RtsSliceProvider,
   SmartDashboardSliceProvider,
   SnifferSliceProvider,
+  SkyshowtimeSliceProvider,
   VoyoSliceProvider,
 } from "./sliceContexts";
 
@@ -23,9 +24,11 @@ export function ComposeSliceProviders({ store, children }: { store: AppStore; ch
               <EonSliceProvider value={store.eon}>
                 <RtsSliceProvider value={store.rts}>
                   <HboSliceProvider value={store.hbo}>
-                    <SmartDashboardSliceProvider value={store.smart}>
-                      <SnifferSliceProvider value={store.sniffer}>{children}</SnifferSliceProvider>
-                    </SmartDashboardSliceProvider>
+                    <SkyshowtimeSliceProvider value={store.skyshowtime}>
+                      <SmartDashboardSliceProvider value={store.smart}>
+                        <SnifferSliceProvider value={store.sniffer}>{children}</SnifferSliceProvider>
+                      </SmartDashboardSliceProvider>
+                    </SkyshowtimeSliceProvider>
                   </HboSliceProvider>
                 </RtsSliceProvider>
               </EonSliceProvider>

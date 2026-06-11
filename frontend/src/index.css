@@ -777,6 +777,12 @@ select option {
   --frame-border: rgba(249, 115, 22, 0.12) !important;
 }
 
+/* SkyShowtime - Teal Theme */
+.tab-content-skyshowtime {
+  --frame-glow: rgba(20, 184, 166, 0.06) !important;
+  --frame-border: rgba(20, 184, 166, 0.12) !important;
+}
+
 /* HRTi Catalog - Cyan Theme */
 .tab-content-hrti {
   --frame-glow: rgba(6, 182, 212, 0.06) !important;
@@ -1517,6 +1523,9 @@ textarea {
 /* HBO color */
 .smart-cta-hbomax { background: linear-gradient(135deg, #9333ea, #7c3aed); }
 .smart-cta-hbomax:hover:not(:disabled) { box-shadow: 0 8px 30px rgba(147,51,234,0.5); }
+
+.smart-cta-skyshowtime { background: linear-gradient(135deg, #14b8a6, #0891b2); }
+.smart-cta-skyshowtime:hover:not(:disabled) { box-shadow: 0 8px 30px rgba(20,184,166,0.5); }
 /* RTS Planeta alias */
 .smart-cta-rtsplaneta { background: linear-gradient(135deg, #f43f5e, #e11d48); }
 .smart-cta-rtsplaneta:hover:not(:disabled) { box-shadow: 0 8px 30px rgba(244,63,94,0.5); }
@@ -1701,6 +1710,7 @@ textarea {
 .queue-card-eon      { border-left: 3px solid #10b981 !important; }
 .queue-card-rts      { border-left: 3px solid #f43f5e !important; }
 .queue-card-hbomax   { border-left: 3px solid #9333ea !important; }
+.queue-card-skyshowtime { border-left: 3px solid #06b6d4 !important; }
 .queue-card-unknown  { border-left: 3px solid rgba(255,255,255,0.15) !important; }
 
 /* Service icon pill in queue */
@@ -1720,6 +1730,7 @@ textarea {
 .queue-pill-eon    { background: rgba(16,185,129,0.12);  color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
 .queue-pill-rts    { background: rgba(244,63,94,0.12);   color: #fb7185; border: 1px solid rgba(244,63,94,0.25); }
 .queue-pill-hbomax { background: rgba(147,51,234,0.12);  color: #c084fc; border: 1px solid rgba(147,51,234,0.25); }
+.queue-pill-skyshowtime { background: rgba(6,182,212,0.12);  color: #22d3ee; border: 1px solid rgba(6,182,212,0.25); }
 .queue-pill-unknown{ background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-glass); }
 
 /* ══════════════════════════════════════════
@@ -1834,6 +1845,7 @@ textarea {
 .tab-header-eon   { background: linear-gradient(135deg, rgba(16,185,129,0.07) 0%, rgba(5,150,105,0.04) 100%);  border-color: rgba(16,185,129,0.15) !important; }
 .tab-header-rts   { background: linear-gradient(135deg, rgba(244,63,94,0.07) 0%, rgba(225,29,72,0.04) 100%);   border-color: rgba(244,63,94,0.15) !important; }
 .tab-header-hbo   { background: linear-gradient(135deg, rgba(147,51,234,0.09) 0%, rgba(126,34,206,0.05) 100%); border-color: rgba(147,51,234,0.18) !important; }
+.tab-header-skyshowtime { background: linear-gradient(135deg, rgba(20,184,166,0.08) 0%, rgba(13,148,136,0.04) 100%); border-color: rgba(20,184,166,0.16) !important; }
 .tab-header-drm   { background: linear-gradient(135deg, rgba(139,92,246,0.07) 0%, rgba(99,102,241,0.04) 100%);  border-color: rgba(139,92,246,0.15) !important; }
 .tab-header-iptv  { background: linear-gradient(135deg, rgba(59,130,246,0.07) 0%, rgba(37,99,235,0.04) 100%);  border-color: rgba(59,130,246,0.15) !important; }
 .scroll-mt-24 {
@@ -1952,6 +1964,9 @@ textarea {
 }
 .tab-header-hbo::after {
   background: radial-gradient(circle, rgba(147, 51, 234, 0.18) 0%, rgba(147, 51, 234, 0) 70%) !important;
+}
+.tab-header-skyshowtime::after {
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.16) 0%, rgba(20, 184, 166, 0) 70%) !important;
 }
 .tab-header-dash::after {
   background: radial-gradient(circle, rgba(251, 191, 36, 0.16) 0%, rgba(251, 191, 36, 0) 70%) !important;

@@ -11,6 +11,11 @@ export interface UseSnifferApplyTargets {
   setHboManifestUrl: (value: string) => void;
   setHboLicenseUrl: (value: string) => void;
   setHboDirectTitle: (value: string) => void;
+  setSkyshowtimeDirectMode: (value: boolean) => void;
+  setSkyshowtimeManifestUrl: (value: string) => void;
+  setSkyshowtimeLicenseUrl: (value: string) => void;
+  setSkyshowtimeLicenseToken: (value: string) => void;
+  setSkyshowtimeDirectTitle: (value: string) => void;
   setEonTarget: (value: string) => void;
 }
 
@@ -89,6 +94,20 @@ export function useSniffer({ showToast, applyTargets }: UseSnifferOptions) {
         if (item.title) applyTargets.setHboDirectTitle(item.title);
         applyTargets.setActiveTab("hbo");
         showToast("⚡ HBO Max Bypass polja popunjena!", "success");
+      } else if (service === "skyshowtime") {
+        applyTargets.setSkyshowtimeDirectMode(true);
+        if (item.manifestUrl) applyTargets.setSkyshowtimeManifestUrl(item.manifestUrl);
+        if (item.licenseUrl) applyTargets.setSkyshowtimeLicenseUrl(item.licenseUrl);
+        if (item.title) applyTargets.setSkyshowtimeDirectTitle(item.title);
+        const hdrs = item.headers || {};
+        const licenseToken =
+          hdrs["X-License-Token"] ||
+          hdrs["x-license-token"] ||
+          hdrs["X-License-token"] ||
+          "";
+        if (licenseToken) applyTargets.setSkyshowtimeLicenseToken(licenseToken);
+        applyTargets.setActiveTab("skyshowtime");
+        showToast("⚡ SkyShowtime Bypass polja popunjena!", "success");
       } else if (service === "eon") {
         applyTargets.setEonTarget(item.manifestUrl || "");
         applyTargets.setActiveTab("eon");

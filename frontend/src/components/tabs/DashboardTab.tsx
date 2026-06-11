@@ -73,6 +73,12 @@ export function DashboardTab() {
     setYtdlpDownloadPlaylist,
     ytdlpPlaylistItems,
     setYtdlpPlaylistItems,
+    smartSkyVcodec,
+    setSmartSkyVcodec,
+    smartSkyQuality,
+    setSmartSkyQuality,
+    smartSkyAudioLang,
+    setSmartSkyAudioLang,
   } = useSmartDashboardTab();
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -85,6 +91,7 @@ export function DashboardTab() {
     rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
     rtsplaneta: { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)", example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
     hbomax:  { emoji:"🟣", name:"HBO Max",     color:"#9333ea", glow:"rgba(147,51,234,0.08)",   example:"https://www.max.com/show/urn:hbo:episode:xyz123", exampleLabel:"Epizoda/film" },
+    skyshowtime: { emoji:"🩵", name:"SkyShowtime", color:"#14b8a6", glow:"rgba(20,184,166,0.08)", example:"https://www.skyshowtime.com/watch/asset/tv/naziv/ID", exampleLabel:"Serija ili film" },
     ytdlp:   { emoji:"🌐", name:"Univerzalno",  color:"#3b82f6", glow:"rgba(59,130,246,0.08)",   example:"https://www.youtube.com/watch?v=dQw4w9WgXcQ", exampleLabel:"YouTube, X, TikTok, FB..." },
   };
   const svcKeys = Object.keys(SVC_THEMES).filter(k => k !== "rtsplaneta");
@@ -734,6 +741,37 @@ export function DashboardTab() {
                 </div>
               ) : (
                 <>
+                  {smartData.service === "skyshowtime" && (
+                    <>
+                      <div>
+                        <label>Video kodek</label>
+                        <CustomSelect
+                          value={smartSkyVcodec}
+                          options={["H264", "H265"]}
+                          onChange={(val) => setSmartSkyVcodec(val)}
+                          formatLabel={(val) => val === "H264" ? "H.264" : "H.265 (HEVC)"}
+                        />
+                      </div>
+                      <div>
+                        <label>Kvalitet</label>
+                        <CustomSelect
+                          value={smartSkyQuality}
+                          options={["SDR", "HDR10", "DV"]}
+                          onChange={(val) => setSmartSkyQuality(val)}
+                          formatLabel={(val) => val}
+                        />
+                      </div>
+                      <div>
+                        <label>Audio jezik</label>
+                        <CustomSelect
+                          value={smartSkyAudioLang}
+                          options={["en", "sr", "hr", "sl"]}
+                          onChange={(val) => setSmartSkyAudioLang(val)}
+                          formatLabel={(val) => val.toUpperCase()}
+                        />
+                      </div>
+                    </>
+                  )}
                   {(smartData.service === "voyo" || smartData.service === "ytdlp") && (
                     <div>
                       <label>Rezolucija</label>

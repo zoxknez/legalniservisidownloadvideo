@@ -9,6 +9,7 @@ import type { RtsSlice } from "../hooks/domains/useRts";
 import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
+import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
 import type { AppStatus } from "../types/app";
 
 const noop = () => {};
@@ -31,6 +32,7 @@ export const mockAppStatus: AppStatus = {
     rts: { authenticated: false },
     eon: { authenticated: false },
     hbo: { authenticated: false },
+    skyshowtime: { authenticated: false },
   },
 };
 
@@ -277,6 +279,50 @@ function rtsSlice(overrides: Partial<RtsSlice> = {}): RtsSlice {
   } as RtsSlice;
 }
 
+function skyshowtimeSlice(overrides: Partial<SkyshowtimeSlice> = {}): SkyshowtimeSlice {
+  return {
+    skyshowtimeTarget: "",
+    setSkyshowtimeTarget: noop,
+    skyshowtimeSeason: "",
+    setSkyshowtimeSeason: noop,
+    skyshowtimeStartEp: "1",
+    setSkyshowtimeStartEp: noop,
+    skyshowtimeEndEp: "",
+    setSkyshowtimeEndEp: noop,
+    skyshowtimeVcodec: "H264",
+    setSkyshowtimeVcodec: noop,
+    skyshowtimeQuality: "SDR",
+    setSkyshowtimeQuality: noop,
+    skyshowtimeAudioLang: "en",
+    setSkyshowtimeAudioLang: noop,
+    skyshowtimeDirectMode: false,
+    setSkyshowtimeDirectMode: noop,
+    skyshowtimeManifestUrl: "",
+    setSkyshowtimeManifestUrl: noop,
+    skyshowtimeLicenseUrl: "",
+    setSkyshowtimeLicenseUrl: noop,
+    skyshowtimeLicenseToken: "",
+    setSkyshowtimeLicenseToken: noop,
+    skyshowtimeDirectTitle: "",
+    setSkyshowtimeDirectTitle: noop,
+    skyshowtimeSeriesData: null,
+    setSkyshowtimeSeriesData: noop,
+    selectedSkyshowtimeEpisodes: [],
+    setSelectedSkyshowtimeEpisodes: noop,
+    skyshowtimeSearching: false,
+    searchSkyshowtimeSeries: noopAsync,
+    skyshowtimeSubmitting: false,
+    skyshowtimeAuth: null,
+    refreshAuth: noop,
+    startSkyshowtimeBrowserSync: noopAsync,
+    startSkyshowtimeLogin: noopAsync,
+    startSkyshowtimeDownload: noopAsync,
+    startSkyshowtimeDirectDownload: noopAsync,
+    pasteSkyshowtimeTarget: noopAsync,
+    ...overrides,
+  } as SkyshowtimeSlice;
+}
+
 function hboSlice(overrides: Partial<HboSlice> = {}): HboSlice {
   return {
     hboMarket: "emea",
@@ -357,6 +403,12 @@ function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboar
     setYtdlpDownloadPlaylist: noop,
     ytdlpPlaylistItems: "",
     setYtdlpPlaylistItems: noop,
+    smartSkyVcodec: "H264",
+    setSmartSkyVcodec: noop,
+    smartSkyQuality: "SDR",
+    setSmartSkyQuality: noop,
+    smartSkyAudioLang: "sr",
+    setSmartSkyAudioLang: noop,
     handleSmartDetect: noopAsync,
     startSmartDownload: noopAsync,
     ...overrides,
@@ -398,6 +450,7 @@ export type TestStoreOverrides = {
   eon?: Partial<EonSlice>;
   rts?: Partial<RtsSlice>;
   hbo?: Partial<HboSlice>;
+  skyshowtime?: Partial<SkyshowtimeSlice>;
   smart?: Partial<SmartDashboardSlice>;
   sniffer?: Partial<SnifferSlice>;
 };
@@ -412,6 +465,7 @@ export function createTestStore(overrides: TestStoreOverrides = {}): AppStore {
     eon: eonSlice(overrides.eon),
     rts: rtsSlice(overrides.rts),
     hbo: hboSlice(overrides.hbo),
+    skyshowtime: skyshowtimeSlice(overrides.skyshowtime),
     smart: smartSlice(overrides.smart),
     sniffer: snifferSlice(overrides.sniffer),
   };

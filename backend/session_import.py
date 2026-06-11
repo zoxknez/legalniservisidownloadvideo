@@ -14,7 +14,22 @@ SERVICE_ALIASES = {
     "rts": "rtsplaneta",
     "hbo": "hbomax",
     "max": "hbomax",
+    "sky": "skyshowtime",
+    "skyott": "skyshowtime",
 }
+
+
+def _write_skyshowtime_cookies_txt(cookie_path: Path, cookies: Dict[str, str]) -> None:
+    lines = [
+        "# Netscape HTTP Cookie File",
+        "# Imported by Video Download Servisi",
+        "",
+    ]
+    for name, value in cookies.items():
+        if not value:
+            continue
+        lines.append(f".skyshowtime.com\tTRUE\t/\tTRUE\t0\t{name}\t{value}")
+    cookie_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _extract_token_string(service: str, data: str) -> str:
@@ -208,6 +223,49 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
             set_secret("hbomax", "access_token", access)
         return {"service": service, "message": "HBO Max token uvezen."}
 
+    if service == "skyshowtime":
+        sky_dir = Path.home() / ".skyshowtime"
+        sky_dir.mkdir(parents=True, exist_ok=True)
+        cookie_path = sky_dir / "cookies.txt"
+
+        if data.startswith("#") or ("\t" in data and "skyshowtime" in data.lower()):
+            cookie_path.write_text(data, encoding="utf-8")
+        elif data.startswith("{"):
+            try:
+                js = json.loads(data)
+            except json.JSONDecodeError as exc:
+                raise ValueError("SkyShowtime uvoz: neispravan JSON.") from exc
+            if isinstance(js.get("cookies"), dict):
+                _write_skyshowtime_cookies_txt(cookie_path, js["cookies"])
+            elif isinstance(js, dict) and js and all(isinstance(v, str) for v in js.values()):
+                _write_skyshowtime_cookies_txt(cookie_path, js)
+            else:
+                raise ValueError(
+                    "SkyShowtime uvoz: očekivan Netscape cookies.txt ili JSON sa poljem cookies."
+                )
+        else:
+            raise ValueError(
+                "SkyShowtime uvoz: nalepite Netscape cookies.txt ili JSON sa kolačićima."
+            )
+
+        try:
+            cookie_path.chmod(0o600)
+        except OSError:
+            pass
+
+        try:
+            from backend.core.services.skyshowtime.skyshowtime_auth import SkyShowtimeAuth
+
+            auth = SkyShowtimeAuth()
+            auth.login_with_cookies(str(cookie_path))
+            return {"service": service, "message": "SkyShowtime kolačići uvezeni i token osvežen."}
+        except Exception as exc:
+            logger.warning("SkyShowtime token refresh after import failed: %s", exc)
+            return {
+                "service": service,
+                "message": f"SkyShowtime kolačići sačuvani u {cookie_path} (token nije osvežen: {exc})",
+            }
+
     raise ValueError(f"Uvoz sesije nije podržan za servis: {service}")
 
 
@@ -226,7 +284,10 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
     if not isinstance(blob, dict):
         return None
 
-    batch_keys = {"voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max", "eon"}
+    batch_keys = {
+        "voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max", "eon",
+        "skyshowtime", "sky", "skyott",
+    }
     if not batch_keys.intersection(k.lower() for k in blob.keys()):
         return None
 
@@ -242,6 +303,9 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
         ("hbo", "hbomax"),
         ("max", "hbomax"),
         ("eon", "eon"),
+        ("skyshowtime", "skyshowtime"),
+        ("sky", "skyshowtime"),
+        ("skyott", "skyshowtime"),
     ]
     done: set[str] = set()
     for src_key, svc in mapping:

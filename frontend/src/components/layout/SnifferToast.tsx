@@ -21,6 +21,7 @@ export function SnifferToast() {
   return (
   <div className={`fixed bottom-6 right-6 z-50 flex flex-col gap-3.5 p-5 rounded-xl glass-panel animate-slide max-w-sm w-96 border border-glass shadow-2xl ${
     latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "glow-purple-card border-purple-500/30" :
+    latestSniffed.service === "skyshowtime" ? "glow-cyan-card border-teal-500/30" :
     latestSniffed.service === "voyo" ? "glow-orange-card border-orange-500/30" :
     latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "glow-rose-card border-rose-500/30" :
     latestSniffed.service === "eon" ? "glow-green-card border-green-500/30" :
@@ -30,6 +31,7 @@ export function SnifferToast() {
       <div className="flex items-center gap-3">
         <div className={`w-10 h-10 rounded-lg flex items-center justify-center animate-pulse ${
           latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "bg-purple-600/20 text-purple-400" :
+          latestSniffed.service === "skyshowtime" ? "bg-teal-600/20 text-teal-400" :
           latestSniffed.service === "voyo" ? "bg-orange-600/20 text-orange-400" :
           latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "bg-rose-600/20 text-rose-400" :
           latestSniffed.service === "eon" ? "bg-emerald-600/20 text-emerald-400" :
@@ -43,6 +45,7 @@ export function SnifferToast() {
           </span>
           <h4 className="text-sm font-extrabold text-white">
             Presretnut {latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "HBO Max" :
+                        latestSniffed.service === "skyshowtime" ? "SkyShowtime" :
                         latestSniffed.service === "voyo" ? "Voyo" :
                         latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "RTS Planeta" :
                         latestSniffed.service === "eon" ? "EON TV" :
@@ -107,6 +110,7 @@ export function SnifferToast() {
         onClick={() => applySniffedResource(latestSniffed.service)}
         className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-1.5 transition-all shadow-lg hover:shadow-xl min-w-[120px] ${
           latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20" :
+          latestSniffed.service === "skyshowtime" ? "bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 shadow-teal-500/20" :
           latestSniffed.service === "voyo" ? "bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 shadow-orange-500/20" :
           latestSniffed.service === "rtsplaneta" || latestSniffed.service === "rts" ? "bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 shadow-rose-500/20" :
           latestSniffed.service === "eon" ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20" :

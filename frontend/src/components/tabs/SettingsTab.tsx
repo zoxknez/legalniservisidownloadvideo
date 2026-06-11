@@ -131,6 +131,9 @@ export function SettingsTab() {
     startHboLogin,
     hboSubmitting,
     hboAuth,
+    skyshowtimeAuth,
+    startSkyshowtimeBrowserSync,
+    skyshowtimeSubmitting,
     ytdlpUpdating,
     handleUpdateYtdlp,
     ytdlpNameTemplate,
@@ -245,7 +248,7 @@ export function SettingsTab() {
           <div className="flex flex-col gap-3">
             <h4 className="font-bold text-xs text-indigo-300 tracking-wider uppercase">Kako funkcioniše automatski uvoz?</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
-              Aplikacija bezbedno skenira lokalne profile instaliranih pretraživača (**Chrome, Edge, Brave**) na vašem računaru i dešifruje aktivne sesijske kolačiće za <strong className="text-white">RTS Planetu, EON TV, Voyo i HRTi</strong> koristeći Windows DPAPI zaštitu. Za <strong className="text-white">HBO Max</strong> koristite uvoz sesije ili bookmarklet ispod.
+              Aplikacija bezbedno skenira lokalne profile instaliranih pretraživača (**Chrome, Edge, Brave**) na vašem računaru i dešifruje aktivne sesijske kolačiće za <strong className="text-white">RTS Planetu, EON TV, Voyo, HRTi i SkyShowtime</strong> koristeći Windows DPAPI zaštitu. Za <strong className="text-white">HBO Max</strong> koristite uvoz sesije ili bookmarklet ispod.
             </p>
             <div className="p-3.5 rounded-lg bg-black/40 border border-white/[0.04] text-[11px] text-text-muted flex flex-col gap-2">
               <span className="flex items-center gap-1.5 text-amber-400 font-bold">
@@ -664,13 +667,14 @@ export function SettingsTab() {
             <label>Izaberite servis</label>
             <CustomSelect
               value={importService}
-              options={["voyo", "hrti", "rtsplaneta", "hbomax", "eon"]}
+              options={["voyo", "hrti", "rtsplaneta", "hbomax", "skyshowtime", "eon"]}
               onChange={(val) => setImportService(val)}
               formatLabel={(val) => {
                 if (val === "voyo") return "Voyo";
                 if (val === "hrti") return "HRTi";
                 if (val === "rtsplaneta") return "RTS Planeta";
                 if (val === "hbomax") return "HBO Max";
+                if (val === "skyshowtime") return "SkyShowtime (kolačići)";
                 if (val === "eon") return "EON TV (kolačići)";
                 return val;
               }}
@@ -1096,6 +1100,34 @@ export function SettingsTab() {
                 "--btn-grad-end": "#7e22ce",
                 "--btn-glow": "rgba(147,51,234,0.25)",
                 "--btn-glow-hover": "rgba(147,51,234,0.45)",
+              })}
+            />
+          </div>
+
+          {/* SkyShowtime */}
+          <div className="flex flex-col gap-4 p-6 rounded-lg bg-white/[0.02] border border-glass glow-cyan-card glow-card-premium transition-all hover:bg-white/[0.03]">
+            <h4 className="font-extrabold text-base text-white flex items-center gap-2 border-b border-white/[0.03] pb-2">
+              <Tv className="w-4 h-4 text-cyan-400" />
+              SkyShowtime
+              {skyshowtimeAuth?.authenticated && (
+                <span className="text-[9px] font-bold text-emerald-400 ml-auto">Sesija aktivna</span>
+              )}
+            </h4>
+            <p className="text-[10px] text-text-muted m-0 leading-relaxed">
+              Ulogujte se na skyshowtime.com u Chrome/Edge/Brave, zatvorite pretraživač i pokrenite sinhronizaciju.
+              Alternativa: uvoz Netscape cookies.txt u sekciji Uvoz sesije.
+            </p>
+            <SettingsCredentialFooter
+              loginLabel="Sinhronizuj iz pretraživača"
+              onLogin={() => void startSkyshowtimeBrowserSync()}
+              onClear={() => void handleClearCredentials("skyshowtime")}
+              loginLoading={skyshowtimeSubmitting}
+              clearLoading={clearingService === "skyshowtime"}
+              loginStyle={cssVars({
+                "--btn-grad-start": "#06b6d4",
+                "--btn-grad-end": "#0891b2",
+                "--btn-glow": "rgba(6,182,212,0.25)",
+                "--btn-glow-hover": "rgba(6,182,212,0.45)",
               })}
             />
           </div>

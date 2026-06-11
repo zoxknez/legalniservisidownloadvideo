@@ -35,7 +35,8 @@ DEFAULT_CONFIG = {
         "eon": {"username": "", "password": "", "serial": "", "number": ""},
         "hbomax": {"market": "emea", "token": ""},
         "rtsplaneta": {"email": "", "password": ""},
-        "hrti": {"email": "", "password": ""}
+        "hrti": {"email": "", "password": ""},
+        "skyshowtime": {"token": "", "expiry": "", "territory": "RS"}
     },
     "sniffer": {
         "auto_download": True

@@ -8,6 +8,7 @@ import type { RtsSlice } from "../hooks/domains/useRts";
 import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
+import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
 
 /** Flat view of all app slices — prefer slice hooks for new code. */
 export type AppContextValue = AppShellSlice &
@@ -18,5 +19,6 @@ export type AppContextValue = AppShellSlice &
   EonSlice &
   RtsSlice &
   HboSlice &
+  SkyshowtimeSlice &
   SmartDashboardSlice &
   SnifferSlice;

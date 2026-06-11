@@ -18,6 +18,9 @@ const RtsTab = lazy(() =>
 const HboTab = lazy(() =>
   import("../tabs/HboTab").then((m) => ({ default: m.HboTab })),
 );
+const SkyShowtimeTab = lazy(() =>
+  import("../tabs/SkyShowtimeTab").then((m) => ({ default: m.SkyShowtimeTab })),
+);
 const IptvTab = lazy(() =>
   import("../tabs/IptvTab").then((m) => ({ default: m.IptvTab })),
 );
@@ -53,6 +56,7 @@ export function ActiveTabContent({ activeTab }: { activeTab: string }) {
         {activeTab === "eon" && <EonTab />}
         {activeTab === "rts" && <RtsTab />}
         {activeTab === "hbo" && <HboTab />}
+        {activeTab === "skyshowtime" && <SkyShowtimeTab />}
         {activeTab === "iptv" && <IptvTab />}
         {activeTab === "drm" && <DrmPanel />}
         {activeTab === "settings" && <SettingsTab />}

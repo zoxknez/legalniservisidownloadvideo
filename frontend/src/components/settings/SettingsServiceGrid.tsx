@@ -1,4 +1,4 @@
-import { Film, Play, Radio, Tv, Zap } from "lucide-react";
+import { Film, Play, Radio, Tv, Video, Zap } from "lucide-react";
 import type { AppStatus } from "../../types/app";
 
 const SERVICES = [
@@ -7,6 +7,7 @@ const SERVICES = [
   { key: "eon", label: "EON TV", icon: Play, color: "service-eon", authKey: "ready" as const },
   { key: "rtsplaneta", label: "RTS Planeta", icon: Radio, color: "service-rts", authKey: "authenticated" as const },
   { key: "hbomax", label: "HBO Max", icon: Zap, color: "service-hbo", authKey: "authenticated" as const },
+  { key: "skyshowtime", label: "SkyShowtime", icon: Video, color: "text-cyan-400", authKey: "authenticated" as const },
 ] as const;
 
 interface SettingsServiceGridProps {
@@ -25,7 +26,9 @@ export function SettingsServiceGrid({ status }: SettingsServiceGridProps) {
         const hint =
           key === "hbomax" && !auth
             ? "Uvoz sesije, bookmarklet ili device login"
-            : key === "eon" && !auth
+            : key === "skyshowtime" && !auth
+              ? "Browser sync ili uvoz cookies.txt"
+              : key === "eon" && !auth
               ? "Uređaj + kolačići ili auto-sync"
               : key === "voyo" && auth
                 ? "AES-128 HLS (bez Widevine)"

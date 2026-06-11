@@ -62,7 +62,7 @@ export function DrmCertPrefetch({ onHealthRefresh, showToast }: DrmCertPrefetchP
             value={prefetchService} onChange={e => setPrefetchService(e.target.value)}
             className="w-full bg-white/[0.04] border border-white/[0.1] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50"
             style={{backgroundColor:"rgba(255,255,255,0.04)"}}>
-            {["hrti","eon","rtsplaneta","hbomax","manual"].map(s => (
+            {["hrti","eon","rtsplaneta","hbomax","skyshowtime","manual"].map(s => (
               <option key={s} value={s} style={{background:"#1a1a2e"}}>{s}</option>
             ))}
           </select>

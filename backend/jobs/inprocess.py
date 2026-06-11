@@ -129,6 +129,9 @@ def execute_job(
         if service == "eon":
             from backend.jobs.eon_job import run_eon_job
             return run_eon_job(action, params, log_fn, cancel_event)
+        if service == "skyshowtime":
+            from backend.jobs.skyshowtime_job import run_skyshowtime_job
+            return run_skyshowtime_job(action, params, log_fn, cancel_event)
 
     log_fn(f"ERROR Nepoznat in-process servis: {service}")
     return False

@@ -7,6 +7,7 @@ from backend.services.hrti_adapter import HrtiAdapter
 from backend.services.eon_adapter import EonAdapter
 from backend.services.rts_adapter import RtsAdapter
 from backend.services.hbo_adapter import HboAdapter
+from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,11 @@ EON_VOD_RE = re.compile(
 HBO_URN_RE = re.compile(
     r"(?:play\.)?(?:hbomax|max)\.com/(?:video|episode|page|feature|show|movie|series)/([^?#]+)"
     r"|(?:play\.)?(?:hbomax|max)\.com/.*/([a-f0-9\-]{36})",
+    re.I,
+)
+
+SKYSHOWTIME_ASSET_RE = re.compile(
+    r"skyshowtime\.com/watch/asset(/(?:movies|tv|kids)/[^?#]+)",
     re.I,
 )
 
@@ -76,7 +82,15 @@ class SmartParser:
             video_id = m.group(1) or m.group(2) or m.group(3)
             return {"service": "voyo", "mode": "video", "target_id": video_id}
 
-        # 2. HBO Max / Max (before HRTi to avoid UUID collision)
+        # 2. SkyShowtime (before HBO/HRTi)
+        if "skyshowtime.com" in url.lower():
+            m = SKYSHOWTIME_ASSET_RE.search(url)
+            if m:
+                slug = m.group(1)
+                mode = "series" if slug.startswith(("/tv/", "/kids/")) else "video"
+                return {"service": "skyshowtime", "mode": mode, "target_id": url.strip()}
+
+        # 3. HBO Max / Max (before HRTi to avoid UUID collision)
         if any(d in url.lower() for d in ("hbomax.com", "max.com")):
             m = HBO_URN_RE.search(url)
             if m:
@@ -86,7 +100,7 @@ class SmartParser:
                 video_id = uuid_m[-1] if uuid_m else raw_id.rstrip("/").rsplit("/", 1)[-1]
                 return {"service": "hbomax", "mode": "video", "target_id": video_id}
 
-        # 3. HRTi (scoped to hrti.hrt.hr domain only)
+        # 4. HRTi (scoped to hrti.hrt.hr domain only)
         if "hrti.hrt.hr" in url.lower():
             m = HRTI_VOD_RE.search(url)
             if m:
@@ -95,7 +109,7 @@ class SmartParser:
             if uuid_m:
                 return {"service": "hrti", "mode": "video", "target_id": uuid_m.group(1)}
 
-        # 4. RTS Planeta
+        # 5. RTS Planeta
         if "rtsplaneta.rs" in url.lower():
             m = RTS_VIDEO_RE.search(url)
             if m:
@@ -107,7 +121,7 @@ class SmartParser:
             if serial_match:
                 return {"service": "rts", "mode": "video", "target_id": serial_match.group(1)}
 
-        # 5. EON TV
+        # 6. EON TV
         if "eon.tv" in url.lower():
             m = EON_VOD_RE.search(url)
             if m:
@@ -119,7 +133,7 @@ class SmartParser:
                 return {"service": "eon", "mode": "vod", "target_id": target_id}
             return {"service": "eon", "mode": "vod", "target_id": url}
 
-        # 6. Generic URLs (Universal Downloader - yt-dlp supported sites)
+        # 7. Generic URLs (Universal Downloader - yt-dlp supported sites)
         if url.lower().startswith("http://") or url.lower().startswith("https://"):
             return {"service": "ytdlp", "mode": "video", "target_id": url}
 
@@ -394,6 +408,48 @@ class SmartParser:
                     "target_id": target_id,
                     "title": f"HBO Max Video (ID: {target_id})",
                     "description": "Započnite preuzimanje videa sa HBO Max."
+                }
+
+            elif service == "skyshowtime":
+                if mode == "series":
+                    info = SkyShowtimeAdapter.get_series_info(target_id)
+                    if info.get("success"):
+                        return {
+                            "success": True,
+                            "service": "skyshowtime",
+                            "mode": "series",
+                            "target_id": target_id,
+                            "title": info.get("title", "SkyShowtime serija"),
+                            "description": info.get("description", ""),
+                            "episodes": [
+                                {
+                                    "id": ep["id"],
+                                    "title": ep.get("title", ""),
+                                    "season": ep.get("season", 0),
+                                    "episode": ep.get("episode", 0),
+                                    "length_mins": ep.get("length_mins", 0),
+                                    "drm": ep.get("drm", True),
+                                }
+                                for ep in info.get("episodes", [])
+                            ],
+                        }
+                meta = SkyShowtimeAdapter.get_title_metadata(target_id)
+                if meta.get("success"):
+                    return {
+                        "success": True,
+                        "service": "skyshowtime",
+                        "mode": mode,
+                        "target_id": target_id,
+                        "title": meta.get("title", "SkyShowtime"),
+                        "description": meta.get("description", "Započnite preuzimanje sa SkyShowtime."),
+                    }
+                return {
+                    "success": True,
+                    "service": "skyshowtime",
+                    "mode": mode,
+                    "target_id": target_id,
+                    "title": "SkyShowtime",
+                    "description": "Započnite preuzimanje sa SkyShowtime.",
                 }
 
             elif service == "ytdlp":

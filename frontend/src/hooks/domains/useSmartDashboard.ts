@@ -37,6 +37,9 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [ytdlpDownloadPlaylist, setYtdlpDownloadPlaylist] = useState(false);
   const [ytdlpPlaylistItems, setYtdlpPlaylistItems] = useState("");
   
+  const [smartSkyVcodec, setSmartSkyVcodec] = useState("H264");
+  const [smartSkyQuality, setSmartSkyQuality] = useState("SDR");
+  const [smartSkyAudioLang, setSmartSkyAudioLang] = useState("sr");
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -81,6 +84,11 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             }
           } else {
             setSmartSubs("sr,hr,mk,bs,sl");
+          }
+          if (data.service === "skyshowtime") {
+            setSmartSkyVcodec("H264");
+            setSmartSkyQuality("SDR");
+            setSmartSkyAudioLang("sr");
           }
           showToast("Link uspešno prepoznat i analiziran!", "success");
         } else {
@@ -201,6 +209,21 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             subs: smartSubs,
           }),
         });
+      } else if (smartData.service === "skyshowtime") {
+        const skyBody: Record<string, unknown> = {
+          url: smartData.target_id,
+          vcodec: smartSkyVcodec,
+          quality: smartSkyQuality,
+          audio_lang: smartSkyAudioLang || undefined,
+        };
+        if (smartData.mode === "series" && smartData.episodes && smartSelectedEpisodes.length > 0) {
+          skyBody.episode_refs = smartSelectedEpisodes.map(String);
+        }
+        res = await apiFetch(`/api/skyshowtime/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(skyBody),
+        });
       } else if (smartData.service === "ytdlp") {
         res = await apiFetch(`/api/ytdlp/download`, {
           method: "POST",
@@ -284,6 +307,9 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     ytdlpSplitChapters,
     ytdlpDownloadPlaylist,
     ytdlpPlaylistItems,
+    smartSkyVcodec,
+    smartSkyQuality,
+    smartSkyAudioLang,
   ]);
 
   return {
@@ -336,6 +362,12 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     ytdlpPlaylistItems,
     setYtdlpPlaylistItems,
     smartSubmitting,
+    smartSkyVcodec,
+    setSmartSkyVcodec,
+    smartSkyQuality,
+    setSmartSkyQuality,
+    smartSkyAudioLang,
+    setSmartSkyAudioLang,
     handleSmartDetect,
     debouncedDetect,
     startSmartDownload,

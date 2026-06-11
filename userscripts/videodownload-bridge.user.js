@@ -12,6 +12,8 @@
 // @match        *://*.rtsplaneta.rs/*
 // @match        *://*.hrt.hr/*
 // @match        *://*.eon.tv/*
+// @match        *://*.skyshowtime.com/*
+// @match        *://*.skyott.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
@@ -41,6 +43,7 @@
     if (host.includes('rtsplaneta')) return 'rtsplaneta';
     if (host.includes('hrt.hr')) return 'hrti';
     if (host.includes('eon.tv')) return 'eon';
+    if (host.includes('skyshowtime.com') || host.includes('skyott.com')) return 'skyshowtime';
     return 'unknown';
   }
 
@@ -108,6 +111,28 @@
     if (host.includes('max.com') || host.includes('hbomax.com')) {
       const t = localStorage.getItem('token') || '';
       if (t && t.length > 8) batch.hbomax = t;
+    }
+    if (host.includes('skyshowtime.com') || host.includes('skyott.com')) {
+      const cookies = {};
+      const raw = document.cookie || '';
+      if (raw) {
+        raw.split(';').forEach(function (part) {
+          const eq = part.indexOf('=');
+          if (eq < 1) return;
+          const name = part.slice(0, eq).trim();
+          const val = part.slice(eq + 1).trim();
+          if (name) {
+            try {
+              cookies[name] = decodeURIComponent(val.replace(/\+/g, ' '));
+            } catch (e) {
+              cookies[name] = val;
+            }
+          }
+        });
+      }
+      if (Object.keys(cookies).length) {
+        batch.skyshowtime = JSON.stringify({ cookies: cookies });
+      }
     }
     if (host.includes('eon.tv')) {
       const cookies = {};
@@ -194,6 +219,7 @@
       'drm-token',
       'deviceid',
       'devicetypeid',
+      'x-license-token',
     ];
     if (headers) {
       Object.keys(headers).forEach(function (key) {

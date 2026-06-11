@@ -12,6 +12,7 @@ import { useSmartDashboard } from "../hooks/domains/useSmartDashboard";
 import { useSniffer } from "../hooks/domains/useSniffer";
 import { useDownloadQueue } from "../hooks/domains/useDownloadQueue";
 import { useAppConfig } from "../hooks/domains/useAppConfig";
+import { useSkyshowtime } from "../hooks/domains/useSkyshowtime";
 
 type BootState = "loading" | "ready" | "error";
 
@@ -72,6 +73,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const rts = useRts({ showToast });
   const hbo = useHbo({ showToast });
+  const skyshowtime = useSkyshowtime({ showToast });
   const smart = useSmartDashboard({ showToast });
   const sniffer = useSniffer({
     showToast,
@@ -81,6 +83,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setHboManifestUrl: hbo.setHboManifestUrl,
       setHboLicenseUrl: hbo.setHboLicenseUrl,
       setHboDirectTitle: hbo.setHboDirectTitle,
+      setSkyshowtimeDirectMode: skyshowtime.setSkyshowtimeDirectMode,
+      setSkyshowtimeManifestUrl: skyshowtime.setSkyshowtimeManifestUrl,
+      setSkyshowtimeLicenseUrl: skyshowtime.setSkyshowtimeLicenseUrl,
+      setSkyshowtimeLicenseToken: skyshowtime.setSkyshowtimeLicenseToken,
+      setSkyshowtimeDirectTitle: skyshowtime.setSkyshowtimeDirectTitle,
       setEonTarget: eon.setEonTarget,
     },
   });
@@ -116,9 +123,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         hbo.setHboMarket(hboMarket);
       }
       hbo.refreshAuth();
+      skyshowtime.refreshAuth();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable setter refs from domain hooks
-  }, [config.subscribeStatusLoaded, sniffer.setSnifferAutoDownload, hbo.setHboMarket, hbo.refreshAuth]);
+  }, [config.subscribeStatusLoaded, sniffer.setSnifferAutoDownload, hbo.setHboMarket, hbo.refreshAuth, skyshowtime.refreshAuth]);
 
   useEffect(() => {
     if (activeTab === "settings") {
@@ -178,6 +186,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     hbo,
     smart,
     sniffer,
+    skyshowtime,
   };
 
   flattenAppStore(store) satisfies AppContextValue;

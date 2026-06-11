@@ -9,6 +9,7 @@ import type { RtsSlice } from "../hooks/domains/useRts";
 import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
+import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
 
 const shell = createSliceContext<AppShellSlice>("AppShell");
 const queue = createSliceContext<DownloadQueueSlice>("DownloadQueue");
@@ -20,6 +21,7 @@ const rts = createSliceContext<RtsSlice>("Rts");
 const hbo = createSliceContext<HboSlice>("Hbo");
 const smart = createSliceContext<SmartDashboardSlice>("SmartDashboard");
 const sniffer = createSliceContext<SnifferSlice>("Sniffer");
+const skyshowtime = createSliceContext<SkyshowtimeSlice>("Skyshowtime");
 
 export const AppShellSliceProvider = shell.Provider;
 export const DownloadQueueSliceProvider = queue.Provider;
@@ -31,6 +33,7 @@ export const RtsSliceProvider = rts.Provider;
 export const HboSliceProvider = hbo.Provider;
 export const SmartDashboardSliceProvider = smart.Provider;
 export const SnifferSliceProvider = sniffer.Provider;
+export const SkyshowtimeSliceProvider = skyshowtime.Provider;
 
 export const useAppShellSlice = shell.useSlice;
 export const useDownloadQueueSlice = queue.useSlice;
@@ -42,3 +45,4 @@ export const useRtsSlice = rts.useSlice;
 export const useHboSlice = hbo.useSlice;
 export const useSmartDashboardSlice = smart.useSlice;
 export const useSnifferSlice = sniffer.useSlice;
+export const useSkyshowtimeSlice = skyshowtime.useSlice;

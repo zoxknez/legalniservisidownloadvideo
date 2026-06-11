@@ -19,3 +19,5 @@ export { useCredentials, type CredentialsSlice } from "./useCredentials";
 export { useSettingsTab, type SettingsTabSlice } from "./useSettingsTab";
 export { useAppShell } from "./useAppShell";
 export { useIptvTab } from "./useIptvTab";
+export { useSkyshowtime, type UseSkyShowtimeOptions, type SkyshowtimeSlice } from "./useSkyshowtime";
+export { useSkyshowtimeTab } from "./useSkyshowtimeTab";

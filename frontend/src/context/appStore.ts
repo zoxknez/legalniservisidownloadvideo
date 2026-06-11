@@ -9,6 +9,7 @@ import type { RtsSlice } from "../hooks/domains/useRts";
 import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
+import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
 import type { AppStatus, ToastType } from "../types/app";
 
 export interface AppShellSlice {
@@ -32,6 +33,7 @@ export interface AppStore {
   hbo: HboSlice;
   smart: SmartDashboardSlice;
   sniffer: SnifferSlice;
+  skyshowtime: SkyshowtimeSlice;
 }
 
 export {
@@ -45,6 +47,7 @@ export {
   useHboSlice,
   useSmartDashboardSlice,
   useSnifferSlice,
+  useSkyshowtimeSlice,
 } from "./sliceContexts";
 
 import { useAppConfigSlice } from "./sliceContexts";
@@ -65,5 +68,6 @@ export function flattenAppStore(store: AppStore) {
     ...store.hbo,
     ...store.smart,
     ...store.sniffer,
+    ...store.skyshowtime,
   };
 }

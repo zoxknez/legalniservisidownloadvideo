@@ -12,6 +12,7 @@ export const SESSION_IMPORT_PLACEHOLDERS: Record<string, string> = {
   rtsplaneta: "RTS secure_streaming_token ili JSON iz localStorage…",
   hbomax: 'JSON iz Max localStorage (token) ili ceo sadržaj ~/.hbomax/token.json…',
   eon: '{"cookies": {"ime": "vrednost", ...}} ili flat mapa kolačića iz EditThisCookie…',
+  skyshowtime: 'Netscape cookies.txt iz pretraživača ili JSON {"cookies": {"ime": "vrednost"}}…',
 };
 
 export function buildSessionConsoleScripts(): Record<string, { title: string; code: string }> {
@@ -32,6 +33,10 @@ export function buildSessionConsoleScripts(): Record<string, { title: string; co
     rtsplaneta: {
       title: "RTS Planeta",
       code: `(function(){const k=Object.keys(localStorage).find(x=>/token|auth/i.test(x));const t=k?localStorage.getItem(k):'';fetch('${bridgeUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:{rtsplaneta:t},source:'console'})}).then(r=>r.json()).then(j=>console.log(j.success?'✓ Poslato u app':j));})();`,
+    },
+    skyshowtime: {
+      title: "SkyShowtime",
+      code: `(function(){const c={};(document.cookie||'').split(';').forEach(p=>{const i=p.indexOf('=');if(i>0)c[p.slice(0,i).trim()]=p.slice(i+1).trim();});fetch('${bridgeUrl}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({batch:{skyshowtime:JSON.stringify({cookies:c})},source:'console'})}).then(r=>r.json()).then(j=>console.log(j.success?'✓ Poslato u app':j));})();`,
     },
   };
 }
