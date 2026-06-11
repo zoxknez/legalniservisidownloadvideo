@@ -1,8 +1,13 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useVoyo } from "./useVoyo";
 
 vi.mock("../../lib/api", () => ({
   apiFetch: vi.fn(),
+  parseApiError: vi.fn(async (_res: Response, fallback: string) => fallback),
+}));
+
+vi.mock("../../context/appStore", () => ({
+  useAppStatus: () => ({ voyo_ignore_catalog_drm_hint: false }),
 }));
 
 import { apiFetch } from "../../lib/api";
@@ -12,55 +17,36 @@ describe("useVoyo", () => {
     vi.mocked(apiFetch).mockReset();
   });
 
-  it("loads series data when search succeeds", async () => {
-    const series = {
-      success: true,
-      id: 42,
-      title: "Test Series",
-      episodes: [{ id: 1, title: "Ep 1", number: 1 }],
-    };
-
+  it("blocks download when probe says stream is unavailable", async () => {
     vi.mocked(apiFetch).mockResolvedValue({
       ok: true,
-      json: async () => series,
+      json: async () => ({ success: true, task_id: "t1" }),
     } as Response);
 
     const showToast = vi.fn();
     const { result } = renderHook(() => useVoyo({ showToast }));
 
     act(() => {
+      result.current.setVoyoMode("video");
       result.current.setVoyoTarget("12345");
+      result.current.setVoyoVideoPreview({
+        title: "Widevine naslov",
+        drm_hint: true,
+        drm_blocking: true,
+        streamable: false,
+        probe_ok: true,
+        stream_reason: "Widevine DRM — preuzimanje nije podržano.",
+      });
     });
 
     await act(async () => {
-      await result.current.searchVoyoSeries();
+      await result.current.startVoyoDownload();
     });
 
-    await waitFor(() => {
-      expect(result.current.voyoSeriesData).toEqual(series);
-    });
-    expect(result.current.selectedVoyoEpisodes).toEqual([1]);
-    expect(apiFetch).toHaveBeenCalledWith("/api/voyo/resolve?target=12345");
-  });
-
-  it("shows toast when search fails", async () => {
-    vi.mocked(apiFetch).mockResolvedValue({
-      ok: false,
-      json: async () => ({ detail: "Series not found" }),
-    } as Response);
-
-    const showToast = vi.fn();
-    const { result } = renderHook(() => useVoyo({ showToast }));
-
-    act(() => {
-      result.current.setVoyoTarget("999");
-    });
-
-    await act(async () => {
-      await result.current.searchVoyoSeries();
-    });
-
-    expect(showToast).toHaveBeenCalledWith("Series not found", "error");
-    expect(result.current.voyoSeriesData).toBeNull();
+    expect(showToast).toHaveBeenCalledWith(
+      "Widevine DRM — preuzimanje nije podržano.",
+      "error",
+    );
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 });

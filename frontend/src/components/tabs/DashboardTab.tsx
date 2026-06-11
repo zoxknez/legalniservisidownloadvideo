@@ -12,7 +12,15 @@ import {
 } from "lucide-react";
 import { CustomSelect } from "../CustomSelect";
 import { YtdlpDownloadPanel } from "../ytdlp/YtdlpDownloadPanel";
-import type { ServiceStatus, SmartEpisode } from "../../types/app";
+import { VoyoSeasonList } from "../voyo/VoyoSeasonList";
+import {
+  defaultSmartEpisodeIds,
+  VOYO_HINT_MSG,
+  voyoCatalogDrmHint,
+  voyoIsHardBlocked,
+  voyoIsSoftHint,
+} from "../../lib/voyoDrm";
+import type { ServiceStatus, SmartEpisode, VoyoEpisode } from "../../types/app";
 import { useSmartDashboardTab } from "../../hooks/domains/useSmartDashboardTab";
 import { cssVars } from "../../utils/cssVars";
 
@@ -92,7 +100,7 @@ export function DashboardTab() {
   const [subsOpen, setSubsOpen] = useState(true);
 // Service theme config
   const SVC_THEMES: Record<string, {emoji:string; name:string; color:string; glow:string; example:string; exampleLabel:string}> = {
-    voyo:    { emoji:"🟠", name:"Voyo",        color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
+    voyo:    { emoji:"🟠", name:"Voyo",        color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/film_50584.html", exampleLabel:"voyo.rs / voyo.hr" },
     hrti:    { emoji:"🔵", name:"HRTi",        color:"#06b6d4", glow:"rgba(6,182,212,0.08)",    example:"https://hrti.hrt.hr/video/show/4a3b2c1d-0000-0000-0000-000000000001", exampleLabel:"Video (UUID)" },
     eon:     { emoji:"🟢", name:"EON TV",      color:"#10b981", glow:"rgba(16,185,129,0.08)",   example:"https://eon.tv/player/vod-abc123", exampleLabel:"VOD naslov" },
     rts:     { emoji:"🔴", name:"RTS Planeta", color:"#f43f5e", glow:"rgba(244,63,94,0.08)",    example:"https://www.rtsplaneta.rs/video/show/12345", exampleLabel:"Epizoda/emisija" },
@@ -129,6 +137,7 @@ export function DashboardTab() {
   };
   // Preview panel service theme
   const previewTheme = smartData ? SVC_THEMES[smartData.service] ?? SVC_THEMES.voyo : null;
+  const ignoreCatalogDrmHint = status?.voyo_ignore_catalog_drm_hint === true;
 
   return (
   <div key="dashboard" className="tab-content tab-content-dash max-w-5xl mx-auto flex flex-col gap-5">
@@ -293,6 +302,23 @@ export function DashboardTab() {
                   Metapodaci nisu u potpunosti dostupni — preuzimanje je i dalje moguće. Proverite da li je Node.js instaliran.
                 </div>
               )}
+              {smartData.service === "voyo" && smartData.mode === "video" && voyoIsHardBlocked(smartData) && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-red-500/35 bg-red-500/10 text-[11px] font-bold text-red-300 flex items-center gap-2">
+                  <Lock style={{ width: 12, height: 12, flexShrink: 0 }} />
+                  {smartData.stream_reason || "Stream nije dostupan za preuzimanje."}
+                </div>
+              )}
+              {smartData.service === "voyo" && smartData.mode === "video" && voyoIsSoftHint(smartData, ignoreCatalogDrmHint) && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-amber-500/35 bg-amber-500/10 text-[11px] font-bold text-amber-300 flex items-center gap-2">
+                  <Lock style={{ width: 12, height: 12, flexShrink: 0 }} />
+                  {VOYO_HINT_MSG}
+                </div>
+              )}
+              {smartData.service === "voyo" && smartData.mode === "video" && smartData.probe_ok && smartData.streamable && voyoCatalogDrmHint(smartData) && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-bold text-emerald-300">
+                  Stream je dostupan (AES-128 HLS).
+                </div>
+              )}
               {smartData.description && <p className="smart-preview-desc">{smartData.description}</p>}
               {/* Extra metadata pills for yt-dlp */}
               {smartData.service === "ytdlp" && (smartData.duration_str || smartData.uploader || smartData.view_count != null || smartData.upload_date) && (
@@ -333,7 +359,22 @@ export function DashboardTab() {
           {/* Body */}
           <div className="smart-preview-body">
             {/* Episode checklist (series with episodes) */}
-            {smartData.episodes && smartData.episodes.length > 0 && (
+            {smartData.service === "voyo" && smartData.seasons && smartData.seasons.length > 0 && smartData.episodes && (
+              <VoyoSeasonList
+                showHeader={false}
+                voyoSeriesData={{
+                  title: smartData.title,
+                  description: smartData.description || "",
+                  seasons: smartData.seasons,
+                  episodes: smartData.episodes as VoyoEpisode[],
+                }}
+                selectedVoyoEpisodes={smartSelectedEpisodes.map((id) => Number(id))}
+                setSelectedVoyoEpisodes={(ids) => setSmartSelectedEpisodes(ids)}
+                ignoreCatalogDrmHint={ignoreCatalogDrmHint}
+              />
+            )}
+
+            {smartData.episodes && smartData.episodes.length > 0 && !(smartData.service === "voyo" && smartData.seasons?.length) && (
               <div>
                 <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
                   <label style={{margin:0}}>
@@ -344,7 +385,11 @@ export function DashboardTab() {
                   <div style={{display:"flex", gap:12}}>
                     <button
                       style={{fontSize:"0.72rem", fontWeight:700, color:previewTheme.color, background:"none", border:"none", cursor:"pointer"}}
-                      onClick={() => setSmartSelectedEpisodes(smartData.episodes!.map((e: SmartEpisode) => e.id))}
+                      onClick={() => setSmartSelectedEpisodes(
+                        smartData.service === "voyo"
+                          ? defaultSmartEpisodeIds(smartData.episodes!, ignoreCatalogDrmHint)
+                          : smartData.episodes!.map((e: SmartEpisode) => e.id),
+                      )}
                     >Označi sve</button>
                     <span style={{color:"var(--text-muted)"}}>|</span>
                     <button
@@ -355,15 +400,27 @@ export function DashboardTab() {
                 </div>
                 <div className="smart-ep-list">
                   {smartData.episodes.map((ep: SmartEpisode, idx: number) => {
-                    const checked = smartSelectedEpisodes.includes(ep.id);
+                    const blocked = smartData.service === "voyo" && voyoIsHardBlocked(ep);
+                    const softHint = smartData.service === "voyo" && voyoIsSoftHint(ep, ignoreCatalogDrmHint);
+                    const checked = !blocked && smartSelectedEpisodes.includes(ep.id);
                     return (
                       <div
                         key={ep.id ?? idx}
-                        className={`smart-ep-item ${checked ? "selected" : ""}`}
-                        onClick={() => setSmartSelectedEpisodes(checked
-                          ? smartSelectedEpisodes.filter((id: number | string) => id !== ep.id)
-                          : [...smartSelectedEpisodes, ep.id]
-                        )}
+                        className={`smart-ep-item ${checked ? "selected" : ""} ${blocked ? "opacity-45 cursor-not-allowed" : softHint ? "opacity-90" : ""}`}
+                        onClick={() => {
+                          if (blocked) return;
+                          setSmartSelectedEpisodes(checked
+                            ? smartSelectedEpisodes.filter((id: number | string) => id !== ep.id)
+                            : [...smartSelectedEpisodes, ep.id],
+                          );
+                        }}
+                        title={
+                          blocked
+                            ? ep.stream_reason || "Stream nije dostupan"
+                            : softHint
+                              ? "Katalog DRM hint — možete probati preuzimanje"
+                              : undefined
+                        }
                         style={checked ? {borderLeft:`3px solid ${previewTheme.color}80`} : {borderLeft:"3px solid transparent"}}
                       >
                         <div className={`custom-checkbox-box ${checked ? "checked" : ""}`} style={checked ? {background:previewTheme.color, borderColor:previewTheme.color} : {}}>
@@ -380,7 +437,8 @@ export function DashboardTab() {
                           {ep.title}
                         </span>
                         {(ep.length_mins ?? 0) > 0 && <span style={{fontSize:"0.7rem", color:"var(--text-muted)", flexShrink:0}}>{ep.length_mins}m</span>}
-                        {ep.drm && <Lock style={{width:12,height:12,color:"#f59e0b",flexShrink:0}} />}
+                        {blocked && <Lock style={{width:12,height:12,color:"#f87171",flexShrink:0}} />}
+                        {!blocked && softHint && <Lock style={{width:12,height:12,color:"#f59e0b",flexShrink:0}} />}
                       </div>
                     );
                   })}
@@ -485,12 +543,13 @@ export function DashboardTab() {
                   )}
                   {smartData.service === "voyo" && (
                     <div>
-                      <label>Rezolucija</label>
+                      <label>Maks. rezolucija</label>
                       <CustomSelect
                         value={smartResolution}
-                        options={["1080p (Full HD)", "720p (HD)", "480p (SD)"]}
+                        options={["2160p (4K)", "1080p (Full HD)", "720p (HD)", "480p (SD)"]}
                         onChange={(val) => setSmartResolution(val)}
                       />
+                      <p style={{fontSize:"0.68rem",color:"var(--text-muted)",marginTop:4}}>Najbolji stream do izabrane visine.</p>
                     </div>
                   )}
                   {smartData.service === "hbomax" && (
@@ -555,7 +614,11 @@ export function DashboardTab() {
               <button
                 className={`smart-cta-btn smart-cta-${smartData.service}`}
                 onClick={startSmartDownload}
-                disabled={smartSubmitting || (smartData.episodes && smartSelectedEpisodes.length === 0)}
+                disabled={
+                  smartSubmitting
+                  || (smartData.episodes && smartSelectedEpisodes.length === 0)
+                  || (smartData.service === "voyo" && smartData.mode === "video" && voyoIsHardBlocked(smartData))
+                }
               >
                 {smartSubmitting
                   ? <Loader2 style={{width:18,height:18,animation:"spin 1s linear infinite"}} />

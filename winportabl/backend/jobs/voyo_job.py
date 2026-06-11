@@ -5,8 +5,7 @@ import re
 from typing import Any, Dict, Optional
 import threading
 
-from backend.config import config
-from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
+from backend.services.voyo_adapter import VoyoAdapter
 from backend.jobs.exceptions import JobCancelled
 from backend.jobs.inprocess import LogFn, capture_job_output
 
@@ -14,33 +13,6 @@ from backend.jobs.inprocess import LogFn, capture_job_output
 def _check_cancelled(cancel_event: Optional[threading.Event]) -> None:
     if cancel_event and cancel_event.is_set():
         raise JobCancelled("Download cancelled by user")
-
-
-def _authenticated_downloader(resolution: str) -> VoyoDownloader:
-    vcfg = VoyoConfig()
-    email, password, device_id = vcfg.get_credentials()
-    if not email or not password:
-        creds = config.get_credentials("voyo")
-        email = creds.get("email", "")
-        password = creds.get("password", "")
-        if email and password:
-            vcfg.set_credentials(email, password)
-
-    auth = VoyoAuth()
-    if device_id:
-        auth.state.device_id = device_id
-        auth.session.headers["device-id"] = device_id
-
-    from backend.credentials_store import get_secret
-    has_token = bool(get_secret("voyo", "token"))
-    if not has_token and (not email or not password):
-        raise RuntimeError("Voyo credentials are not configured.")
-
-    auth.authenticate(email, password)
-    vcfg.update_device_id(auth.state.device_id)
-
-    out_dir = config.get_output_dir()
-    return VoyoDownloader(auth, out_dir, resolution)
 
 
 def run_voyo_job(
@@ -52,12 +24,13 @@ def run_voyo_job(
     resolution = params.get("resolution") or "1080p"
     target = str(params.get("target", "")).strip()
     episodes = str(params.get("episodes") or "").strip()
+    series_title = str(params.get("series_title") or "").strip()
     is_url = bool(re.match(r"^https?://", target, re.IGNORECASE))
 
     _check_cancelled(cancel_event)
 
     with capture_job_output(log_fn, ["VoyoDownloader", "backend.core.services.voyo", ""]):
-        downloader = _authenticated_downloader(resolution)
+        downloader = VoyoAdapter.create_downloader(resolution)
         _check_cancelled(cancel_event)
 
         if action == "video":
@@ -91,7 +64,10 @@ def run_voyo_job(
             for idx, video_id in enumerate(video_ids, 1):
                 _check_cancelled(cancel_event)
                 log_fn(f"INFO Voyo epizoda {idx}/{total}: video {video_id}")
-                if downloader.download_video(video_id):
+                if downloader.download_video(
+                    video_id,
+                    series_title=series_title,
+                ):
                     success += 1
                 else:
                     log_fn(f"ERROR Voyo epizoda nije uspela: video {video_id}")

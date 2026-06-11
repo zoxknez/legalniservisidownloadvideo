@@ -12,11 +12,11 @@ from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
 logger = logging.getLogger(__name__)
 
 # Regular expressions for matching Streaming URLs
-VOYO_SERIES_RE = re.compile(r"voyo\.(?:rs|si|cz)/(?:[^/]+/)?serije/(\d+)", re.I)
+VOYO_SERIES_RE = re.compile(r"voyo\.(?:rs|hr)/(?:[^/]+/)?serije/(\d+)", re.I)
 VOYO_VIDEO_RE = re.compile(
-    r"voyo\.(?:rs|si|cz)/.*_(\d+)\.html"
-    r"|voyo\.(?:rs|si|cz)/proizvod/(\d+)"
-    r"|voyo\.(?:rs|si|cz)/.*[?&]id=(\d+)",
+    r"voyo\.(?:rs|hr)/.*_(\d+)\.html"
+    r"|voyo\.(?:rs|hr)/proizvod/(\d+)"
+    r"|voyo\.(?:rs|hr)/.*[?&]id=(\d+)",
     re.I,
 )
 
@@ -289,9 +289,15 @@ class SmartParser:
             }
 
     @staticmethod
-    def get_metadata(url: str) -> Dict[str, Any]:
+    def get_metadata(url: str, force_service: Optional[str] = None) -> Dict[str, Any]:
         """Detect service and retrieve structured metadata for preview."""
         try:
+            if force_service == "ytdlp":
+                url = url.strip()
+                if not url.lower().startswith(("http://", "https://")):
+                    return {"success": False, "error": "URL mora počinjati sa http:// ili https://"}
+                return SmartParser._extract_ytdlp_metadata(url)
+
             detected = SmartParser.detect_service(url)
             if not detected:
                 return {"success": False, "error": "URL nije prepoznat kao podržani servis."}
@@ -311,18 +317,39 @@ class SmartParser:
                             "target_id": target_id,
                             "title": info.get("title"),
                             "description": info.get("description"),
-                            "episodes": info.get("episodes")
+                            "episodes": info.get("episodes"),
+                            "seasons": info.get("seasons"),
                         }
                     return {"success": False, "error": info.get("error", "Greška pri preuzimanju serije.")}
-                else:
+                info = VoyoAdapter.get_video_info(int(target_id))
+                if info.get("success"):
                     return {
                         "success": True,
                         "service": "voyo",
                         "mode": "video",
                         "target_id": target_id,
-                        "title": f"Voyo Video (ID: {target_id})",
-                        "description": "Započnite preuzimanje Voyo videa."
+                        "title": info.get("title", f"Voyo Video {target_id}"),
+                        "description": info.get("description", ""),
+                        "duration_str": info.get("duration_str"),
+                        "thumbnail": info.get("thumbnail"),
+                        "drm_hint": bool(info.get("drm_hint", info.get("drm"))),
+                        "drm": bool(info.get("drm_hint", info.get("drm"))),
+                        "has_subs": bool(info.get("has_subs")),
+                        "streamable": info.get("streamable"),
+                        "drm_blocking": info.get("drm_blocking"),
+                        "probe_ok": info.get("probe_ok"),
+                        "drm_type": info.get("drm_type"),
+                        "stream_reason": info.get("stream_reason"),
                     }
+                return {
+                    "success": True,
+                    "service": "voyo",
+                    "mode": "video",
+                    "target_id": target_id,
+                    "title": f"Voyo Video (ID: {target_id})",
+                    "description": "Metapodaci nisu dostupni — preuzimanje je i dalje moguće.",
+                    "metadata_partial": True,
+                }
 
             elif service == "hrti":
                 try:

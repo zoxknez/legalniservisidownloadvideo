@@ -31,6 +31,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
   const [ytdlpUpdating, setYtdlpUpdating] = useState(false);
   const [ytdlpNameTemplate, setYtdlpNameTemplate] = useState("%(title)s.%(ext)s");
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
+  const [voyoIgnoreCatalogDrmHint, setVoyoIgnoreCatalogDrmHint] = useState(false);
 
   const deviceWvdInfo = status?.binaries?.device_wvd;
 
@@ -57,6 +58,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         if (data.max_concurrent_downloads) {
           setMaxConcurrentDownloads(data.max_concurrent_downloads);
         }
+        setVoyoIgnoreCatalogDrmHint(data.voyo_ignore_catalog_drm_hint === true);
         const paths: Record<string, string> = {};
         for (const [name, info] of Object.entries(data.binaries)) {
           paths[name] = info.path;
@@ -158,6 +160,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
           binaries: binariesPaths,
           ytdlp_name_template: ytdlpNameTemplate,
           max_concurrent_downloads: maxConcurrentDownloads,
+          voyo_ignore_catalog_drm_hint: voyoIgnoreCatalogDrmHint,
         }),
       });
       if (res.ok) {
@@ -172,7 +175,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
-  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, outputDir, showToast, transcodeMode, ytdlpNameTemplate, maxConcurrentDownloads]);
+  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, maxConcurrentDownloads, outputDir, showToast, transcodeMode, voyoIgnoreCatalogDrmHint, ytdlpNameTemplate]);
 
   const handleSaveDeviceWvdPath = useCallback(async () => {
     try {
@@ -370,6 +373,8 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     setYtdlpNameTemplate,
     maxConcurrentDownloads,
     setMaxConcurrentDownloads,
+    voyoIgnoreCatalogDrmHint,
+    setVoyoIgnoreCatalogDrmHint,
     deviceWvdInfo,
     fetchStatus,
     subscribeStatusLoaded,

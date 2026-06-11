@@ -4,7 +4,7 @@
 
 | Servis | Kanonski modul (preuzimanje) | Auth / browse |
 |--------|------------------------------|---------------|
-| Voyo | `backend.core.services.voyo.downloader` | `voyo.auth` (in-process u adapteru) |
+| Voyo (RS / HR) | `backend.core.services.voyo.downloader` | `voyo.auth` + `stream_probe` (videoUrlV2); katalog `drmProtected` je samo hint |
 | HRTi | `backend.core.services.hrti.hrti_downloader` | `hrti.HRTIBrowser` (in-process) |
 | EON | `backend.core.services.eon.eon_downloader` | `eon.engine.EONEngine` (in-process browse/API) |
 | RTS Planeta | `backend.core.services.rtsplaneta.rtsplaneta_downloader` | `rtsplaneta_auth` (in-process) |

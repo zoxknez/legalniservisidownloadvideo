@@ -1,9 +1,10 @@
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Dict, Any, List
 
-from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader
+from backend.core.services.voyo import VoyoAuth, VoyoConfig, VoyoDownloader, check_streamable
 from backend.jobs.inprocess import build_job
 from backend.config import config
 
@@ -112,33 +113,81 @@ class VoyoAdapter:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def get_profiles() -> List[Dict[str, Any]]:
+    def get_profiles() -> Dict[str, Any]:
         """Fetch profiles of authenticated Voyo user."""
         try:
+            auth = VoyoAdapter._make_auth()
+            profiles = auth.get_profiles()
+            return {
+                "success": True,
+                "profiles": profiles,
+                "active_profile_id": auth.state.profile_id,
+            }
+        except Exception as e:
+            return {"success": False, "profiles": [], "active_profile_id": 0, "error": str(e)}
+
+    @staticmethod
+    def set_active_profile(profile_id: int) -> Dict[str, Any]:
+        """Switch Voyo profile and persist selection."""
+        global _VOYO_CACHE
+        profile_id = int(profile_id)
+        try:
+            auth = VoyoAdapter._make_auth()
+            auth.select_profile(profile_id)
             vcfg = VoyoConfig()
-            email, password, device_id = vcfg.get_credentials()
-            variant = vcfg.get_variant()
-            if not email:
-                return []
-            
-            auth = VoyoAuth()
-            auth.set_variant(variant)
-            if device_id:
-                auth.state.device_id = device_id
-                auth.session.headers['device-id'] = device_id
-            
-            auth.authenticate(email, password)
-            return auth.get_profiles()
-        except Exception:
-            return []
+            vcfg.set_profile_id(profile_id)
+            creds = config.get_credentials("voyo")
+            config.update_credentials(
+                "voyo",
+                {**creds, "profile_id": profile_id},
+            )
+            _VOYO_CACHE = {
+                **_VOYO_CACHE,
+                "profile_id": auth.state.profile_id,
+                "last_check": time.time(),
+                "authenticated": True,
+            }
+            return {"success": True, "profile_id": auth.state.profile_id}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def assert_video_streamable(video_id: int) -> None:
+        auth = VoyoAdapter._make_auth()
+        probe = check_streamable(auth, int(video_id))
+        if probe.get("drm_blocking"):
+            raise ValueError(probe.get("reason") or "Stream nije dostupan za preuzimanje.")
+
+    @staticmethod
+    def assert_videos_streamable(video_ids: List[int]) -> None:
+        auth = VoyoAdapter._make_auth()
+        blocked: List[int] = []
+        reasons: Dict[int, str] = {}
+        for raw_id in video_ids:
+            vid = int(raw_id)
+            probe = check_streamable(auth, vid)
+            if probe.get("drm_blocking"):
+                blocked.append(vid)
+                reasons[vid] = probe.get("reason") or ""
+        if blocked:
+            ids = ", ".join(str(i) for i in blocked)
+            sample_reason = reasons.get(blocked[0], "")
+            raise ValueError(f"Stream nije dostupan za preuzimanje (ID: {ids}). {sample_reason}".strip())
 
     @staticmethod
     def _make_auth() -> VoyoAuth:
+        from backend.credentials_store import get_secret
+
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
         variant = vcfg.get_variant()
-        if not email:
-            raise RuntimeError("No credentials configured")
+        if not email and not get_secret("voyo", "token"):
+            creds = config.get_credentials("voyo")
+            email = creds.get("email", "") or email
+            password = creds.get("password", "") or password
+            variant = creds.get("variant", "") or variant
+        if not email and not get_secret("voyo", "token"):
+            raise RuntimeError("Voyo kredencijali nisu podešeni.")
         auth = VoyoAuth()
         auth.set_variant(variant)
         if device_id:
@@ -146,7 +195,51 @@ class VoyoAdapter:
             auth.session.headers["device-id"] = device_id
         auth.authenticate(email, password)
         vcfg.update_device_id(auth.state.device_id)
+        profile_id = vcfg.get_profile_id()
+        if profile_id and profile_id != auth.state.profile_id:
+            auth.select_profile(profile_id)
         return auth
+
+    @staticmethod
+    def create_downloader(resolution: str = "1080p") -> VoyoDownloader:
+        auth = VoyoAdapter._make_auth()
+        return VoyoDownloader(auth, config.get_output_dir(), resolution)
+
+    @staticmethod
+    def get_video_info(video_id: int, *, probe: bool = True) -> Dict[str, Any]:
+        """Fetch metadata and optionally probe stream availability for a Voyo video."""
+        try:
+            auth = VoyoAdapter._make_auth()
+            meta = auth.get_video_metadata(video_id)
+            inner = meta.get("meta", {}) or {}
+            length_sec = meta.get("length") or inner.get("length") or 0
+            mins = int(length_sec) // 60 if length_sec else 0
+            duration_str = f"{mins} min" if mins else None
+            thumb = meta.get("image") or meta.get("thumbnail") or inner.get("image")
+            drm_hint = bool(meta.get("drmProtected"))
+            payload: Dict[str, Any] = {
+                "success": True,
+                "id": video_id,
+                "title": meta.get("title", f"Video {video_id}"),
+                "description": meta.get("description", ""),
+                "duration_str": duration_str,
+                "thumbnail": thumb,
+                "drm_hint": drm_hint,
+                "drm": drm_hint,
+                "has_subs": bool(meta.get("hasSubtitles")),
+            }
+            if probe:
+                stream = check_streamable(auth, video_id)
+                payload.update({
+                    "streamable": stream.get("streamable"),
+                    "drm_blocking": stream.get("drm_blocking"),
+                    "probe_ok": stream.get("probe_ok"),
+                    "drm_type": stream.get("drm_type"),
+                    "stream_reason": stream.get("reason"),
+                })
+            return payload
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @staticmethod
     def resolve_to_category(target: str) -> Dict[str, Any]:
@@ -211,7 +304,9 @@ class VoyoAdapter:
                     "season": _parse_season(inner.get("season", "")),
                     "episode": inner.get("episode", 0),
                     "length_mins": ep.get("length", 0) // 60,
+                    "drm_hint": bool(ep.get("drmProtected")),
                     "drm": bool(ep.get("drmProtected")),
+                    "drm_blocking": False,
                     "has_subs": bool(ep.get("hasSubtitles")),
                 })
 
@@ -257,66 +352,47 @@ class VoyoAdapter:
         return build_job("voyo", "video", params)
 
     @staticmethod
-    def make_download_batch_cmd(video_ids: List[int], resolution: str = "1080p") -> List[str]:
+    def make_download_batch_cmd(
+        video_ids: List[int],
+        resolution: str = "1080p",
+        series_title: str = "",
+    ) -> List[str]:
         ids = [int(video_id) for video_id in video_ids if str(video_id).strip()]
         if not ids:
             raise ValueError("Lista Voyo epizoda je prazna.")
-        return build_job(
-            "voyo",
-            "videos",
-            {
-                "video_ids": ids,
-                "resolution": resolution,
-                "output_dir": config.get_output_dir(),
-            },
-        )
+        params: Dict[str, Any] = {
+            "video_ids": ids,
+            "resolution": resolution,
+            "output_dir": config.get_output_dir(),
+        }
+        if series_title:
+            params["series_title"] = series_title
+        return build_job("voyo", "videos", params)
 
     @staticmethod
     def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:
         """Download a single Voyo video."""
         try:
-            vcfg = VoyoConfig()
-            email, password, device_id = vcfg.get_credentials()
-            variant = vcfg.get_variant()
-            if not email:
-                raise RuntimeError("No Voyo credentials configured")
-            
-            auth = VoyoAuth()
-            auth.set_variant(variant)
-            if device_id:
-                auth.state.device_id = device_id
-                auth.session.headers['device-id'] = device_id
-            auth.authenticate(email, password)
-            vcfg.update_device_id(auth.state.device_id)
-            
-            out_dir = output_dir or config.get_output_dir()
-            downloader = VoyoDownloader(auth, out_dir, resolution)
+            downloader = VoyoAdapter.create_downloader(resolution)
+            if output_dir:
+                downloader.output_dir = Path(output_dir)
             return downloader.download_video(video_id)
         except Exception as e:
             logger.error("Voyo download failed: %s", e)
             return False
 
     @staticmethod
-    def download_series(series_id: int, episodes_range: str = "", 
-                       output_dir: str = None, resolution: str = "1080p") -> tuple:
+    def download_series(
+        series_id: int,
+        episodes_range: str = "",
+        output_dir: str = None,
+        resolution: str = "1080p",
+    ) -> tuple:
         """Download Voyo series episodes."""
         try:
-            vcfg = VoyoConfig()
-            email, password, device_id = vcfg.get_credentials()
-            variant = vcfg.get_variant()
-            if not email:
-                raise RuntimeError("No Voyo credentials configured")
-            
-            auth = VoyoAuth()
-            auth.set_variant(variant)
-            if device_id:
-                auth.state.device_id = device_id
-                auth.session.headers['device-id'] = device_id
-            auth.authenticate(email, password)
-            vcfg.update_device_id(auth.state.device_id)
-            
-            out_dir = output_dir or config.get_output_dir()
-            downloader = VoyoDownloader(auth, out_dir, resolution)
+            downloader = VoyoAdapter.create_downloader(resolution)
+            if output_dir:
+                downloader.output_dir = Path(output_dir)
             return downloader.download_series(series_id, episodes_range)
         except Exception as e:
             logger.error("Voyo series download failed: %s", e)

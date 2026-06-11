@@ -38,12 +38,32 @@ import requests
 from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
 
 from .auth import VoyoAuth, VoyoConfig
+from .stream_probe import classify_url_info
 
 logger = logging.getLogger(__name__)
 
 requests.packages.urllib3.disable_warnings()
 
 RELEASE_GROUP = 'VOYO'
+
+_RESOLUTION_MAX_HEIGHT = {
+    '2160p': 2160,
+    '1440p': 1440,
+    '1080p': 1080,
+    '720p': 720,
+    '480p': 480,
+    '360p': 360,
+}
+
+
+def _resolution_max_height(resolution: str) -> Optional[int]:
+    if not resolution:
+        return None
+    key = resolution.strip().lower().split()[0]
+    if key in _RESOLUTION_MAX_HEIGHT:
+        return _RESOLUTION_MAX_HEIGHT[key]
+    m = re.search(r'(\d+)', key)
+    return int(m.group(1)) if m else None
 
 
 # ── Tool detection ────────────────────────────────────────────────────────────
@@ -176,27 +196,39 @@ def detect_resolution(m3u8_url: str, auth: VoyoAuth) -> str:
 import urllib.parse
 from Crypto.Cipher import AES
 
-def resolve_variant_url(master_content: str, master_url: str) -> str:
-    """Parse HLS master playlist and return the best quality variant URL."""
+def resolve_variant_url(
+    master_content: str,
+    master_url: str,
+    max_height: Optional[int] = None,
+) -> str:
+    """Parse HLS master playlist and return the best variant URL up to max_height."""
     lines = master_content.splitlines()
-    variants = []
+    variants: List[Tuple[int, int, str]] = []
     current_bandwidth = 0
+    current_height = 0
     current_url = ""
-    
+
     for line in lines:
         line = line.strip()
         if line.startswith("#EXT-X-STREAM-INF"):
-            m = re.search(r"BANDWIDTH=(\d+)", line)
-            current_bandwidth = int(m.group(1)) if m else 0
+            bw = re.search(r"BANDWIDTH=(\d+)", line)
+            current_bandwidth = int(bw.group(1)) if bw else 0
+            res = re.search(r"RESOLUTION=(\d+)x(\d+)", line)
+            current_height = int(res.group(2)) if res else 0
         elif line and not line.startswith("#"):
             current_url = urllib.parse.urljoin(master_url, line)
-            variants.append((current_bandwidth, current_url))
-            
-    if variants:
-        variants.sort(key=lambda x: x[0], reverse=True)
-        return variants[0][1]
-        
-    return master_url
+            variants.append((current_height, current_bandwidth, current_url))
+
+    if not variants:
+        return master_url
+
+    if max_height:
+        capped = [v for v in variants if not v[0] or v[0] <= max_height]
+        if capped:
+            variants = capped
+
+    variants.sort(key=lambda x: (x[0] or 0, x[1]), reverse=True)
+    return variants[0][2]
 
 def parse_m3u8(playlist_content: str, playlist_url: str) -> Tuple[List[str], Optional[Dict[str, Any]]]:
     """Parse HLS m3u8 playlist and extract segment URLs and decryption key info."""
@@ -238,7 +270,13 @@ def decrypt_segment(encrypted_data: bytes, key: bytes, sequence_number: int, key
     cipher = AES.new(key, AES.MODE_CBC, iv)
     return cipher.decrypt(encrypted_data)
 
-async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, title: str = 'video') -> Optional[str]:
+async def download_native_async(
+    m3u8_url: str,
+    temp_stem: str,
+    auth: VoyoAuth,
+    title: str = 'video',
+    max_height: Optional[int] = None,
+) -> Optional[str]:
     """Download HLS natively using asynchronous connection pool and parallel workers."""
     from backend.core.services.async_engine import AsyncDownloadEngine
     import aiohttp
@@ -261,7 +299,7 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
             
         # 2. Handle master playlist variants
         if "#EXT-X-STREAM-INF" in content:
-            variant_url = resolve_variant_url(content, m3u8_url)
+            variant_url = resolve_variant_url(content, m3u8_url, max_height=max_height)
             logger.info(f"Resolved master playlist to variant: {variant_url}")
             async with session.get(variant_url, headers=headers) as resp:
                 if resp.status != 200:
@@ -351,14 +389,21 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
         shutil.rmtree(temp_dir, ignore_errors=True)
         return output_ts
 
-def download_with_ytdlp(m3u8_url: str, temp_stem: str,
-                         auth: VoyoAuth, title: str = 'video') -> Optional[str]:
+def download_with_ytdlp(
+    m3u8_url: str,
+    temp_stem: str,
+    auth: VoyoAuth,
+    title: str = 'video',
+    max_height: Optional[int] = None,
+) -> Optional[str]:
     """
     Download HLS using native parallel async engine, falling back to yt-dlp if needed.
     """
     import asyncio
     try:
-        return asyncio.run(download_native_async(m3u8_url, temp_stem, auth, title))
+        return asyncio.run(
+            download_native_async(m3u8_url, temp_stem, auth, title, max_height=max_height)
+        )
     except Exception as e:
         logger.error(f"Native async engine failed: {e}. Falling back to standard yt-dlp...")
 
@@ -372,9 +417,13 @@ def download_with_ytdlp(m3u8_url: str, temp_stem: str,
     headers.pop('Content-Type', None)
     headers['device-id'] = auth.state.device_id
 
+    fmt = 'bestvideo+bestaudio/best'
+    if max_height:
+        fmt = f'bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best'
+
     ydl_opts = {
         'outtmpl':                       temp_stem + '.%(ext)s',
-        'format':                        'bestvideo+bestaudio/best',
+        'format':                        fmt,
         'http_headers':                  headers,
         'allow_unplayable_formats':      True,
         'continuedl':                    True,
@@ -515,10 +564,9 @@ class VoyoDownloader:
             logger.error(f'Failed to get stream URL: {e}')
             return False
 
-        info_code = url_info.get('infoCode', 0)
-        if info_code != 0:
-            logger.error(f'Stream not available (infoCode={info_code}): '
-                         f'{url_info.get("info", "")}')
+        probe = classify_url_info(url_info)
+        if not probe.get('streamable'):
+            logger.error('Video %s: %s', video_id, probe.get('reason') or 'stream unavailable')
             return False
 
         m3u8_url = url_info['url']
@@ -533,8 +581,14 @@ class VoyoDownloader:
 
             # Detect actual resolution from the stream (overrides --resolution default)
             logger.info('Detecting stream resolution...')
-            resolution = detect_resolution(m3u8_url, self.auth)
-            logger.info(f'  Detected: {resolution}')
+            detected = detect_resolution(m3u8_url, self.auth)
+            max_h = _resolution_max_height(self.resolution)
+            det_h = _resolution_max_height(detected)
+            if max_h and det_h and det_h > max_h:
+                resolution = self.resolution
+            else:
+                resolution = detected
+            logger.info(f'  Stream: {resolution} (limit {self.resolution})')
 
             output_stem = build_filename(
                 meta, video_id, series_title, resolution)
@@ -547,8 +601,10 @@ class VoyoDownloader:
         temp_stem = str(self.temp_dir / f'voyo_{video_id}')
         logger.info(f'Output: {output_stem}.mkv')
 
-        downloaded = download_with_ytdlp(m3u8_url, temp_stem,
-                                          self.auth, output_stem)
+        max_height = _resolution_max_height(self.resolution)
+        downloaded = download_with_ytdlp(
+            m3u8_url, temp_stem, self.auth, output_stem, max_height=max_height
+        )
         if not downloaded:
             logger.error(f'Download failed for {video_id}')
             return False

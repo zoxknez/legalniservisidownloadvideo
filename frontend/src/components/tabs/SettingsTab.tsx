@@ -126,6 +126,11 @@ export function SettingsTab() {
     voyoPassword,
     voyoVariant,
     setVoyoVariant,
+    voyoProfiles,
+    voyoActiveProfileId,
+    voyoProfilesLoading,
+    voyoProfileSwitching,
+    selectVoyoProfile,
     hboMarket,
     setHboMarket,
     startHboLogin,
@@ -140,6 +145,8 @@ export function SettingsTab() {
     setYtdlpNameTemplate,
     maxConcurrentDownloads,
     setMaxConcurrentDownloads,
+    voyoIgnoreCatalogDrmHint,
+    setVoyoIgnoreCatalogDrmHint,
   } = useSettingsTab();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(
@@ -820,6 +827,61 @@ export function SettingsTab() {
                 formatLabel={(val) => val === "rs" ? "Srbija (Voyo.rs)" : "Hrvatska (Voyo.hr)"}
               />
             </div>
+            <div>
+              <label className="custom-checkbox-wrap cursor-pointer" style={{ marginTop: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={voyoIgnoreCatalogDrmHint}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setVoyoIgnoreCatalogDrmHint(checked);
+                    void apiFetch("/api/config", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ voyo_ignore_catalog_drm_hint: checked }),
+                    }).then(async (res) => {
+                      if (res.ok) {
+                        showToast("Voyo DRM podešavanje sačuvano.", "success");
+                        await fetchStatus();
+                      } else {
+                        showToast("Greška pri čuvanju Voyo podešavanja.", "error");
+                      }
+                    });
+                  }}
+                />
+                <div className={`custom-checkbox-box ${voyoIgnoreCatalogDrmHint ? "checked" : ""}`}>
+                  <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                    <polyline points="1.5 5 4 7.5 8.5 2" />
+                  </svg>
+                </div>
+                <span className="text-sm font-semibold text-white">
+                  Ignoriši DRM upozorenja iz kataloga
+                </span>
+              </label>
+              <p style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 4, marginLeft: 28 }}>
+                Katalog ponekad lažno označava naslove — aplikacija ipak proverava stvarni stream (videoUrlV2).
+                Uključite da podrazumevano označite i hint epizode.
+              </p>
+            </div>
+            {status?.services?.voyo?.authenticated && voyoProfiles.length > 0 && (
+              <div>
+                <label>Korisnički profil</label>
+                <CustomSelect
+                  value={String(voyoActiveProfileId || voyoProfiles[0]?.profileId || "")}
+                  options={voyoProfiles.map((p) => String(p.profileId))}
+                  onChange={(val) => void selectVoyoProfile(Number(val))}
+                  formatLabel={(val) => {
+                    const p = voyoProfiles.find((x) => String(x.profileId) === val);
+                    if (!p) return val;
+                    const kind = p.type ? ` (${p.type})` : "";
+                    return `${p.name}${kind}`;
+                  }}
+                />
+                <p style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 4 }}>
+                  {voyoProfileSwitching ? "Menjam profil…" : "Kids i ostali profili sa Voyo naloga."}
+                </p>
+              </div>
+            )}
             <div>
               <label>Email</label>
               <input type="email" value={voyoEmail} onChange={(e) => setVoyoEmail(e.target.value)} placeholder="email@voyo.rs" className="input-premium" style={cssVars({"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"})} />

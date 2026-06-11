@@ -63,7 +63,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const queue = useDownloadQueue({ showToast });
   const config = useAppConfig({ showToast });
 
-  const voyo = useVoyo({ showToast });
+  const voyoIgnoreCatalogDrmHint = config.status?.voyo_ignore_catalog_drm_hint === true;
+  const voyo = useVoyo({ showToast, ignoreCatalogDrmHint: voyoIgnoreCatalogDrmHint });
   const hrti = useHrti({ showToast, activeTab });
   const eon = useEon({
     showToast,
@@ -76,7 +77,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const hbo = useHbo({ showToast });
   const skyshowtime = useSkyshowtime({ showToast });
   const ytdlp = useYtdlp({ showToast, activeTab });
-  const smart = useSmartDashboard({ showToast });
+  const smart = useSmartDashboard({ showToast, ignoreCatalogDrmHint: voyoIgnoreCatalogDrmHint });
   const sniffer = useSniffer({
     showToast,
     applyTargets: {

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { defaultSmartEpisodeIds, VOYO_HARD_BLOCK_MSG, voyoIsHardBlocked } from "../../lib/voyoDrm";
 import { apiFetch, parseApiError } from "../../lib/api";
 import { errorMessage } from "../../utils/logUtils";
 import type { SmartDetectData, SmartEpisode } from "../../types/app";
@@ -6,9 +7,10 @@ import type { ShowToastFn } from "../domainTypes";
 
 export interface UseSmartDashboardOptions {
   showToast: ShowToastFn;
+  ignoreCatalogDrmHint?: boolean;
 }
 
-export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
+export function useSmartDashboard({ showToast, ignoreCatalogDrmHint = false }: UseSmartDashboardOptions) {
   const [smartUrl, setSmartUrl] = useState("");
   const [smartLoading, setSmartLoading] = useState(false);
   const [smartData, setSmartData] = useState<SmartDetectData | null>(null);
@@ -112,7 +114,11 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           const data = await res.json();
           setSmartData(data);
           if (data.episodes && data.episodes.length > 0) {
-            setSmartSelectedEpisodes(data.episodes.map((ep: SmartEpisode) => ep.id));
+            if (data.service === "voyo") {
+              setSmartSelectedEpisodes(defaultSmartEpisodeIds(data.episodes, ignoreCatalogDrmHint));
+            } else {
+              setSmartSelectedEpisodes(data.episodes.map((ep: SmartEpisode) => ep.id));
+            }
           }
           if (data.available_resolutions && data.available_resolutions.length > 0) {
             setSmartResolution(data.available_resolutions[0]);
@@ -162,7 +168,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         if (!controller.signal.aborted) setSmartLoading(false);
       }
     },
-    [refreshYtdlpCookiesStatus, showToast],
+    [ignoreCatalogDrmHint, refreshYtdlpCookiesStatus, showToast],
   );
 
   const debouncedDetect = useCallback(
@@ -177,6 +183,12 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
 
   const startSmartDownload = useCallback(async () => {
     if (!smartData || smartSubmitting) return;
+
+    if (smartData.service === "voyo" && smartData.mode === "video" && voyoIsHardBlocked(smartData)) {
+      showToast(smartData.stream_reason || VOYO_HARD_BLOCK_MSG, "error");
+      return;
+    }
+
     setSmartSubmitting(true);
     try {
       showToast("Pokretanje pametnog preuzimanja...", "info");
@@ -201,7 +213,15 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           resolution: smartResolution,
         };
         if (smartData.mode === "series" && smartData.episodes && smartSelectedEpisodes.length > 0) {
-          voyoBody.video_ids = smartSelectedEpisodes.map(id => Number(id));
+          const blocked = smartData.episodes.filter(
+            (ep: SmartEpisode) => voyoIsHardBlocked(ep) && smartSelectedEpisodes.includes(ep.id),
+          );
+          if (blocked.length > 0) {
+            showToast(VOYO_HARD_BLOCK_MSG, "error");
+            return;
+          }
+          voyoBody.video_ids = smartSelectedEpisodes.map((id) => Number(id));
+          voyoBody.series_title = smartData.title;
         } else if (epRange) {
           voyoBody.episodes = epRange;
         }

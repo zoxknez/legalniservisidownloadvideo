@@ -4,7 +4,7 @@
 
 | Servis | Kanonski modul (preuzimanje) | Auth / browse |
 |--------|------------------------------|---------------|
-| Voyo | `backend.core.services.voyo.downloader` | `voyo.auth` (in-process u adapteru) |
+| Voyo (RS / HR) | `backend.core.services.voyo.downloader` | `voyo.auth` — varijante `rs` (voyo.rs) i `hr` (voyo.hr) |
 | HRTi | `backend.core.services.hrti.hrti_downloader` | `hrti.HRTIBrowser` (in-process) |
 | EON | `backend.core.services.eon.eon_downloader` | `eon.engine.EONEngine` (in-process browse/API) |
 | RTS Planeta | `backend.core.services.rtsplaneta.rtsplaneta_downloader` | `rtsplaneta_auth` (in-process) |

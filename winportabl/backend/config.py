@@ -35,11 +35,15 @@ DEFAULT_CONFIG = {
         "eon": {"username": "", "password": "", "serial": "", "number": ""},
         "hbomax": {"market": "emea", "token": ""},
         "rtsplaneta": {"email": "", "password": ""},
-        "hrti": {"email": "", "password": ""}
+        "hrti": {"email": "", "password": ""},
+        "skyshowtime": {"token": "", "expiry": "", "territory": "RS"}
     },
     "sniffer": {
         "auto_download": True
-    }
+    },
+    "voyo": {
+        "ignore_catalog_drm_hint": False,
+    },
 }
 
 class AppConfig:
@@ -172,6 +176,13 @@ class AppConfig:
 
     def set_max_concurrent_downloads(self, limit: int):
         self.data["max_concurrent_downloads"] = int(limit)
+        self.save()
+
+    def get_voyo_ignore_catalog_drm_hint(self) -> bool:
+        return bool(self.data.get("voyo", {}).get("ignore_catalog_drm_hint", False))
+
+    def set_voyo_ignore_catalog_drm_hint(self, value: bool) -> None:
+        self.data.setdefault("voyo", {})["ignore_catalog_drm_hint"] = bool(value)
         self.save()
 
     def set_credential(self, service: str, key: str, value: str):

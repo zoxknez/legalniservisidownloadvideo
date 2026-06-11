@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useAppConfigSlice, useAppShellSlice, useHboSlice, useSkyshowtimeSlice, useSnifferSlice } from "../../context/appStore";
 import { useCredentials } from "./useCredentials";
+import { useVoyoProfiles } from "./useVoyoProfiles";
 
 const CLEAR_SERVICE_LABELS: Record<string, string> = {
   voyo: "Voyo",
@@ -40,6 +41,8 @@ export function useSettingsTab() {
   const hbo = useHboSlice();
   const skyshowtime = useSkyshowtimeSlice();
   const { showToast, setActiveTab } = useAppShellSlice();
+  const voyoAuthenticated = config.status?.services?.voyo?.authenticated === true;
+  const voyoProfiles = useVoyoProfiles(voyoAuthenticated, showToast);
 
   const handleClearCredentials = useCallback(
     async (service: string) => {
@@ -104,6 +107,8 @@ export function useSettingsTab() {
     setYtdlpNameTemplate: config.setYtdlpNameTemplate,
     maxConcurrentDownloads: config.maxConcurrentDownloads,
     setMaxConcurrentDownloads: config.setMaxConcurrentDownloads,
+    voyoIgnoreCatalogDrmHint: config.voyoIgnoreCatalogDrmHint,
+    setVoyoIgnoreCatalogDrmHint: config.setVoyoIgnoreCatalogDrmHint,
     snifferAutoDownload: sniffer.snifferAutoDownload,
     saveSnifferAutoDownload: sniffer.saveSnifferAutoDownload,
     userscriptPreview: sniffer.userscriptPreview,
@@ -121,6 +126,7 @@ export function useSettingsTab() {
     startSkyshowtimeBrowserSync: skyshowtime.startSkyshowtimeBrowserSync,
     skyshowtimeSubmitting: skyshowtime.skyshowtimeSubmitting,
     ...credentials,
+    ...voyoProfiles,
   };
 }
 

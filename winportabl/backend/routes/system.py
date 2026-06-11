@@ -119,6 +119,7 @@ async def get_system_status():
         },
         "credentials_security": all_credential_security_status(config),
         "sniffer": config.data.get("sniffer", {"auto_download": True}),
+        "voyo_ignore_catalog_drm_hint": config.get_voyo_ignore_catalog_drm_hint(),
         "services": {
             "voyo": voyo,
             "hrti": hrti,
@@ -140,6 +141,7 @@ class ConfigUpdate(BaseModel):
     sniffer: Optional[Dict[str, Any]] = None
     ytdlp_name_template: Optional[str] = None
     max_concurrent_downloads: Optional[int] = None
+    voyo_ignore_catalog_drm_hint: Optional[bool] = None
 
 
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
@@ -184,6 +186,8 @@ def update_config(data: ConfigUpdate):
     if data.sniffer is not None:
         config.data.setdefault("sniffer", {}).update(data.sniffer)
         config.save()
+    if data.voyo_ignore_catalog_drm_hint is not None:
+        config.set_voyo_ignore_catalog_drm_hint(data.voyo_ignore_catalog_drm_hint)
     return {
         "success": True,
         "output_dir": config.get_output_dir(),
@@ -192,18 +196,21 @@ def update_config(data: ConfigUpdate):
         "max_concurrent_downloads": config.get_max_concurrent_downloads(),
         "binaries": config.data["binaries"],
         "sniffer": config.data.get("sniffer", {}),
+        "voyo_ignore_catalog_drm_hint": config.get_voyo_ignore_catalog_drm_hint(),
     }
 
 
 @router.get("/api/smart-detect")
-async def smart_detect(url: str):
+async def smart_detect(url: str, force: Optional[str] = None):
     url = url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL parametar je obavezan.")
+    if force and force not in ("ytdlp",):
+        raise HTTPException(status_code=400, detail=f"Nepoznat force parametar: {force}")
     loop = asyncio.get_running_loop()
     try:
         res = await asyncio.wait_for(
-            loop.run_in_executor(None, SmartParser.get_metadata, url),
+            loop.run_in_executor(None, lambda: SmartParser.get_metadata(url, force_service=force)),
             timeout=60.0,
         )
     except asyncio.TimeoutError:

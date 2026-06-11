@@ -111,13 +111,13 @@ def test_voyo_batch_job_reuses_one_downloader():
         def __init__(self):
             self.calls = []
 
-        def download_video(self, video_id):
+        def download_video(self, video_id, series_title="", **_kwargs):
             self.calls.append(video_id)
             return True
 
     fake = FakeDownloader()
     logs: list[str] = []
-    with patch("backend.jobs.voyo_job._authenticated_downloader", return_value=fake) as build_mock:
+    with patch("backend.jobs.voyo_job.VoyoAdapter.create_downloader", return_value=fake) as build_mock:
         ok = run_voyo_job("videos", {"video_ids": [11, 12, 13]}, logs.append)
 
     assert ok is True

@@ -62,6 +62,8 @@ def test_voyo_selected_episodes_queue_as_single_batch(client):
         "backend.routes.voyo.VoyoAdapter.get_auth_status",
         return_value={"authenticated": True},
     ), patch(
+        "backend.routes.voyo.VoyoAdapter.assert_videos_streamable",
+    ), patch(
         "backend.routes.voyo.queue_manager.add_download",
         new_callable=AsyncMock,
         return_value="task-batch",
@@ -87,6 +89,23 @@ def test_voyo_selected_episodes_queue_as_single_batch(client):
     payload = json.loads(cmd[1])
     assert payload["action"] == "videos"
     assert payload["params"]["video_ids"] == [45268, 45269, 45270]
+
+
+def test_voyo_download_rejects_unstreamable_video(client):
+    with patch(
+        "backend.routes.voyo.VoyoAdapter.get_auth_status",
+        return_value={"authenticated": True},
+    ), patch(
+        "backend.routes.voyo.VoyoAdapter.assert_video_streamable",
+        side_effect=ValueError("Widevine DRM — preuzimanje nije podržano."),
+    ):
+        r = client.post(
+            "/api/voyo/download",
+            headers={"X-API-Key": "test-secret-key"},
+            json={"target": "999", "mode": "video", "resolution": "1080p"},
+        )
+    assert r.status_code == 400
+    assert "Widevine" in r.json()["detail"]
 
 
 def test_hrti_selected_episodes_queue_as_single_batch(client):

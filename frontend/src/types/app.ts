@@ -68,6 +68,7 @@ export interface AppStatus {
     localhost_bypass?: boolean;
   };
   sniffer?: { auto_download?: boolean };
+  voyo_ignore_catalog_drm_hint?: boolean;
   credentials_security?: CredentialsSecurityMap;
   drm?: DrmStatusSummary;
   services: Record<string, ServiceStatus>;
@@ -101,7 +102,13 @@ export interface VoyoEpisode {
   season: number;
   episode: number;
   length_mins: number;
+  /** Katalog hint (drmProtected) — nije autoritativan. */
   drm: boolean;
+  drm_hint?: boolean;
+  drm_blocking?: boolean;
+  streamable?: boolean;
+  probe_ok?: boolean;
+  stream_reason?: string;
   has_subs: boolean;
 }
 
@@ -117,6 +124,23 @@ export interface VoyoSeriesInfo {
   nbSeasons?: number;
   seasons?: VoyoSeason[];
   episodes: VoyoEpisode[];
+}
+
+export interface VoyoVideoInfo {
+  success?: boolean;
+  id?: number;
+  title: string;
+  description?: string;
+  duration_str?: string;
+  thumbnail?: string;
+  drm?: boolean;
+  drm_hint?: boolean;
+  drm_blocking?: boolean;
+  streamable?: boolean;
+  probe_ok?: boolean;
+  drm_type?: string;
+  stream_reason?: string;
+  has_subs?: boolean;
 }
 
 export interface SkyShowtimeEpisode {
@@ -171,6 +195,11 @@ export interface SmartEpisode {
   episode?: number;
   length_mins?: number;
   drm?: boolean;
+  drm_hint?: boolean;
+  drm_blocking?: boolean;
+  streamable?: boolean;
+  probe_ok?: boolean;
+  stream_reason?: string;
 }
 
 export interface SmartDetectData {
@@ -179,6 +208,7 @@ export interface SmartDetectData {
   target_id?: string;
   mode?: string;
   episodes?: SmartEpisode[];
+  seasons?: VoyoSeason[];
   available_resolutions?: string[];
   available_subtitles?: string[];
   available_auto_subtitles?: string[];
@@ -191,6 +221,21 @@ export interface SmartDetectData {
   metadata_partial?: boolean;
   generic_url?: boolean;
   playlist_count?: number;
+  drm?: boolean;
+  drm_hint?: boolean;
+  drm_blocking?: boolean;
+  streamable?: boolean;
+  probe_ok?: boolean;
+  drm_type?: string;
+  stream_reason?: string;
+  has_subs?: boolean;
+}
+
+export interface VoyoProfile {
+  profileId: number;
+  name: string;
+  type?: string;
+  avatar?: string;
 }
 
 export interface TranscodeAcceleration {

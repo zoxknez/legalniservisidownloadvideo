@@ -7,8 +7,8 @@
 // @match        *://*.max.com/*
 // @match        *://*.hbomax.com/*
 // @match        *://*.voyo.rs/*
-// @match        *://*.voyo.si/*
-// @match        *://*.voyo.cz/*
+// @match        *://*.voyo.hr/*
+// @match        *://*.rtl.hr/*
 // @match        *://*.rtsplaneta.rs/*
 // @match        *://*.hrt.hr/*
 // @match        *://*.eon.tv/*

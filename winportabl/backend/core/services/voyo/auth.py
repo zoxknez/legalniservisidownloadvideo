@@ -600,6 +600,16 @@ class VoyoConfig:
     def get_variant(self) -> str:
         return self._cfg.get('variant', 'rs')
 
+    def get_profile_id(self) -> int:
+        try:
+            return int(self._cfg.get('profile_id', 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def set_profile_id(self, profile_id: int) -> None:
+        self._cfg['profile_id'] = int(profile_id)
+        self.save()
+
     def has_credentials(self) -> bool:
         email, password, _ = self.get_credentials()
         return bool(email and password)
