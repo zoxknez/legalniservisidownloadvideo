@@ -14,8 +14,10 @@ Usage:
     python hbomax_downloader.py -i de4c9160-1b67-4c1e-8cad-e7b0e42c5fdf
 
     # With subtitle options:
-    python hbomax_downloader.py -i <id> --subs sr,hr,mk,bs,sl
+    python hbomax_downloader.py -i <id> --subs all
+    python hbomax_downloader.py -i <id> --subs sr,hr,en
     python hbomax_downloader.py -i <id> --subs none
+    python hbomax_downloader.py -i <id> --audio all
 
     # URL directly accepted too:
     python hbomax_downloader.py -i https://play.hbomax.com/video/watch/.../de4c9160-...
@@ -82,7 +84,8 @@ LICENSE_URL  = "https://widevine.any-any.prd.max.com/widevine/v1/license"
 APP_VERSION  = "3.0.0"
 PLATFORM_TAG = "browser"
 
-_DEFAULT_SUBS = "sr,hr,mk,bs,sl"
+_DEFAULT_SUBS = "all"
+_DEFAULT_AUDIO = "all"
 _OUTPUT_DIR   = Path("output")
 
 # ── Widevine CDM wrapper ───────────────────────────────────────────────────────
@@ -301,6 +304,188 @@ class MaxAPI:
         return headers
 
 
+# ── Language / track helpers ───────────────────────────────────────────────────
+
+_LANG_ISO_MAP = {
+    "sr": "srp", "sr-latn": "srp", "sr-cyrl": "srp",
+    "hr": "hrv", "mk": "mkd", "bs": "bos",
+    "sl": "slv", "en": "eng", "und": "und",
+    "de": "deu", "fr": "fra", "es": "spa", "it": "ita",
+    "pt": "por", "nl": "nld", "pl": "pol", "cs": "ces",
+    "sk": "slk", "hu": "hun", "ro": "ron", "bg": "bul",
+    "el": "ell", "tr": "tur", "ru": "rus", "uk": "ukr",
+    "ja": "jpn", "ko": "kor", "zh": "zho", "ar": "ara",
+}
+
+
+def _lang_base(lang: str) -> str:
+    return (lang or "und").lower().split("-")[0]
+
+
+def _lang_to_iso639_2(lang: str) -> str:
+    low = (lang or "und").lower()
+    if low in _LANG_ISO_MAP:
+        return _LANG_ISO_MAP[low]
+    base = _lang_base(low)
+    return _LANG_ISO_MAP.get(base, base[:3] if len(base) >= 3 else "und")
+
+
+def _adaptation_role(adapt: Dict[str, Any]) -> str:
+    roles = adapt.get("Role", [])
+    if isinstance(roles, dict):
+        roles = [roles]
+    for role in roles or []:
+        val = (role.get("@value") or "").strip().lower()
+        if val:
+            return val
+    return ""
+
+
+def _safe_filename_part(value: str) -> str:
+    return re.sub(r'[<>:"/\\|?*\s]+', "_", (value or "track").strip())[:80]
+
+
+_AUDIO_ROLE_PRIORITY = ("", "main", "dub", "subtitle", "description", "alternate", "commentary", "caption")
+
+
+def _audio_role_rank(role: str) -> int:
+    r = (role or "").lower()
+    try:
+        return _AUDIO_ROLE_PRIORITY.index(r)
+    except ValueError:
+        return len(_AUDIO_ROLE_PRIORITY)
+
+
+def _track_identity(track: Dict[str, Any]) -> Tuple[str, str, str]:
+    return (
+        str(track.get("lang") or "und"),
+        str(track.get("role") or ""),
+        str(track.get("id") or ""),
+    )
+
+
+def _pick_default_audio_track(audio_tracks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not audio_tracks:
+        return None
+
+    def _score(track: Dict[str, Any]) -> Tuple[int, int, str]:
+        lang = _lang_base(track.get("lang", ""))
+        if lang == "und":
+            lang_score = 0
+        elif lang == "en":
+            lang_score = 1
+        else:
+            lang_score = 2
+        return (lang_score, _audio_role_rank(track.get("role", "")), str(track.get("lang") or ""))
+
+    return min(audio_tracks, key=_score)
+
+
+def _primary_audio_track_from_list(audio_tracks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return _pick_default_audio_track(audio_tracks)
+
+
+def _upsert_audio_track(
+    tracks: List[Dict[str, Any]],
+    lang: str,
+    role: str,
+    rep_id: str,
+    merged: Dict[str, Any],
+) -> None:
+    bw = int(merged.get("@bandwidth") or 0)
+    for track in tracks:
+        if (
+            track.get("lang") == lang
+            and track.get("role", "") == role
+            and track.get("id", "") == rep_id
+        ):
+            if bw > int(track.get("@bandwidth") or 0):
+                track.clear()
+                track.update({**merged, "lang": lang, "role": role, "id": rep_id})
+            return
+    tracks.append({**merged, "lang": lang, "role": role, "id": rep_id})
+
+
+def _normalize_audio_tracks(parsed: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw = parsed.get("audio_tracks")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        out: List[Dict[str, Any]] = []
+        for lang, merged in raw.items():
+            out.append({
+                **merged,
+                "lang": lang,
+                "role": merged.get("role", ""),
+                "id": merged.get("@id", merged.get("id", "")),
+            })
+        return out
+    if parsed.get("audio"):
+        merged = parsed["audio"]
+        return [{
+            **merged,
+            "lang": merged.get("@lang", merged.get("lang", "und")),
+            "role": merged.get("role", ""),
+            "id": merged.get("@id", merged.get("id", "")),
+        }]
+    return []
+
+
+def _audio_display_name(lang: str, role: str) -> str:
+    label = (lang or "und").upper()
+    if role in ("description", "alternate"):
+        return f"{label} (AD)"
+    if role == "commentary":
+        return f"{label} (komentar)"
+    if role == "dub":
+        return f"{label} (dub)"
+    if role in ("main", "subtitle", ""):
+        return label
+    return f"{label} ({role})"
+
+
+def _subtitle_extension(mime: str) -> str:
+    m = (mime or "").lower()
+    if "ttml" in m:
+        return "ttml"
+    if "srt" in m:
+        return "srt"
+    if "vtt" in m or "webvtt" in m:
+        return "vtt"
+    return "vtt"
+
+
+def _pick_default_audio_lang(langs: List[str]) -> str:
+    for pref in ("und", "en"):
+        for lang in langs:
+            if _lang_base(lang) == pref:
+                return lang
+    return langs[0] if langs else "und"
+
+
+def _subtitle_track_wanted(wanted_langs: List[str], track_lang: str) -> bool:
+    if not wanted_langs or wanted_langs == ["none"]:
+        return False
+    normalized = [w.lower() for w in wanted_langs]
+    if "all" in normalized:
+        return True
+    tl = (track_lang or "und").lower()
+    base = _lang_base(tl)
+    for wanted in normalized:
+        if tl == wanted or tl.startswith(f"{wanted}-") or base == wanted:
+            return True
+    return False
+
+
+def _subtitle_display_name(lang: str, role: str) -> str:
+    label = (lang or "und").upper()
+    if role == "caption":
+        return f"{label} (CC)"
+    if role in ("subtitle", "main", ""):
+        return label
+    return f"{label} ({role})"
+
+
 # ── MPD parsing ───────────────────────────────────────────────────────────────
 
 def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]:
@@ -318,7 +503,7 @@ def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]
         periods = [periods]
 
     best_video: Optional[Dict] = None
-    best_audio_by_lang: Dict[str, Dict] = {}
+    audio_tracks_list: List[Dict[str, Any]] = []
     subtitle_tracks: List[Dict] = []
     pssh_b64: Optional[str] = None
 
@@ -357,17 +542,24 @@ def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]
 
             # ── Audio ────────────────────────────────────────────────────────
             elif "audio" in mime or "audio" in content_type:
+                role = _adaptation_role(adapt)
                 reps = adapt.get("Representation", [])
                 if isinstance(reps, dict):
                     reps = [reps]
                 for rep in reps:
-                    bw = int(rep.get("@bandwidth") or 0)
-                    existing = best_audio_by_lang.get(lang)
-                    if not existing or bw > int(existing.get("@bandwidth", 0)):
-                        best_audio_by_lang[lang] = {**adapt, **rep}
+                    rep_id = str(rep.get("@id") or "")
+                    _upsert_audio_track(
+                        audio_tracks_list,
+                        lang,
+                        role,
+                        rep_id,
+                        {**adapt, **rep},
+                    )
 
             # ── Subtitles ────────────────────────────────────────────────────
-            elif "text" in mime or "text" in content_type or "subtitle" in mime:
+            elif (
+                "text" in mime or "text" in content_type or "subtitle" in mime
+            ) and "image" not in mime:
                 reps = adapt.get("Representation", [])
                 if isinstance(reps, dict):
                     reps = [reps]
@@ -380,29 +572,30 @@ def _parse_mpd(mpd_text: str, max_height: int = L3_MAX_HEIGHT) -> Dict[str, Any]
                             base_url = tmpl.get("@media") or tmpl.get("@initialization")
                     subtitle_tracks.append({
                         "lang": lang,
+                        "role": _adaptation_role(adapt),
+                        "id": rep.get("@id", ""),
                         "mime": mime,
                         "base_url": base_url,
                         "adapt": adapt,
                         "rep": rep,
                     })
 
-    # Pick a single audio track — prefer 'und' or first available
-    best_audio = (
-        best_audio_by_lang.get("und")
-        or best_audio_by_lang.get("en")
-        or (next(iter(best_audio_by_lang.values())) if best_audio_by_lang else None)
-    )
+    best_audio = _primary_audio_track_from_list(audio_tracks_list)
 
     if best_video and mpd_duration:
         best_video["_mpd_duration"] = mpd_duration
     if best_audio and mpd_duration:
         best_audio["_mpd_duration"] = mpd_duration
+    for track in audio_tracks_list:
+        if mpd_duration:
+            track["_mpd_duration"] = mpd_duration
 
     return {
-        "video":     best_video,
-        "audio":     best_audio,
-        "subtitles": subtitle_tracks,
-        "pssh":      pssh_b64,
+        "video":        best_video,
+        "audio":        best_audio,
+        "audio_tracks": audio_tracks_list,
+        "subtitles":    subtitle_tracks,
+        "pssh":         pssh_b64,
     }
 
 
@@ -574,30 +767,45 @@ def _download_subtitles(
     mpd_base_url: str,
     sess: Any,
 ) -> List[Dict[str, str]]:
-    """Download subtitle tracks for wanted languages. Returns list of {lang, path}."""
-    result = []
+    """Download subtitle tracks. Returns list of {lang, path, name}."""
+    result: List[Dict[str, str]] = []
     if not wanted_langs or wanted_langs == ["none"]:
         return result
 
-    for track in subtitle_tracks:
-        lang = track.get("lang", "und").lower()
-        # Check if this language is wanted
-        if wanted_langs and not any(lang.startswith(w.lower()) for w in wanted_langs):
+    used_names: Dict[str, int] = {}
+
+    for idx, track in enumerate(subtitle_tracks):
+        lang = (track.get("lang") or "und").lower()
+        role = (track.get("role") or "").lower()
+        if not _subtitle_track_wanted(wanted_langs, lang):
             continue
 
         base_url = track.get("base_url")
         if not base_url:
-            # Try to build from SegmentTemplate
-            seg_urls = _extract_segment_urls({**track.get("adapt", {}), **track.get("rep", {})}, mpd_base_url)
+            seg_urls = _extract_segment_urls(
+                {**track.get("adapt", {}), **track.get("rep", {})},
+                mpd_base_url,
+            )
             if not seg_urls:
-                logger.warning(f"Ne mogu naći subtitle URL za {lang}")
+                logger.warning("Ne mogu naći subtitle URL za %s (%s)", lang, role or "main")
                 continue
         else:
-            seg_urls = [base_url if base_url.startswith("http") else mpd_base_url.rsplit("/", 1)[0] + "/" + base_url]
+            seg_urls = [
+                base_url if base_url.startswith("http")
+                else mpd_base_url.rsplit("/", 1)[0] + "/" + base_url
+            ]
 
-        out_path = out_dir / f"sub_{lang}.vtt"
+        rep_id = _safe_filename_part(str(track.get("id") or f"{lang}_{role}_{idx}"))
+        name_key = f"{lang}|{role}|{rep_id}"
+        used_names[name_key] = used_names.get(name_key, 0) + 1
+        suffix = f"_{role}" if role else ""
+        if used_names[name_key] > 1:
+            suffix += f"_{used_names[name_key]}"
+        ext = _subtitle_extension(track.get("mime", ""))
+        out_path = out_dir / f"sub_{_safe_filename_part(lang)}{suffix}_{rep_id}.{ext}"
+
         try:
-            content_parts = []
+            content_parts: List[str] = []
             header_written = False
             for url in seg_urls:
                 r = sess.get(url, timeout=15)
@@ -617,10 +825,11 @@ def _download_subtitles(
                     content_parts.append("\n".join(lines[skip:]))
 
             out_path.write_text("\n".join(content_parts), encoding="utf-8")
-            logger.info(f"  ✓ Titlovi {lang}: {out_path.name}")
-            result.append({"lang": lang, "path": str(out_path)})
+            display = _subtitle_display_name(lang, role)
+            logger.info("  ✓ Titlovi %s: %s", display, out_path.name)
+            result.append({"lang": lang, "path": str(out_path), "name": display})
         except Exception as e:
-            logger.warning(f"  ✗ Titlovi {lang}: {e}")
+            logger.warning("  ✗ Titlovi %s (%s): %s", lang, role or "main", e)
 
     return result
 
@@ -645,37 +854,104 @@ def _decrypt_file(
 
 # ── mkvmerge ──────────────────────────────────────────────────────────────────
 
+def _download_decrypt_audio_tracks(
+    audio_tracks: List[Dict[str, Any]],
+    mpd_url: str,
+    tmp: Path,
+    keys: List[Dict],
+    mp4decrypt_bin: str,
+    workers: int,
+    audio_mode: str = "all",
+) -> List[Dict[str, Any]]:
+    """Download and decrypt all (or primary) audio tracks from the manifest."""
+    if not audio_tracks:
+        raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
+
+    if audio_mode == "first":
+        primary = _pick_default_audio_track(audio_tracks)
+        selected = [primary] if primary else []
+    else:
+        selected = list(audio_tracks)
+
+    default_track = _pick_default_audio_track(selected) or (selected[0] if selected else None)
+    default_key = _track_identity(default_track) if default_track else ("", "", "")
+    decrypted: List[Dict[str, Any]] = []
+
+    for track in sorted(selected, key=_track_identity):
+        lang = str(track.get("lang") or "und")
+        role = str(track.get("role") or "")
+        rep_id = str(track.get("id") or "")
+        safe_name = _safe_filename_part(f"{lang}_{role}_{rep_id}")
+        enc_audio = tmp / f"audio_{safe_name}.mp4"
+        dec_audio = tmp / f"audio_{safe_name}_dec.mp4"
+
+        label = _audio_display_name(lang, role)
+        logger.info("Preuzimam audio segmente (%s) …", label)
+        aud_urls = _extract_segment_urls(track, mpd_url)
+        if not aud_urls:
+            logger.warning("Preskačem audio %s — nema segmenata.", label)
+            continue
+        _download_segments(aud_urls, enc_audio, f"Audio {label}", workers)
+
+        if keys:
+            _decrypt_file(enc_audio, dec_audio, keys, mp4decrypt_bin)
+        else:
+            enc_audio.rename(dec_audio)
+
+        decrypted.append({
+            "lang": lang,
+            "role": role,
+            "name": label,
+            "path": dec_audio,
+            "default": _track_identity(track) == default_key,
+        })
+
+    if not decrypted:
+        raise RuntimeError("Nijedan audio zapis nije uspešno preuzet.")
+    return decrypted
+
+
 def _mux_mkv(
     video: Path,
-    audio: Path,
+    audio_tracks: List[Dict[str, Any]],
     out: Path,
     subtitles: Optional[List[Dict]],
     mkvmerge_bin: str,
 ) -> None:
-    """Mux video, audio and optional subtitles into MKV."""
-    lang_map = {
-        "sr": "srp", "sr-latn": "srp", "sr-cyrl": "srp",
-        "hr": "hrv", "mk": "mkd", "bs": "bos",
-        "sl": "slv", "en": "eng", "und": "und",
-    }
-
+    """Mux video, multiple audio tracks and optional subtitles into MKV."""
     cmd = [
         mkvmerge_bin, "--ui-language", "en",
         "--output", str(out),
         "--language", "0:und", "--default-track", "0:yes", str(video),
-        "--language", "0:und", "--default-track", "0:yes", str(audio),
     ]
+
+    default_set = False
+    for track in audio_tracks:
+        lang = str(track.get("lang") or "und")
+        iso = _lang_to_iso639_2(lang)
+        is_default = bool(track.get("default")) and not default_set
+        if is_default:
+            default_set = True
+        cmd += ["--language", f"0:{iso}", "--default-track", f"0:{'yes' if is_default else 'no'}"]
+        name = track.get("name")
+        if name:
+            cmd += ["--track-name", f"0:{name}"]
+        cmd.append(str(track["path"]))
 
     if subtitles:
         for sub in subtitles:
-            lang_bcp = sub.get("lang", "und").lower()
-            iso = lang_map.get(lang_bcp, lang_bcp[:3])
-            cmd += ["--language", f"0:{iso}", "--default-track", "0:no", sub["path"]]
+            lang_bcp = (sub.get("lang") or "und").lower()
+            iso = _lang_to_iso639_2(lang_bcp)
+            cmd += ["--language", f"0:{iso}", "--default-track", "0:no"]
+            name = sub.get("name")
+            if name:
+                cmd += ["--track-name", f"0:{name}"]
+            cmd.append(sub["path"])
 
     cmd.append("--no-global-tags")
 
     result = run_subprocess(cmd, capture_output=True, text=True)
-    if result.returncode not in (0, 1):  # mkvmerge returns 1 for warnings
+    if result.returncode not in (0, 1):
         raise RuntimeError(f"mkvmerge greška:\n{result.stderr}")
 
 
@@ -733,7 +1009,93 @@ class HBOMaxDownloader:
 
     # ── Download pipeline ─────────────────────────────────────────────────────
 
-    def download(self, video_id: str, wanted_subs: List[str]) -> None:
+    def _finalize_from_parsed(
+        self,
+        parsed: Dict[str, Any],
+        mpd_url: str,
+        safe_title: str,
+        wanted_subs: List[str],
+        keys: List[Dict],
+        audio_mode: str = "all",
+    ) -> None:
+        """Download segments, decrypt, subtitles and mux from parsed MPD."""
+        audio_tracks = _normalize_audio_tracks(parsed)
+        if not parsed.get("video"):
+            raise RuntimeError(f"Nije pronađena video reprezentacija ≤{L3_MAX_HEIGHT}p u MPD.")
+        if not audio_tracks:
+            raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
+
+        vh = parsed["video"].get("@height", "?")
+        vbw = int(parsed["video"].get("@bandwidth", 0)) // 1000
+        logger.info(f"Video: {vh}p @ {vbw} kbps")
+        audio_labels = [
+            _audio_display_name(t.get("lang", "und"), t.get("role", ""))
+            for t in audio_tracks
+        ]
+        logger.info(
+            "Audio u manifestu (%s): %s",
+            len(audio_labels),
+            ", ".join(audio_labels) if audio_labels else "—",
+        )
+        logger.info(
+            "Subtitlovi u manifestu: %s",
+            [f"{t.get('lang', 'und')}{'/' + t['role'] if t.get('role') else ''}" for t in parsed["subtitles"]],
+        )
+
+        tmp = Path(tempfile.mkdtemp(prefix="hbomax_"))
+        try:
+            enc_video = tmp / "video.mp4"
+            dec_video = tmp / "video_dec.mp4"
+
+            logger.info("Preuzimam video segmente …")
+            vid_urls = _extract_segment_urls(parsed["video"], mpd_url)
+            if not vid_urls:
+                raise RuntimeError("Nije pronađen nijedan video segment URL.")
+            _download_segments(vid_urls, enc_video, "Video", self.workers)
+
+            bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
+
+            if keys:
+                logger.info("Dekripcija videa …")
+                _decrypt_file(enc_video, dec_video, keys, bins["mp4decrypt"])
+            else:
+                enc_video.rename(dec_video)
+
+            decrypted_audio = _download_decrypt_audio_tracks(
+                audio_tracks,
+                mpd_url,
+                tmp,
+                keys,
+                bins["mp4decrypt"],
+                self.workers,
+                audio_mode=audio_mode,
+            )
+
+            subs: List[Dict] = []
+            if wanted_subs and wanted_subs != ["none"]:
+                logger.info("Preuzimam titlove: %s …", ", ".join(wanted_subs))
+                subs = _download_subtitles(
+                    parsed["subtitles"],
+                    wanted_subs,
+                    tmp,
+                    mpd_url,
+                    self._sess,
+                )
+
+            out_path = self.output_dir / f"{safe_title}.mkv"
+            logger.info(f"Muxing → {out_path} …")
+            _mux_mkv(dec_video, decrypted_audio, out_path, subs or None, bins["mkvmerge"])
+            logger.info(f"✓ Završeno: {out_path} ({len(decrypted_audio)} audio, {len(subs)} titlova)")
+        finally:
+            import shutil as _shutil
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+    def download(
+        self,
+        video_id: str,
+        wanted_subs: List[str],
+        audio_mode: str = "all",
+    ) -> None:
         """Full download pipeline for one video."""
         video_id = self.extract_video_id(video_id)
         logger.info(f"Preuzimam video ID: {video_id}")
@@ -769,16 +1131,6 @@ class HBOMaxDownloader:
         mpd_text = self.api.get_manifest(mpd_url)
         parsed   = _parse_mpd(mpd_text, max_height=L3_MAX_HEIGHT)
 
-        if not parsed["video"]:
-            raise RuntimeError(f"Nije pronađena video reprezentacija ≤{L3_MAX_HEIGHT}p u MPD.")
-        if not parsed["audio"]:
-            raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
-
-        vh = parsed["video"].get("@height", "?")
-        vbw = int(parsed["video"].get("@bandwidth", 0)) // 1000
-        logger.info(f"Video: {vh}p @ {vbw} kbps")
-        logger.info(f"Subtitlovi u manifestu: {[t['lang'] for t in parsed['subtitles']]}")
-
         # ── 4. Widevine keys ──────────────────────────────────────────────────
         pssh = parsed.get("pssh")
         keys: List[Dict] = []
@@ -795,64 +1147,18 @@ class HBOMaxDownloader:
         else:
             logger.warning("PSSH nije pronađen — sadržaj možda nije zaštićen ili je manifest nestandardan.")
 
-        # ── 5. Download segments ──────────────────────────────────────────────
-        tmp = Path(tempfile.mkdtemp(prefix="hbomax_"))
-        try:
-            enc_video = tmp / "video.mp4"
-            enc_audio = tmp / "audio.mp4"
-            dec_video = tmp / "video_dec.mp4"
-            dec_audio = tmp / "audio_dec.mp4"
-
-            logger.info("Preuzimam video segmente …")
-            vid_urls = _extract_segment_urls(parsed["video"], mpd_url)
-            if not vid_urls:
-                raise RuntimeError("Nije pronađen nijedan video segment URL.")
-            _download_segments(vid_urls, enc_video, "Video", self.workers)
-
-            logger.info("Preuzimam audio segmente …")
-            aud_urls = _extract_segment_urls(parsed["audio"], mpd_url)
-            if not aud_urls:
-                raise RuntimeError("Nije pronađen nijedan audio segment URL.")
-            _download_segments(aud_urls, enc_audio, "Audio", self.workers)
-
-            # ── 6. Decrypt ────────────────────────────────────────────────────
-            bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
-
-            if keys:
-                logger.info("Dekripcija …")
-                _decrypt_file(enc_video, dec_video, keys, bins["mp4decrypt"])
-                _decrypt_file(enc_audio, dec_audio, keys, bins["mp4decrypt"])
-            else:
-                # No encryption — rename
-                enc_video.rename(dec_video)
-                enc_audio.rename(dec_audio)
-
-            # ── 7. Subtitles ───────────────────────────────────────────────────
-            subs: List[Dict] = []
-            if wanted_subs and wanted_subs != ["none"]:
-                logger.info(f"Preuzimam titlove: {', '.join(wanted_subs)} …")
-                subs = _download_subtitles(
-                    parsed["subtitles"],
-                    wanted_subs,
-                    tmp,
-                    mpd_url,
-                    self._sess,
-                )
-
-            # ── 8. Mux to MKV ─────────────────────────────────────────────────
-            out_path = self.output_dir / f"{safe_title}.mkv"
-            logger.info(f"Muxing → {out_path} …")
-            _mux_mkv(dec_video, dec_audio, out_path, subs or None, bins["mkvmerge"])
-            logger.info(f"✓ Završeno: {out_path}")
-
-        finally:
-            # Clean up temp files
-            import shutil as _shutil
-            _shutil.rmtree(tmp, ignore_errors=True)
+        self._finalize_from_parsed(parsed, mpd_url, safe_title, wanted_subs, keys, audio_mode)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def download_direct(self, manifest_url: str, license_url: str, title: str, wanted_subs: List[str]) -> None:
+    def download_direct(
+        self,
+        manifest_url: str,
+        license_url: str,
+        title: str,
+        wanted_subs: List[str],
+        audio_mode: str = "all",
+    ) -> None:
         """Full download pipeline using direct manifest URL and license URL (Bypass Mode)."""
         logger.info("Započinjem direktno preuzimanje preko manifesta i licence...")
         if not title or not title.strip():
@@ -864,16 +1170,6 @@ class HBOMaxDownloader:
         logger.info("Parsiranje MPD manifesta …")
         mpd_text = self.api.get_manifest(manifest_url)
         parsed   = _parse_mpd(mpd_text, max_height=L3_MAX_HEIGHT)
-
-        if not parsed["video"]:
-            raise RuntimeError(f"Nije pronađena video reprezentacija ≤{L3_MAX_HEIGHT}p u MPD.")
-        if not parsed["audio"]:
-            raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
-
-        vh = parsed["video"].get("@height", "?")
-        vbw = int(parsed["video"].get("@bandwidth", 0)) // 1000
-        logger.info(f"Video: {vh}p @ {vbw} kbps")
-        logger.info(f"Subtitlovi u manifestu: {[t['lang'] for t in parsed['subtitles']]}")
 
         # ── 2. Widevine keys ──────────────────────────────────────────────────
         pssh = parsed.get("pssh")
@@ -903,60 +1199,9 @@ class HBOMaxDownloader:
         else:
             logger.warning("PSSH nije pronađen — sadržaj možda nije zaštićen ili je manifest nestandardan.")
 
-        # ── 3. Download segments ──────────────────────────────────────────────
-        tmp = Path(tempfile.mkdtemp(prefix="hbomax_"))
-        try:
-            enc_video = tmp / "video.mp4"
-            enc_audio = tmp / "audio.mp4"
-            dec_video = tmp / "video_dec.mp4"
-            dec_audio = tmp / "audio_dec.mp4"
-
-            logger.info("Preuzimam video segmente …")
-            vid_urls = _extract_segment_urls(parsed["video"], manifest_url)
-            if not vid_urls:
-                raise RuntimeError("Nije pronađen nijedan video segment URL.")
-            _download_segments(vid_urls, enc_video, "Video", self.workers)
-
-            logger.info("Preuzimam audio segmente …")
-            aud_urls = _extract_segment_urls(parsed["audio"], manifest_url)
-            if not aud_urls:
-                raise RuntimeError("Nije pronađen nijedan audio segment URL.")
-            _download_segments(aud_urls, enc_audio, "Audio", self.workers)
-
-            # ── 4. Decrypt ────────────────────────────────────────────────────
-            bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
-
-            if keys:
-                logger.info("Dekripcija …")
-                _decrypt_file(enc_video, dec_video, keys, bins["mp4decrypt"])
-                _decrypt_file(enc_audio, dec_audio, keys, bins["mp4decrypt"])
-            else:
-                # No encryption — rename
-                enc_video.rename(dec_video)
-                enc_audio.rename(dec_audio)
-
-            # ── 5. Subtitles ───────────────────────────────────────────────────
-            subs: List[Dict] = []
-            if wanted_subs and wanted_subs != ["none"]:
-                logger.info(f"Preuzimam titlove: {', '.join(wanted_subs)} …")
-                subs = _download_subtitles(
-                    parsed["subtitles"],
-                    wanted_subs,
-                    tmp,
-                    manifest_url,
-                    self._sess,
-                )
-
-            # ── 6. Mux to MKV ─────────────────────────────────────────────────
-            out_path = self.output_dir / f"{safe_title}.mkv"
-            logger.info(f"Muxing → {out_path} …")
-            _mux_mkv(dec_video, dec_audio, out_path, subs or None, bins["mkvmerge"])
-            logger.info(f"✓ Završeno: {out_path}")
-
-        finally:
-            # Clean up temp files
-            import shutil as _shutil
-            _shutil.rmtree(tmp, ignore_errors=True)
+        self._finalize_from_parsed(
+            parsed, manifest_url, safe_title, wanted_subs, keys, audio_mode
+        )
 
     @staticmethod
     def _extract_title(content: Dict, video_id: str) -> str:
@@ -1058,9 +1303,10 @@ Primeri:
   # Download po URL:
   python hbomax_downloader.py -i "https://play.hbomax.com/video/watch/.../de4c9160-..."
 
-  # Sa titlovima:
-  python hbomax_downloader.py -i <id> --subs sr,hr,mk,bs,sl
-  python hbomax_downloader.py -i <id> --subs none
+  # Sa titlovima / audio:
+  python hbomax_downloader.py -i <id> --subs all
+  python hbomax_downloader.py -i <id> --subs sr,hr,en
+  python hbomax_downloader.py -i <id> --subs none --audio first
 """,
     )
 
@@ -1071,7 +1317,9 @@ Primeri:
     # Download
     parser.add_argument("-i", "--id",   dest="video_id", help="Video ID (UUID) ili puni URL")
     parser.add_argument("--subs",       default=_DEFAULT_SUBS,
-                        help=f"Jezici titlova odvojeni zarezom, ili 'none' (default: {_DEFAULT_SUBS})")
+                        help=f"Titlovi: 'all', lista jezika ili 'none' (default: {_DEFAULT_SUBS})")
+    parser.add_argument("--audio",      default=_DEFAULT_AUDIO,
+                        help=f"Audio: 'all' (svi jezici) ili 'first' (jedan, default: {_DEFAULT_AUDIO})")
 
     # Direct Download (Bypass Mode)
     parser.add_argument("--manifest",      default=None,       help="Direktni DASH (.mpd) manifest URL")
@@ -1110,12 +1358,17 @@ def main() -> int:
         print("Greška: navedite -i <video_id> ili --manifest i --license, ili --login")
         return 1
 
-    # Parse subtitle languages
     subs_raw = (args.subs or "").strip().lower()
     if subs_raw in ("none", "no", ""):
         wanted_subs = ["none"]
+    elif subs_raw == "all":
+        wanted_subs = ["all"]
     else:
         wanted_subs = [s.strip() for s in subs_raw.split(",") if s.strip()]
+
+    audio_mode = (args.audio or _DEFAULT_AUDIO).strip().lower()
+    if audio_mode not in ("all", "first"):
+        audio_mode = "all"
 
     # Ensure authenticated
     auth = HBOMaxAuth(market=args.market)
@@ -1134,9 +1387,9 @@ def main() -> int:
     dl.mkvmerge_path = args.mkvmerge
     try:
         if args.manifest and args.license:
-            dl.download_direct(args.manifest, args.license, args.title, wanted_subs)
+            dl.download_direct(args.manifest, args.license, args.title, wanted_subs, audio_mode)
         else:
-            dl.download(args.video_id, wanted_subs)
+            dl.download(args.video_id, wanted_subs, audio_mode)
         return 0
     except KeyboardInterrupt:
         print("\nPrekid od strane korisnika.")

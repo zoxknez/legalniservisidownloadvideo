@@ -57,8 +57,12 @@ class HboAdapter:
         return build_job("hbomax", "login", {"market": market})
 
     @staticmethod
-    def make_download_cmd(video_id: str, subs: str = "sr,hr,mk,bs,sl",
-                          market: str = "") -> List[str]:
+    def make_download_cmd(
+        video_id: str,
+        subs: str = "all",
+        market: str = "",
+        audio: str = "all",
+    ) -> List[str]:
         if not market:
             market = config.get_credentials("hbomax").get("market", "emea")
         return build_job(
@@ -67,6 +71,7 @@ class HboAdapter:
             {
                 "video_id": video_id,
                 "subs": subs,
+                "audio": audio,
                 "market": market,
                 "output_dir": config.get_output_dir(),
             },
@@ -77,7 +82,8 @@ class HboAdapter:
         manifest_url: str,
         license_url: str,
         title: str = "",
-        subs: str = "sr,hr,mk,bs,sl",
+        subs: str = "all",
+        audio: str = "all",
     ) -> List[str]:
         market = config.get_credentials("hbomax").get("market", "emea")
         return build_job(
@@ -88,6 +94,7 @@ class HboAdapter:
                 "license_url": license_url,
                 "title": title,
                 "subs": subs,
+                "audio": audio,
                 "market": market,
                 "output_dir": config.get_output_dir(),
             },

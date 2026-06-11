@@ -79,6 +79,8 @@ export function DashboardTab() {
     setSmartSkyQuality,
     smartSkyAudioLang,
     setSmartSkyAudioLang,
+    smartHboAudio,
+    setSmartHboAudio,
   } = useSmartDashboardTab();
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -741,6 +743,19 @@ export function DashboardTab() {
                 </div>
               ) : (
                 <>
+                  {smartData.service === "hbomax" && (
+                    <div>
+                      <label>Audio trake</label>
+                      <CustomSelect
+                        value={smartHboAudio}
+                        options={["all", "first"]}
+                        onChange={(val) => setSmartHboAudio(val)}
+                        formatLabel={(val) =>
+                          val === "all" ? "Svi jezici (preporučeno)" : "Samo primarni (en/und)"
+                        }
+                      />
+                    </div>
+                  )}
                   {smartData.service === "skyshowtime" && (
                     <>
                       <div>
@@ -802,7 +817,7 @@ export function DashboardTab() {
                       <div>
                         <label>Prevodi (odaberi klikom na oznaku jezika)</label>
                         <input type="text" value={smartSubs} onChange={e=>setSmartSubs(e.target.value)}
-                          placeholder={smartData.service === "hbomax" ? "sr,hr,mk,bs,sl" : "npr. en,sr,hr ili all (ostavi prazno za bez prevoda)"}
+                          placeholder={smartData.service === "hbomax" ? "all ili sr,hr,en — none za bez titlova" : "npr. en,sr,hr ili all (ostavi prazno za bez prevoda)"}
                           className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
                         
                         {smartData.service === "ytdlp" && (

@@ -40,6 +40,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [smartSkyVcodec, setSmartSkyVcodec] = useState("H264");
   const [smartSkyQuality, setSmartSkyQuality] = useState("SDR");
   const [smartSkyAudioLang, setSmartSkyAudioLang] = useState("sr");
+  const [smartHboAudio, setSmartHboAudio] = useState("all");
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -89,6 +90,10 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             setSmartSkyVcodec("H264");
             setSmartSkyQuality("SDR");
             setSmartSkyAudioLang("sr");
+          }
+          if (data.service === "hbomax") {
+            setSmartSubs("all");
+            setSmartHboAudio("all");
           }
           showToast("Link uspešno prepoznat i analiziran!", "success");
         } else {
@@ -206,7 +211,8 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             video_id: smartData.target_id,
-            subs: smartSubs,
+            subs: smartSubs.trim() || "all",
+            audio: smartHboAudio,
           }),
         });
       } else if (smartData.service === "skyshowtime") {
@@ -310,6 +316,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     smartSkyVcodec,
     smartSkyQuality,
     smartSkyAudioLang,
+    smartHboAudio,
   ]);
 
   return {
@@ -368,6 +375,8 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setSmartSkyQuality,
     smartSkyAudioLang,
     setSmartSkyAudioLang,
+    smartHboAudio,
+    setSmartHboAudio,
     handleSmartDetect,
     debouncedDetect,
     startSmartDownload,

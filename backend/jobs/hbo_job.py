@@ -21,7 +21,14 @@ def _parse_subs(raw: str) -> List[str]:
     subs_raw = (raw or "").strip().lower()
     if subs_raw in ("none", "no", ""):
         return ["none"]
+    if subs_raw == "all":
+        return ["all"]
     return [s.strip() for s in subs_raw.split(",") if s.strip()]
+
+
+def _parse_audio_mode(raw: str) -> str:
+    mode = (raw or "all").strip().lower()
+    return "first" if mode in ("first", "single", "one") else "all"
 
 
 def _device_path() -> str:
@@ -70,13 +77,14 @@ def run_hbo_job(
 
         if action == "direct":
             dl = _build_downloader(market, workers)
-            wanted_subs = _parse_subs(params.get("subs", "sr,hr,mk,bs,sl"))
+            wanted_subs = _parse_subs(params.get("subs", "all"))
+            audio_mode = _parse_audio_mode(params.get("audio", "all"))
             manifest = str(params.get("manifest_url", "")).strip()
             license_url = str(params.get("license_url", "")).strip()
             title = str(params.get("title") or "").strip()
             if not manifest or not license_url:
                 raise RuntimeError("manifest_url i license_url su obavezni.")
-            dl.download_direct(manifest, license_url, title, wanted_subs)
+            dl.download_direct(manifest, license_url, title, wanted_subs, audio_mode)
             return True
 
         auth = HBOMaxAuth(market=market)
@@ -86,13 +94,14 @@ def run_hbo_job(
             )
 
         dl = _build_downloader(market, workers)
-        wanted_subs = _parse_subs(params.get("subs", "sr,hr,mk,bs,sl"))
+        wanted_subs = _parse_subs(params.get("subs", "all"))
+        audio_mode = _parse_audio_mode(params.get("audio", "all"))
 
         if action == "video":
             video_id = str(params.get("video_id", "")).strip()
             if not video_id:
                 raise RuntimeError("video_id je obavezan.")
-            dl.download(video_id, wanted_subs)
+            dl.download(video_id, wanted_subs, audio_mode)
             return True
 
         raise RuntimeError(f"Unknown HBO job action: {action}")

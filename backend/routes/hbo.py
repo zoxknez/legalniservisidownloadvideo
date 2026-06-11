@@ -36,7 +36,8 @@ def hbo_status():
 
 class HboDownloadRequest(BaseModel):
     video_id: str = Field(min_length=1)
-    subs: str = "sr,hr,mk,bs,sl"
+    subs: str = "all"
+    audio: str = "all"
     market: Literal["emea", "latam", "us"] = "emea"
 
 
@@ -48,7 +49,9 @@ async def hbo_download(req: HboDownloadRequest):
             status_code=401,
             detail="Niste prijavljeni na HBO Max. Pokrenite login prvo.",
         )
-    cmd = HboAdapter.make_download_cmd(req.video_id.strip(), req.subs, req.market)
+    cmd = HboAdapter.make_download_cmd(
+        req.video_id.strip(), req.subs, req.market, req.audio
+    )
     title = f"HBO Max: {req.video_id.strip()}"
     task_id = await queue_manager.add_download("hbomax", title, cmd)
     return {"success": True, "task_id": task_id}
@@ -58,12 +61,15 @@ class HboDirectDownloadRequest(BaseModel):
     manifest_url: str = Field(min_length=10)
     license_url: str = Field(min_length=10)
     title: str = ""
-    subs: str = "sr,hr,mk,bs,sl"
+    subs: str = "all"
+    audio: str = "all"
 
 
 @router.post("/download-direct")
 async def hbo_download_direct(req: HboDirectDownloadRequest):
-    cmd = HboAdapter.make_download_direct_cmd(req.manifest_url, req.license_url, req.title, req.subs)
+    cmd = HboAdapter.make_download_direct_cmd(
+        req.manifest_url, req.license_url, req.title, req.subs, req.audio
+    )
     display_title = req.title.strip() if req.title.strip() else f"HBO Max Direct: {req.manifest_url[:40]}…"
     task_id = await queue_manager.add_download("hbomax", display_title, cmd)
     return {"success": True, "task_id": task_id}

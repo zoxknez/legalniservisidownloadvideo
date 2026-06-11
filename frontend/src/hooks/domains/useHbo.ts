@@ -28,12 +28,14 @@ export interface UseHboOptions {
 export function useHbo({ showToast }: UseHboOptions) {
   const [hboMarket, setHboMarket] = useState("emea");
   const [hboTarget, setHboTarget] = useState("");
-  const [hboSubs, setHboSubs] = useState("sr,hr,mk,bs,sl");
+  const [hboSubs, setHboSubs] = useState("all");
+  const [hboAudio, setHboAudio] = useState("all");
   const [hboDirectMode, setHboDirectMode] = useState(false);
   const [hboManifestUrl, setHboManifestUrl] = useState("");
   const [hboLicenseUrl, setHboLicenseUrl] = useState("");
   const [hboDirectTitle, setHboDirectTitle] = useState("");
-  const [hboDirectSubs, setHboDirectSubs] = useState("sr,hr,mk,bs,sl");
+  const [hboDirectSubs, setHboDirectSubs] = useState("all");
+  const [hboDirectAudio, setHboDirectAudio] = useState("all");
   const [hboSubmitting, setHboSubmitting] = useState(false);
   const [hboAuth, setHboAuth] = useState<HboAuthStatus | null>(null);
 
@@ -80,7 +82,12 @@ export function useHbo({ showToast }: UseHboOptions) {
       const res = await apiFetch(`/api/hbo/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: id, subs: hboSubs, market: hboMarket }),
+        body: JSON.stringify({
+          video_id: id,
+          subs: hboSubs,
+          audio: hboAudio,
+          market: hboMarket,
+        }),
       });
       if (res.ok) {
         showToast("HBO Max preuzimanje pokrenuto!");
@@ -93,7 +100,7 @@ export function useHbo({ showToast }: UseHboOptions) {
     } finally {
       setHboSubmitting(false);
     }
-  }, [hboMarket, hboSubs, hboSubmitting, hboTarget, showToast]);
+  }, [hboAudio, hboMarket, hboSubs, hboSubmitting, hboTarget, showToast]);
 
   const startHboDirectDownload = useCallback(async () => {
     if (!hboManifestUrl.trim() || !hboLicenseUrl.trim() || hboSubmitting) return;
@@ -107,6 +114,7 @@ export function useHbo({ showToast }: UseHboOptions) {
           license_url: hboLicenseUrl.trim(),
           title: hboDirectTitle.trim(),
           subs: hboDirectSubs,
+          audio: hboDirectAudio,
         }),
       });
       if (res.ok) {
@@ -122,7 +130,7 @@ export function useHbo({ showToast }: UseHboOptions) {
     } finally {
       setHboSubmitting(false);
     }
-  }, [hboDirectSubs, hboDirectTitle, hboLicenseUrl, hboManifestUrl, hboSubmitting, showToast]);
+  }, [hboDirectAudio, hboDirectSubs, hboDirectTitle, hboLicenseUrl, hboManifestUrl, hboSubmitting, showToast]);
 
   const pasteHboTarget = useCallback(async () => {
     try {
@@ -146,6 +154,8 @@ export function useHbo({ showToast }: UseHboOptions) {
     setHboTarget,
     hboSubs,
     setHboSubs,
+    hboAudio,
+    setHboAudio,
     hboDirectMode,
     setHboDirectMode,
     hboManifestUrl,
@@ -156,6 +166,8 @@ export function useHbo({ showToast }: UseHboOptions) {
     setHboDirectTitle,
     hboDirectSubs,
     setHboDirectSubs,
+    hboDirectAudio,
+    setHboDirectAudio,
     hboSubmitting,
     hboAuth,
     refreshAuth,

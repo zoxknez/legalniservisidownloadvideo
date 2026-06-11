@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from backend.config import config
 from backend.jobs.inprocess import build_job
 from backend.services.hbo_adapter import HboAdapter
+from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
 from backend.sniffer_store import SnifferCapture, _norm_service
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,12 @@ def _device_path() -> str:
     return path if path and Path(path).exists() else ""
 
 
-def build_sniffer_download_cmd(capture: SnifferCapture, *, subs: str = "sr,hr,mk,bs,sl") -> List[str]:
+def build_sniffer_download_cmd(
+    capture: SnifferCapture,
+    *,
+    subs: str = "all",
+    audio: str = "all",
+) -> List[str]:
     svc = _norm_service(capture.service)
     manifest = capture.manifest_url.strip()
     license_url = (capture.license_url or "").strip()
@@ -31,7 +37,18 @@ def build_sniffer_download_cmd(capture: SnifferCapture, *, subs: str = "sr,hr,mk
     if svc in ("hbomax", "hbo"):
         if not license_url:
             raise ValueError("License URL nije snifovan (potreban za HBO Max).")
-        return HboAdapter.make_download_direct_cmd(manifest, license_url, title, subs)
+        return HboAdapter.make_download_direct_cmd(manifest, license_url, title, subs, audio)
+
+    if svc == "skyshowtime":
+        if not license_url:
+            raise ValueError("License URL nije snifovan (potreban za SkyShowtime).")
+        license_token = (capture.headers or {}).get("X-License-Token", "")
+        return SkyShowtimeAdapter.make_download_direct_cmd(
+            manifest,
+            license_url,
+            title,
+            license_token=license_token,
+        )
 
     return build_job(
         "sniffer",
@@ -61,9 +78,10 @@ async def queue_sniffer_download(
     queue_manager,
     capture: SnifferCapture,
     *,
-    subs: str = "sr,hr,mk,bs,sl",
+    subs: str = "all",
+    audio: str = "all",
 ) -> Dict[str, Any]:
-    cmd = build_sniffer_download_cmd(capture, subs=subs)
+    cmd = build_sniffer_download_cmd(capture, subs=subs, audio=audio)
     title = capture_display_title(capture)
     task_id = await queue_manager.add_download(_norm_service(capture.service), title, cmd)
     return {"success": True, "task_id": task_id, "title": title}

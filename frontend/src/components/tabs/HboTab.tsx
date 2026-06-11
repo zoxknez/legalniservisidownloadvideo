@@ -23,11 +23,13 @@ export function HboTab() {
   const {
     hboDirectMode,
     hboDirectSubs,
+    hboDirectAudio,
     hboDirectTitle,
     hboLicenseUrl,
     hboManifestUrl,
     hboMarket,
     hboSubs,
+    hboAudio,
     hboTarget,
     hboSubmitting,
     hboAuth,
@@ -35,11 +37,13 @@ export function HboTab() {
     pasteHboTarget,
     setHboDirectMode,
     setHboDirectSubs,
+    setHboDirectAudio,
     setHboDirectTitle,
     setHboLicenseUrl,
     setHboManifestUrl,
     setHboMarket,
     setHboSubs,
+    setHboAudio,
     setHboTarget,
     startHboDirectDownload,
     startHboDownload,
@@ -168,18 +172,32 @@ export function HboTab() {
                 </p>
               </div>
 
-              <div>
-                <label>Jezici za titlove (odvojeni zarezom)</label>
-                <div className="password-wrapper">
-                  <Globe className="absolute left-4 text-text-muted w-4 h-4" />
-                  <input
-                    type="text"
-                    placeholder="npr. sr,hr,mk,bs,sl ili 'none' za bez titlova"
-                    value={hboSubs}
-                    onChange={(e) => setHboSubs(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !hboSubmitting && hboTarget.trim() && startHboDownload()}
-                    className="input-premium pl-11"
-                    style={cssVars({"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"})}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label>Titlovi</label>
+                  <div className="password-wrapper">
+                    <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                    <input
+                      type="text"
+                      placeholder="all, sr,hr,en ili none"
+                      value={hboSubs}
+                      onChange={(e) => setHboSubs(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && !hboSubmitting && hboTarget.trim() && startHboDownload()}
+                      className="input-premium pl-11"
+                      style={cssVars({"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"})}
+                    />
+                  </div>
+                  <p className="text-[10px] text-text-muted mt-1">Podrazumevano <code className="font-mono">all</code> — svi titlovi iz manifesta.</p>
+                </div>
+                <div>
+                  <label>Audio trake</label>
+                  <CustomSelect
+                    value={hboAudio}
+                    options={["all", "first"]}
+                    onChange={(val) => setHboAudio(val)}
+                    formatLabel={(val) =>
+                      val === "all" ? "Svi jezici (preporučeno)" : "Samo primarni (en/und)"
+                    }
                   />
                 </div>
               </div>
@@ -270,18 +288,31 @@ export function HboTab() {
               </div>
             </div>
 
-            <div>
-              <label>Jezici za titlove (odvojeni zarezom)</label>
-              <div className="password-wrapper">
-                <Globe className="absolute left-4 text-text-muted w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="npr. sr,hr,mk,bs,sl ili 'none'"
-                  value={hboDirectSubs}
-                  onChange={(e) => setHboDirectSubs(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !hboSubmitting && hboManifestUrl.trim() && hboLicenseUrl.trim() && startHboDirectDownload()}
-                  className="input-premium pl-11"
-                  style={cssVars({"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"})}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label>Titlovi</label>
+                <div className="password-wrapper">
+                  <Globe className="absolute left-4 text-text-muted w-4 h-4" />
+                  <input
+                    type="text"
+                    placeholder="all, sr,hr,en ili none"
+                    value={hboDirectSubs}
+                    onChange={(e) => setHboDirectSubs(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !hboSubmitting && hboManifestUrl.trim() && hboLicenseUrl.trim() && startHboDirectDownload()}
+                    className="input-premium pl-11"
+                    style={cssVars({"--focused-border": "#9333ea", "--focused-glow": "rgba(147,51,234,0.25)"})}
+                  />
+                </div>
+              </div>
+              <div>
+                <label>Audio trake</label>
+                <CustomSelect
+                  value={hboDirectAudio}
+                  options={["all", "first"]}
+                  onChange={(val) => setHboDirectAudio(val)}
+                  formatLabel={(val) =>
+                    val === "all" ? "Svi jezici (preporučeno)" : "Samo primarni (en/und)"
+                  }
                 />
               </div>
             </div>

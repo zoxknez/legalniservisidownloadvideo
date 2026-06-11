@@ -61,7 +61,8 @@ def sniffer_captures():
 
 class SnifferDownloadRequest(BaseModel):
     service: str
-    subs: str = "sr,hr,mk,bs,sl"
+    subs: str = "all"
+    audio: str = "all"
 
 
 @router.post("/download")
@@ -76,7 +77,9 @@ async def sniffer_download(req: SnifferDownloadRequest):
             detail="Manifest i/ili license nisu spremni. Pustite video dok je Tampermonkey aktivan.",
         )
     try:
-        result = await queue_sniffer_download(queue_manager, capture, subs=req.subs)
+        result = await queue_sniffer_download(
+            queue_manager, capture, subs=req.subs, audio=req.audio
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     sniffer_store.mark_queued(capture.service, result["task_id"])
