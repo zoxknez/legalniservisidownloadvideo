@@ -161,8 +161,40 @@ def test_hrti_batch_job_reuses_one_downloader():
     assert ok is True
     build_mock.assert_called_once()
     assert fake.login_calls == 1
-    assert fake.calls == [("ep-1", "Ep 1"), ("ep-2", "Ep 2")]
+    assert fake.calls == [("ep-1", None), ("ep-2", None)]
     assert any("2/2" in line for line in logs)
+
+
+def test_hrti_batch_job_fails_on_partial_success():
+    from backend.jobs.hrti_job import run_hrti_job
+
+    class FakeDownloader:
+        def login(self):
+            pass
+
+        def download(self, ref_id, title=None):
+            if ref_id == "ep-2":
+                raise RuntimeError("boom")
+            return True
+
+    logs: list[str] = []
+    with patch("backend.jobs.hrti_job._device_path", return_value=""), patch(
+        "backend.jobs.hrti_job.HRTIDownloader",
+        return_value=FakeDownloader(),
+    ):
+        ok = run_hrti_job(
+            "downloads",
+            {
+                "items": [
+                    {"ref_id": "ep-1", "title": "Ep 1"},
+                    {"ref_id": "ep-2", "title": "Ep 2"},
+                ]
+            },
+            logs.append,
+        )
+
+    assert ok is False
+    assert any("1/2" in line for line in logs)
 
 
 @pytest.mark.integration

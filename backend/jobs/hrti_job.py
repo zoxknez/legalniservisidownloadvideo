@@ -84,11 +84,11 @@ def run_hrti_job(
             label = item["title"] or item["ref_id"]
             log_fn(f"INFO HRTi epizoda {idx}/{total}: {label}")
             try:
-                downloader.download(item["ref_id"], item["title"] or None)
+                downloader.download(item["ref_id"], None)
                 success += 1
             except Exception as exc:
                 log_fn(f"ERROR HRTi epizoda nije uspela: {label} ({exc})")
 
         _check_cancelled(cancel_event)
         log_fn(f"INFO HRTi batch zavrsen: {success}/{total} epizoda")
-        return success > 0
+        return total > 0 and success == total

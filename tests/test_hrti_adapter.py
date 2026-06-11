@@ -41,6 +41,37 @@ def test_hrti_auth_true_when_keyring_has_password():
         status = HrtiAdapter.get_auth_status()
         assert status["authenticated"] is True
         assert status["email"] == "user@hrti.hr"
+        assert status["auth_method"] == "credentials"
+
+
+def test_hrti_auth_true_when_session_token_has_customer_id(tmp_path):
+    cfg_dir = tmp_path / ".hrti"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text('{"customer_id": "cust-123"}', encoding="utf-8")
+
+    with patch("backend.services.hrti_adapter.Path.home", return_value=tmp_path), patch(
+        "backend.credentials_store.get_secret",
+        side_effect=lambda _svc, key: "token-123" if key == "token" else "",
+    ), patch(
+        "backend.services.hrti_adapter.config.get_credentials",
+        return_value={"email": "", "password": ""},
+    ):
+        status = HrtiAdapter.get_auth_status()
+        assert status["authenticated"] is True
+        assert status["auth_method"] == "session"
+
+
+def test_hrti_auth_rejects_token_without_customer_id(tmp_path):
+    with patch("backend.services.hrti_adapter.Path.home", return_value=tmp_path), patch(
+        "backend.credentials_store.get_secret",
+        side_effect=lambda _svc, key: "token-123" if key == "token" else "",
+    ), patch(
+        "backend.services.hrti_adapter.config.get_credentials",
+        return_value={"email": "", "password": ""},
+    ):
+        status = HrtiAdapter.get_auth_status()
+        assert status["authenticated"] is False
+        assert "CustomerId" in status["error"]
 
 
 def test_hrti_register_device_retry_on_already_used(tmp_path):
@@ -73,6 +104,26 @@ def test_hrti_register_device_retry_on_already_used(tmp_path):
         assert auth.state.aviion_ref_id == "mock-ref-id"
 
 
+def test_hrti_login_restores_stored_session_token(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"customer_id": "cust-123"}), encoding="utf-8")
+    auth = HRTIAuth(config_path=str(config_path))
+
+    with patch(
+        "backend.credentials_store.get_secret",
+        side_effect=lambda _svc, key: "token-123" if key == "token" else "",
+    ), patch.object(auth, "_get_ip", return_value="127.0.0.1"), patch.object(
+        auth,
+        "_register_device",
+    ) as register_device:
+        result = auth.login()
+
+    assert result["SessionRestored"] is True
+    assert auth.state.token == "token-123"
+    assert auth.state.customer_id == "cust-123"
+    register_device.assert_called_once()
+
+
 def test_hrti_config_does_not_persist_session_secrets(tmp_path):
     config_path = tmp_path / "config.json"
     auth = HRTIAuth(config_path=str(config_path))
@@ -87,6 +138,7 @@ def test_hrti_config_does_not_persist_session_secrets(tmp_path):
     assert data == {
         "device_id": "device-123",
         "aviion_ref_id": "aviion-ref-123",
+        "customer_id": "customer-123",
     }
 
 
@@ -122,4 +174,19 @@ def test_hrti_resolve_reference_id_rejects_empty_input():
 
     with pytest.raises(ValueError, match="Reference ID"):
         downloader.resolve_reference_id(" ")
+
+
+def test_hrti_detect_binaries_uses_configured_paths(tmp_path):
+    from backend.core.services.hrti import hrti_downloader
+
+    paths = {}
+    for name in ("aria2c", "mp4decrypt", "mkvmerge", "ffmpeg"):
+        path = tmp_path / f"{name}.exe"
+        path.write_text("", encoding="utf-8")
+        paths[name] = str(path)
+
+    with patch("backend.config.config.get_binary_path", side_effect=lambda key: paths[key]):
+        found = hrti_downloader.detect_binaries()
+
+    assert found == paths
 

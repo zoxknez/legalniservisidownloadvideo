@@ -58,6 +58,33 @@ def _extract_token_string(service: str, data: str) -> str:
     return text
 
 
+def _write_hrti_session_metadata(customer_id: str = "", email: str = "") -> None:
+    if not customer_id and not email:
+        return
+    cfg_path = Path.home() / ".hrti" / "config.json"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg: Dict[str, Any] = {}
+    if cfg_path.exists():
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                cfg = loaded
+        except Exception:
+            cfg = {}
+    if customer_id:
+        cfg["customer_id"] = customer_id
+    if email:
+        cfg["email"] = email
+        cfg["username"] = email
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    try:
+        cfg_path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def _detect_voyo_variant_from_token(token: str) -> str:
     import base64
     import json
@@ -138,9 +165,40 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
         return {"service": service, "message": f"Voyo {voyo_variant.upper()} token uvezen (OS keyring)."}
 
     if service == "hrti":
-        token = _extract_token_string("hrti", data)
+        from backend.core.services.hrti.hrti_auth import (
+            clean_session_token,
+            extract_customer_id_from_payload,
+            extract_email_from_payload,
+        )
+
+        token = clean_session_token(_extract_token_string("hrti", data))
+        if not token or token.startswith("{"):
+            raise ValueError("HRTi uvoz: očekivan token ili JSON sa poljem token.")
+        customer_id = extract_customer_id_from_payload(data) or extract_customer_id_from_payload(token)
+        email = extract_email_from_payload(data) or extract_email_from_payload(token)
         set_secret("hrti", "token", token)
-        return {"service": service, "message": "HRTi token uvezen (OS keyring)."}
+        _write_hrti_session_metadata(customer_id=customer_id, email=email)
+        if email:
+            try:
+                from backend.config import config
+
+                config.update_credentials("hrti", {"email": email})
+            except Exception:
+                pass
+        if customer_id:
+            return {
+                "service": service,
+                "session_ready": True,
+                "message": "HRTi token i CustomerId uvezeni (OS keyring).",
+            }
+        return {
+            "service": service,
+            "session_ready": False,
+            "message": (
+                "HRTi token je uvezen, ali nedostaje CustomerId. "
+                "Za preuzimanje uvezite JSON sa token/customer_id ili se prijavite emailom i lozinkom."
+            ),
+        }
 
     if service == "rtsplaneta":
         token = _extract_token_string("rtsplaneta", data)

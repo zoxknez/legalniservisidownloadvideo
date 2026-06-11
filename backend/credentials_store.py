@@ -306,6 +306,11 @@ def clear_service_credentials(service: str, config_module) -> Dict[str, Any]:
             if native.get(tfield):
                 native[tfield] = ""
                 changed = True
+        if service == "hrti":
+            for public_key in ("email", "username", "customer_id", "CustomerId"):
+                if native.get(public_key):
+                    native[public_key] = ""
+                    changed = True
         if service == "eon" and native.get("cookies"):
             native["cookies"] = {}
             changed = True

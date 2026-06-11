@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Video Download Servisi — Bridge (Sniffer + Sesije)
 // @namespace    https://github.com/videodownloadservisi
-// @version      2.1.0
+// @version      2.1.1
 // @description  Automatski šalje sesije i snifuje MPD/license URL-ove u lokalnu aplikaciju.
 // @author       Video Download Servisi
 // @match        *://*.max.com/*
@@ -70,6 +70,72 @@
     });
   }
 
+  function decodeJwtPayload(token) {
+    try {
+      const part = String(token).replace(/^(Bearer|Client)\s+/i, '').split('.')[1];
+      if (!part) return {};
+      return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function findNestedValue(value, keyRx, depth) {
+    if (!value || depth > 6 || typeof value !== 'object') return '';
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findNestedValue(item, keyRx, depth + 1);
+        if (found) return found;
+      }
+      return '';
+    }
+    for (const key in value) {
+      const val = value[key];
+      if (keyRx.test(key) && val != null && typeof val !== 'object') {
+        return String(val).trim();
+      }
+    }
+    for (const key in value) {
+      const found = findNestedValue(value[key], keyRx, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+
+  function scanLocalStorage(keyRx) {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i) || '';
+      const val = localStorage.getItem(key) || '';
+      if (keyRx.test(key) && val) return val.trim();
+      try {
+        const found = findNestedValue(JSON.parse(val), keyRx, 0);
+        if (found) return found;
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    return '';
+  }
+
+  function collectHrtiSession() {
+    const token = localStorage.getItem('token') || '';
+    if (!token || token.length <= 8) return '';
+    const payload = decodeJwtPayload(token);
+    const cidRx = /^(customerid|customer_id|userid|user_id|customerreferenceid|customer_reference_id)$/i;
+    const emailRx = /^(email|username|useremail|mail)$/i;
+    const customerId =
+      findNestedValue(
+        payload,
+        /^(customerid|customer_id|userid|user_id|customerreferenceid|customer_reference_id|sub)$/i,
+        0
+      ) || scanLocalStorage(cidRx);
+    const email = findNestedValue(payload, emailRx, 0) || scanLocalStorage(emailRx);
+    const out = { token: token };
+    if (customerId) out.customer_id = customerId;
+    if (email) out.email = email;
+    return JSON.stringify(out);
+  }
+
   function collectSessions() {
     const batch = {};
     const host = window.location.hostname;
@@ -98,8 +164,8 @@
       }
     }
     if (host.includes('hrt.hr')) {
-      const t = localStorage.getItem('token') || '';
-      if (t && t.length > 8) batch.hrti = t;
+      const session = collectHrtiSession();
+      if (session) batch.hrti = session;
     }
     if (host.includes('rtsplaneta')) {
       const k = Object.keys(localStorage).find(function (x) {

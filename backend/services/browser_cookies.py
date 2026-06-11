@@ -438,13 +438,32 @@ def sync_all_supported_services() -> Dict[str, Any]:
 
     hrti_cookies = extracted.get("hrti.hrt.hr", [])
     if hrti_cookies:
+        from backend.core.services.hrti.hrti_auth import (
+            clean_session_token,
+            extract_customer_id_from_payload,
+            extract_email_from_payload,
+        )
+        from backend.session_import import _write_hrti_session_metadata
+
         cookie_dict = {c["name"]: c["value"] for c in hrti_cookies if c["value"]}
         hrti_token = cookie_dict.get("token") or cookie_dict.get("Authorization")
         if hrti_token:
             try:
-                set_secret("hrti", "token", hrti_token.replace("Client ", "").strip())
-                domain_report["hrti.hrt.hr"] = True
-                logger.info("HRTi session token auto-synced (keyring).")
+                clean_token = clean_session_token(hrti_token)
+                customer_id = (
+                    extract_customer_id_from_payload(cookie_dict)
+                    or extract_customer_id_from_payload(clean_token)
+                )
+                email = extract_email_from_payload(cookie_dict) or extract_email_from_payload(clean_token)
+                set_secret("hrti", "token", clean_token)
+                _write_hrti_session_metadata(customer_id=customer_id, email=email)
+                if email:
+                    config.update_credentials("hrti", {"email": email})
+                domain_report["hrti.hrt.hr"] = bool(customer_id)
+                if customer_id:
+                    logger.info("HRTi session token auto-synced (keyring).")
+                else:
+                    logger.warning("HRTi token synced, but CustomerId was not found.")
             except Exception as e:
                 logger.error("Failed to store HRTi token: %s", e)
 

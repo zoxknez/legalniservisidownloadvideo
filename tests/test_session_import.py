@@ -19,7 +19,29 @@ def test_batch_import_voyo_hrti(mock_set):
 def test_single_hrti(mock_set):
     res = import_session_for_service("hrti", '{"token":"abc123"}')
     assert res["service"] == "hrti"
+    assert res["session_ready"] is False
     mock_set.assert_called_with("hrti", "token", "abc123")
+
+
+@patch("backend.credentials_store.set_secret")
+def test_single_hrti_saves_customer_metadata(mock_set, tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    payload = json.dumps(
+        {
+            "token": "Client token-123",
+            "customer_id": "cust-456",
+            "email": "user@hrti.hr",
+        }
+    )
+
+    res = import_session_for_service("hrti", payload)
+
+    assert res["service"] == "hrti"
+    assert res["session_ready"] is True
+    mock_set.assert_called_with("hrti", "token", "token-123")
+    cfg = json.loads((tmp_path / ".hrti" / "config.json").read_text(encoding="utf-8"))
+    assert cfg["customer_id"] == "cust-456"
+    assert cfg["email"] == "user@hrti.hr"
 
 
 def test_non_batch_returns_none():
