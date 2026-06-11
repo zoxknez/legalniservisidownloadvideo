@@ -382,11 +382,16 @@ class HRTIAuth:
         drm_id = self.authorize_session(reference_id, content_drm_id)
         drm_headers = self.build_drm_headers(drm_id)
 
-        title = details.get("OriginalTitle") or details.get("Title") or reference_id
+        series_name = (details.get("SeriesName") or "").strip()
         season = details.get("SeasonNr")
         episode = details.get("EpisodeNr")
-        if season and episode:
-            title = f"{title}.S{int(season):02d}E{int(episode):02d}"
+        if series_name and season is not None and episode is not None:
+            from .hrti_downloader import HRTIDownloader
+
+            base = HRTIDownloader.sanitize_filename(series_name.replace(" ", "."))
+            title = f"{base}.S{int(season):02d}E{int(episode):02d}"
+        else:
+            title = details.get("OriginalTitle") or details.get("Title") or reference_id
 
         return {
             "mpd_url": mpd_url,

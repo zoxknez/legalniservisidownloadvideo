@@ -95,6 +95,8 @@ export function YtdlpDownloadPanel({
   setSubsOpen,
   hardsubInputId = "ytdlpHardsub-console",
 }: YtdlpDownloadPanelProps) {
+  const hasEpisodeChecklist = !!(data.episodes && data.episodes.length > 0);
+
   return (
     <div className="ytdlp-console-container">
                 <div className="ytdlp-console-wrapper animate-fade-in">
@@ -201,20 +203,22 @@ export function YtdlpDownloadPanel({
                         <span className="ytdlp-option-help">Rutira saobraćaj kroz proksi server (http/socks5).</span>
                       </div>
 
-                      {/* Opseg videa iz plejliste */}
-                      <div className="ytdlp-option-group" style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.45 }}>
-                        <label>Opseg stavki iz plejliste</label>
-                        <input
-                          type="text"
-                          value={ytdlpPlaylistItems}
-                          onChange={e => setYtdlpPlaylistItems(e.target.value)}
-                          placeholder={ytdlpDownloadPlaylist ? "npr. 1-5, 10" : "Prvo uključi plejliste"}
-                          disabled={!ytdlpDownloadPlaylist}
-                          className="ytdlp-advanced-input"
-                          style={{ cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
-                        />
-                        <span className="ytdlp-option-help">Preuzima samo određene delove plejliste (npr. 1-3, 5).</span>
-                      </div>
+                      {/* Opseg videa iz plejliste — skriveno kad postoji vizuelna checklista */}
+                      {!hasEpisodeChecklist && (
+                        <div className="ytdlp-option-group" style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.45 }}>
+                          <label>Opseg stavki iz plejliste</label>
+                          <input
+                            type="text"
+                            value={ytdlpPlaylistItems}
+                            onChange={e => setYtdlpPlaylistItems(e.target.value)}
+                            placeholder={ytdlpDownloadPlaylist ? "npr. 1-5, 10" : "Prvo uključi plejliste"}
+                            disabled={!ytdlpDownloadPlaylist}
+                            className="ytdlp-advanced-input"
+                            style={{ cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
+                          />
+                          <span className="ytdlp-option-help">Preuzima samo određene delove plejliste (npr. 1-3, 5).</span>
+                        </div>
+                      )}
 
                       <div className="ytdlp-option-group md:col-span-2">
                         <label>Napredni format (opciono)</label>

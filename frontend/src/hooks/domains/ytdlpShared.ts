@@ -1,5 +1,58 @@
 import type { SmartDetectData, SmartEpisode } from "../../types/app";
 
+export function toggleYtdlpSubsLang(subs: string, lang: string): string {
+  const activeList = subs
+    ? subs
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const l = lang.toLowerCase();
+  if (activeList.includes(l)) {
+    return activeList.filter((s) => s !== l).join(",");
+  }
+  return [...activeList, l].join(",");
+}
+
+function pluralEpizoda(n: number): string {
+  if (n === 1) return "epizodu";
+  if (n >= 2 && n <= 4) return "epizode";
+  return "epizoda";
+}
+
+function pluralStavka(n: number): string {
+  if (n === 1) return "stavku";
+  if (n >= 2 && n <= 4) return "stavke";
+  return "stavki";
+}
+
+export function buildYtdlpCtaLabel(opts: {
+  submitting: boolean;
+  mode?: string;
+  selectedCount?: number;
+  totalEpisodes?: number;
+}): string {
+  if (opts.submitting) return "Dodavanje u red...";
+
+  const selected = opts.selectedCount ?? 0;
+  const total = opts.totalEpisodes ?? 0;
+  const isPlaylist = opts.mode === "playlist";
+
+  if (total > 0 && selected > 0) {
+    if (selected < total) {
+      return isPlaylist
+        ? `Preuzmi ${selected} od ${total} ${pluralStavka(selected)}`
+        : `Preuzmi ${selected} ${pluralEpizoda(selected)}`;
+    }
+    return isPlaylist
+      ? `Preuzmi celu plejlistu (${total} ${pluralStavka(total)})`
+      : `Preuzmi sve (${total} ${pluralEpizoda(total)})`;
+  }
+
+  if (isPlaylist) return "Preuzmi plejlistu";
+  return "Dodaj u red preuzimanja";
+}
+
 export function applyYtdlpDetectDefaults(
   data: SmartDetectData,
   setters: {

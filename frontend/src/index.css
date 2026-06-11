@@ -1374,6 +1374,69 @@ textarea {
   cursor: not-allowed;
 }
 
+/* Univerzalno tab — zasebno dugme (ne deli amber .smart-url-analyze-btn) */
+.tab-content-ytdlp .smart-url-wrap:focus-within {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2),
+              0 0 16px rgba(59, 130, 246, 0.15);
+}
+
+.ytdlp-url-analyze-btn {
+  height: 46px;
+  padding: 0 24px;
+  margin-right: 2px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  background-size: auto;
+  border: none;
+  border-radius: 11px;
+  color: #ffffff !important;
+  font-weight: 800;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+  animation: none;
+}
+.ytdlp-url-analyze-btn svg {
+  color: #ffffff !important;
+  stroke: #ffffff;
+  flex-shrink: 0;
+}
+.ytdlp-url-analyze-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  color: #ffffff !important;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.45);
+  transform: translateY(-1px);
+}
+.ytdlp-url-analyze-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.ytdlp-url-analyze-btn:disabled {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.ytdlp-url-analyze-btn:disabled svg {
+  color: var(--text-muted) !important;
+  stroke: var(--text-muted);
+}
+
+.tab-content-hrti .ytdlp-url-analyze-btn {
+  background: linear-gradient(135deg, #06b6d4, #0891b2);
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.35);
+}
+.tab-content-hrti .ytdlp-url-analyze-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #22d3ee, #06b6d4);
+  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.45);
+}
+
 /* Supported platforms pills */
 .smart-supported-platforms {
   display: flex;
@@ -2054,6 +2117,7 @@ textarea {
 
 /* ── 2. Brand-Themed Glowing Shadow Halos ── */
 .glow-orange-card { --glow-color: rgba(249, 115, 22, 0.25); }
+.glow-blue-card   { --glow-color: rgba(59, 130, 246, 0.25); }
 .glow-cyan-card   { --glow-color: rgba(6, 182, 212, 0.25); }
 .glow-green-card  { --glow-color: rgba(16, 185, 129, 0.25); }
 .glow-rose-card   { --glow-color: rgba(244, 63, 94, 0.25); }

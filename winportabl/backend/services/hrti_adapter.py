@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class HrtiAdapter:
     _browser: HRTIBrowser | None = None
-    _cats_cached_val: List[str] | None = None
+    _cats_cached_val: List[Dict[str, str]] | None = None
     _cats_cached_time: float = 0.0
     _items_cached_dict: Dict[tuple, tuple] = {}
     _search_cached_dict: Dict[str, tuple] = {}
@@ -68,7 +68,7 @@ class HrtiAdapter:
             return {"success": False, "error": str(exc)}
 
     @classmethod
-    def list_categories(cls) -> List[str]:
+    def list_categories(cls) -> List[Dict[str, str]]:
         now = time.time()
         if cls._cats_cached_val and (now - cls._cats_cached_time) < 1800.0:
             return cls._cats_cached_val
@@ -80,6 +80,22 @@ class HrtiAdapter:
         except Exception as exc:
             logger.error("HRTi list_categories failed: %s", exc)
             return []
+
+    @classmethod
+    def preview_ref(cls, ref_id: str) -> Dict[str, Any]:
+        now = time.time()
+        cache_key = f"preview:{ref_id}"
+        if cache_key in cls._series_cached_dict:
+            ts, cached = cls._series_cached_dict[cache_key]
+            if (now - ts) < 600.0:
+                return cached
+        try:
+            result = cls._browser_client().preview_ref(ref_id.strip())
+            cls._series_cached_dict[cache_key] = (now, result)
+            return result
+        except Exception as exc:
+            logger.error("HRTi preview_ref failed: %s", exc)
+            return {"success": False, "error": str(exc), "mode": "video", "ref_id": ref_id}
 
     @classmethod
     def get_category_items(cls, category: str, page: int = 1) -> Dict[str, Any]:

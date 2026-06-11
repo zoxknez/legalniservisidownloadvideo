@@ -90,10 +90,25 @@ export interface DownloadTask {
   logs: string[];
 }
 
+export interface HrtiCategory {
+  id: string;
+  name: string;
+}
+
+export interface HrtiSeason {
+  season: number;
+  title: string;
+  episode_count: number;
+}
+
 export interface HrtiItem {
   id: string;
   type: "movie" | "series" | "episode";
   title: string;
+  thumbnail?: string;
+  season?: number;
+  episode?: number;
+  category_id?: string;
 }
 
 export interface VoyoEpisode {
@@ -217,6 +232,7 @@ export interface SmartDetectData {
   duration_str?: string;
   uploader?: string;
   view_count?: number;
+  like_count?: number;
   upload_date?: string;
   metadata_partial?: boolean;
   generic_url?: boolean;

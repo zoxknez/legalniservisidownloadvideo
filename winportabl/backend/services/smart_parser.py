@@ -362,20 +362,22 @@ class SmartParser:
                             episodes.append({
                                 "id": item.get("id"),
                                 "title": item.get("title"),
-                                "season": 1,
-                                "episode": 0,
+                                "season": item.get("season") or 1,
+                                "episode": item.get("episode") or 0,
                                 "length_mins": 0,
                                 "drm": False,
-                                "has_subs": False
+                                "has_subs": False,
                             })
+                        series_title = series_info.get("series_title") or f"HRTi Serija"
                         return {
                             "success": True,
                             "service": "hrti",
                             "mode": "series",
                             "target_id": target_id,
-                            "title": f"HRTi Serija (ID: {target_id})",
+                            "title": series_title,
                             "description": "Preuzmite epizode sa HRTi.",
-                            "episodes": episodes
+                            "episodes": episodes,
+                            "seasons": series_info.get("seasons") or [],
                         }
                 except Exception as exc:
                     logger.warning("HRTi series lookup failed for %s: %s", target_id, exc)

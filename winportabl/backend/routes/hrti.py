@@ -12,6 +12,15 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _require_hrti_auth() -> None:
+    auth = HrtiAdapter.get_auth_status()
+    if not auth.get("authenticated"):
+        raise HTTPException(
+            status_code=401,
+            detail="Niste prijavljeni na HRTi. Unesite kredencijale u Postavkama.",
+        )
+
+
 @router.post("/login")
 def hrti_login(req: LoginRequest):
     res = HrtiAdapter.save_credentials(req.email, req.password)
@@ -27,6 +36,7 @@ def hrti_status():
 
 @router.get("/categories")
 def hrti_categories():
+    _require_hrti_auth()
     try:
         return HrtiAdapter.list_categories()
     except Exception as e:
@@ -36,6 +46,7 @@ def hrti_categories():
 
 @router.get("/category-items")
 def hrti_category_items(category: str, page: int = 1):
+    _require_hrti_auth()
     if not category.strip():
         raise HTTPException(status_code=400, detail="Kategorija je obavezna.")
     try:
@@ -47,6 +58,7 @@ def hrti_category_items(category: str, page: int = 1):
 
 @router.get("/search")
 def hrti_search(query: str):
+    _require_hrti_auth()
     if not query.strip():
         raise HTTPException(status_code=400, detail="Upit za pretragu je obavezan.")
     try:
@@ -56,8 +68,21 @@ def hrti_search(query: str):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@router.get("/preview")
+def hrti_preview(ref_id: str):
+    _require_hrti_auth()
+    if not ref_id.strip():
+        raise HTTPException(status_code=400, detail="Reference ID je obavezan.")
+    try:
+        return HrtiAdapter.preview_ref(ref_id.strip())
+    except Exception as e:
+        logger.exception("Failed to preview HRTi ref")
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @router.get("/series/{series_uuid}")
 def hrti_series_episodes(series_uuid: str):
+    _require_hrti_auth()
     if not series_uuid.strip():
         raise HTTPException(status_code=400, detail="Series UUID je obavezan.")
     try:
@@ -81,12 +106,7 @@ class HrtiDownloadRequest(BaseModel):
 
 @router.post("/download")
 async def hrti_download(req: HrtiDownloadRequest):
-    auth = HrtiAdapter.get_auth_status()
-    if not auth.get("authenticated"):
-        raise HTTPException(
-            status_code=401,
-            detail="Niste prijavljeni na HRTi. Unesite kredencijale u Postavkama.",
-        )
+    _require_hrti_auth()
     if req.items:
         items = [
             {"ref_id": item.ref_id.strip(), "title": item.title.strip()}

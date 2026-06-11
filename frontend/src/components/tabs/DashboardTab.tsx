@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { CustomSelect } from "../CustomSelect";
 import { YtdlpDownloadPanel } from "../ytdlp/YtdlpDownloadPanel";
+import { YtdlpEpisodeList } from "../ytdlp/YtdlpEpisodeList";
+import { YtdlpPreviewExtras } from "../ytdlp/YtdlpPreviewHeader";
+import { buildYtdlpCtaLabel } from "../../hooks/domains/ytdlpShared";
 import { VoyoSeasonList } from "../voyo/VoyoSeasonList";
 import {
   defaultSmartEpisodeIds,
@@ -292,12 +295,12 @@ export function DashboardTab() {
                 {previewTheme.emoji} {previewTheme.name} · {smartData.mode?.toUpperCase()}
               </div>
               <h3 className="smart-preview-title">{smartData.title}</h3>
-              {smartData.generic_url && !smartData.metadata_partial && (
+              {smartData.service !== "ytdlp" && smartData.generic_url && !smartData.metadata_partial && (
                 <div className="mt-2 px-3 py-2 rounded-lg border border-blue-500/25 bg-blue-500/10 text-[11px] font-bold text-blue-300">
                   Link nije prepoznat kao poznati servis — koristi se univerzalni yt-dlp preuzimač.
                 </div>
               )}
-              {smartData.metadata_partial && (
+              {smartData.service !== "ytdlp" && smartData.metadata_partial && (
                 <div className="mt-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-[11px] font-bold text-amber-300">
                   Metapodaci nisu u potpunosti dostupni — preuzimanje je i dalje moguće. Proverite da li je Node.js instaliran.
                 </div>
@@ -320,38 +323,13 @@ export function DashboardTab() {
                 </div>
               )}
               {smartData.description && <p className="smart-preview-desc">{smartData.description}</p>}
-              {/* Extra metadata pills for yt-dlp */}
-              {smartData.service === "ytdlp" && (smartData.duration_str || smartData.uploader || smartData.view_count != null || smartData.upload_date) && (
-                <div style={{display:"flex", flexWrap:"wrap", gap:"6px", marginTop:"10px"}}>
-                  {smartData.duration_str && (
-                    <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                      {smartData.duration_str}
-                    </span>
-                  )}
-                  {smartData.uploader && (
-                    <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                      {smartData.uploader}
-                    </span>
-                  )}
-                  {smartData.view_count != null && (
-                    <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                      {smartData.view_count >= 1_000_000
-                        ? `${(smartData.view_count / 1_000_000).toFixed(1)}M pregleda`
-                        : smartData.view_count >= 1_000
-                        ? `${(smartData.view_count / 1_000).toFixed(0)}K pregleda`
-                        : `${smartData.view_count} pregleda`}
-                    </span>
-                  )}
-                  {smartData.upload_date && (
-                    <span style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:"0.72rem",fontWeight:700,color:"var(--text-secondary)",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:6,padding:"3px 8px"}}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                      {smartData.upload_date}
-                    </span>
-                  )}
-                </div>
+              {smartData.service === "ytdlp" && (
+                <YtdlpPreviewExtras
+                  data={smartData}
+                  subs={smartSubs}
+                  setSubs={setSmartSubs}
+                  theme={{ color: previewTheme.color, glow: previewTheme.glow, emoji: previewTheme.emoji, name: previewTheme.name }}
+                />
               )}
             </div>
           </div>
@@ -374,13 +352,20 @@ export function DashboardTab() {
               />
             )}
 
-            {smartData.episodes && smartData.episodes.length > 0 && !(smartData.service === "voyo" && smartData.seasons?.length) && (
+            {smartData.service === "ytdlp" && smartData.episodes && smartData.episodes.length > 0 && (
+              <YtdlpEpisodeList
+                data={smartData}
+                selectedEpisodes={smartSelectedEpisodes}
+                setSelectedEpisodes={setSmartSelectedEpisodes}
+                theme={{ color: previewTheme.color, glow: previewTheme.glow, emoji: previewTheme.emoji, name: previewTheme.name }}
+              />
+            )}
+
+            {smartData.episodes && smartData.episodes.length > 0 && smartData.service !== "ytdlp" && !(smartData.service === "voyo" && smartData.seasons?.length) && (
               <div>
                 <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
                   <label style={{margin:0}}>
-                    {smartData.service === "ytdlp" && smartData.mode === "playlist"
-                      ? `Stavke plejliste (${smartSelectedEpisodes.length}/${smartData.episodes.length} odabrano)`
-                      : `Epizode (${smartSelectedEpisodes.length}/${smartData.episodes.length} odabrano)`}
+                    {`Epizode (${smartSelectedEpisodes.length}/${smartData.episodes.length} odabrano)`}
                   </label>
                   <div style={{display:"flex", gap:12}}>
                     <button
@@ -624,11 +609,18 @@ export function DashboardTab() {
                   ? <Loader2 style={{width:18,height:18,animation:"spin 1s linear infinite"}} />
                   : <Download style={{width:18,height:18}} />
                 }
-                {smartSubmitting
-                  ? "Slanje..."
-                  : smartData.episodes
-                    ? `Preuzmi ${smartSelectedEpisodes.length} epizod${smartSelectedEpisodes.length === 1 ? "u" : smartSelectedEpisodes.length < 5 ? "e" : "a"}`
-                    : "Pokreni Preuzimanje"
+                {smartData.service === "ytdlp"
+                  ? buildYtdlpCtaLabel({
+                      submitting: smartSubmitting,
+                      mode: smartData.mode,
+                      selectedCount: smartSelectedEpisodes.length,
+                      totalEpisodes: smartData.episodes?.length,
+                    })
+                  : smartSubmitting
+                    ? "Slanje..."
+                    : smartData.episodes
+                      ? `Preuzmi ${smartSelectedEpisodes.length} epizod${smartSelectedEpisodes.length === 1 ? "u" : smartSelectedEpisodes.length < 5 ? "e" : "a"}`
+                      : "Pokreni Preuzimanje"
                 }
               </button>
               <button
