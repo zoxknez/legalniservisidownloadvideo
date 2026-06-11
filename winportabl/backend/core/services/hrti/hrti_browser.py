@@ -21,13 +21,13 @@ TYPE_SERIES = 3
 
 
 def get_item_type(item: Dict[str, Any]) -> str:
+    if item.get("EpisodeData") is not None:
+        return "episode"
     raw_type = item.get("Type")
     if raw_type == TYPE_MOVIE:
         return "movie"
     if raw_type == TYPE_SERIES:
         return "series"
-    if item.get("EpisodeData") is not None:
-        return "episode"
     if item.get("SeriesData") is not None:
         return "series"
     return "movie"
@@ -250,25 +250,38 @@ class HRTIBrowser:
         total_items = _coerce_total_items(result, items)
         return _items_payload(items, 1, total_items, page_size=100)
 
-    def _search_via_catalogue_scan(self, query: str, per_page: int = 25) -> Dict[str, Any]:
+    def _search_via_catalogue_scan(self, query: str, per_page: int = 100) -> Dict[str, Any]:
         q = query.lower().strip()
         found: List[Dict[str, Any]] = []
+        seen: set[str] = set()
         for cat_id in self._vod_leaf_category_ids():
+            page = 1
             try:
-                result = self.auth.get_catalogue(category_id=cat_id, page=1, page_size=per_page)
-                for item in _coerce_items(result):
-                    title = (item.get("Title") or "").strip()
-                    if q in title.lower():
-                        mapped = _map_item(item, cat_id)
-                        found.append(mapped)
+                while True:
+                    result = self.auth.get_catalogue(category_id=cat_id, page=page, page_size=per_page)
+                    items = _coerce_items(result)
+                    total_items = _coerce_total_items(result, items)
+                    for item in items:
+                        ref_id = (item.get("ReferenceId") or "").strip()
+                        title = (item.get("Title") or "").strip()
+                        if ref_id and ref_id not in seen and q in title.lower():
+                            seen.add(ref_id)
+                            found.append(_map_item(item, cat_id))
+                    total_pages = (total_items + per_page - 1) // per_page if total_items > 0 else 1
+                    if page >= total_pages or not items:
+                        break
+                    page += 1
             except Exception as exc:
                 logger.debug("HRTi search skip category %s: %s", cat_id, exc)
-        return _items_payload(
-            [{"ReferenceId": i["id"], "Title": i["title"], "Type": TYPE_MOVIE if i["type"] == "movie" else TYPE_SERIES} for i in found],
-            1,
-            len(found),
-            page_size=max(len(found), 1),
-        )
+        return {
+            "success": True,
+            "metadata": {
+                "total_items": len(found),
+                "page": 1,
+                "total_pages": 1,
+            },
+            "items": found,
+        }
 
     def search_items(self, query: str) -> Dict[str, Any]:
         self.ensure_login()
@@ -375,8 +388,11 @@ class HRTIBrowser:
             season_eps: List[Dict[str, Any]] = []
             for ep in raw_eps:
                 mapped = _map_item(ep)
-                if mapped["season"] is None:
+                mapped["type"] = "episode"
+                if mapped.get("season") is None:
                     mapped["season"] = season_num
+                if mapped.get("episode") is None:
+                    mapped["episode"] = len(season_eps) + 1
                 season_eps.append(mapped)
                 episodes.append(mapped)
 

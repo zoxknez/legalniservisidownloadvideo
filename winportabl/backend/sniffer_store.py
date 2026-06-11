@@ -12,6 +12,8 @@ def _norm_service(service: str) -> str:
     s = (service or "").strip().lower()
     if s in ("hbo", "max"):
         return "hbomax"
+    if s in ("sky", "skyott"):
+        return "skyshowtime"
     if s == "rts":
         return "rtsplaneta"
     return s

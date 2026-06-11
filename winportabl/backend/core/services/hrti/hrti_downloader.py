@@ -182,6 +182,8 @@ class WidevineCDM:
 # ---------------------------------------------------------------------------
 
 def detect_binaries() -> Dict[str, str]:
+    from backend.config import config
+
     is_win = platform.system() == "Windows"
     ext = ".exe" if is_win else ""
     names = {
@@ -192,9 +194,16 @@ def detect_binaries() -> Dict[str, str]:
     }
     found = {}
     for key, binary in names.items():
-        path = shutil.which(binary) or (
-            str(Path("binaries") / binary) if (Path("binaries") / binary).exists() else None
+        configured = config.get_binary_path(key)
+        path = shutil.which(configured) or (
+            str(Path(configured).resolve()) if Path(configured).exists() else None
         )
+        if not path:
+            path = shutil.which(binary) or (
+                str((Path("binaries") / binary).resolve())
+                if (Path("binaries") / binary).exists()
+                else None
+            )
         if path:
             found[key] = path
         else:

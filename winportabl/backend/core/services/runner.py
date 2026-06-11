@@ -15,6 +15,7 @@ HRTI_BROWSER = "backend.core.services.hrti.hrti_browser"
 EON_DOWNLOADER = "backend.core.services.eon.eon_downloader"
 RTS_DOWNLOADER = "backend.core.services.rtsplaneta.rtsplaneta_downloader"
 HBO_DOWNLOADER = "backend.core.services.hbomax.hbomax_downloader"
+SKYSHOWTIME_DOWNLOADER = "backend.core.services.skyshowtime.skyshowtime_downloader"
 
 
 def python_module_cmd(

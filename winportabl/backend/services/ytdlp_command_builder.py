@@ -76,7 +76,7 @@ def build_ytdlp_cmd(params: Dict[str, Any]) -> List[str]:
         else:
             cmd.append("--embed-subs")
 
-    sponsorblock_mode = params.get("sponsorblock_mode") or "remove"
+    sponsorblock_mode = params.get("sponsorblock_mode") or "disabled"
     if sponsorblock_mode == "remove":
         cmd.extend(["--sponsorblock-remove", "all"])
     elif sponsorblock_mode == "mark":

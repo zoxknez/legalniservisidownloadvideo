@@ -27,15 +27,18 @@ class HrtiAdapter:
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
         from backend.credentials_store import get_secret
+        from backend.core.services.hrti.hrti_auth import extract_customer_id_from_payload
         import json
 
         email = ""
+        customer_id = ""
         cfg_path = Path.home() / ".hrti" / "config.json"
         if cfg_path.exists():
             try:
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 email = data.get("email") or data.get("username", "")
+                customer_id = str(data.get("customer_id") or data.get("CustomerId") or "").strip()
             except Exception:
                 pass
 
@@ -44,9 +47,23 @@ class HrtiAdapter:
             email = app_creds.get("email") or app_creds.get("username", "")
 
         password = get_secret("hrti", "password") or app_creds.get("password", "")
+        token = get_secret("hrti", "token") or app_creds.get("token", "")
+        if token and not customer_id:
+            customer_id = extract_customer_id_from_payload(token)
 
         if email and password:
-            return {"authenticated": True, "email": email}
+            return {"authenticated": True, "email": email, "auth_method": "credentials"}
+        if token and customer_id:
+            return {"authenticated": True, "email": email, "auth_method": "session"}
+        if token:
+            return {
+                "authenticated": False,
+                "email": email,
+                "error": (
+                    "HRTi token je sačuvan, ali nedostaje CustomerId. "
+                    "Uvezite JSON sa token/customer_id ili se prijavite ponovo."
+                ),
+            }
         if email:
             return {
                 "authenticated": False,

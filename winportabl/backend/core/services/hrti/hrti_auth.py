@@ -44,6 +44,88 @@ class HRTIAuthState:
     aviion_ref_id: str = ""
 
 
+_TOKEN_PREFIX_RE = re.compile(r"^(?:Bearer|Client)\s+", re.IGNORECASE)
+_CUSTOMER_ID_KEYS = {
+    "customerid",
+    "customer_id",
+    "userid",
+    "user_id",
+    "customerreferenceid",
+    "customer_reference_id",
+}
+_EMAIL_KEYS = {"email", "username", "useremail", "mail"}
+
+
+def clean_session_token(token: str) -> str:
+    """Normalize a token pasted from browser headers/localStorage."""
+    return _TOKEN_PREFIX_RE.sub("", (token or "").strip())
+
+
+def _decode_jwt_payload(token: str) -> Dict[str, Any]:
+    clean = clean_session_token(token)
+    parts = clean.split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1].replace("-", "+").replace("_", "/")
+    payload += "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.b64decode(payload)
+        data = json.loads(decoded.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _json_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text.startswith("{") and not text.startswith("["):
+            return _decode_jwt_payload(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return _decode_jwt_payload(text)
+    return value
+
+
+def _find_string_value(value: Any, keys: set[str], depth: int = 0) -> str:
+    if depth > 6:
+        return ""
+    if isinstance(value, dict):
+        for key, val in value.items():
+            if key.replace("-", "_").lower() in keys and val not in (None, ""):
+                return str(val).strip()
+        for val in value.values():
+            found = _find_string_value(val, keys, depth + 1)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_string_value(item, keys, depth + 1)
+            if found:
+                return found
+    return ""
+
+
+def extract_customer_id_from_payload(value: Any) -> str:
+    """Best-effort extraction from HRTi session JSON or JWT payload."""
+    payload = _json_payload(value)
+    found = _find_string_value(payload, _CUSTOMER_ID_KEYS)
+    if found:
+        return found
+    if isinstance(payload, dict):
+        # Some JWTs use sub as the customer id. Keep this after explicit keys.
+        sub = payload.get("sub")
+        if isinstance(sub, (str, int)) and str(sub).strip():
+            return str(sub).strip()
+    return ""
+
+
+def extract_email_from_payload(value: Any) -> str:
+    """Best-effort email extraction from imported HRTi session metadata."""
+    return _find_string_value(_json_payload(value), _EMAIL_KEYS)
+
+
 
 
 class HRTIAuth:
@@ -84,6 +166,9 @@ class HRTIAuth:
                     cfg = json.load(f)
                 self.state.device_id = cfg.get("device_id", "")
                 self.state.aviion_ref_id = cfg.get("aviion_ref_id", "")
+                self.state.customer_id = str(
+                    cfg.get("customer_id") or cfg.get("CustomerId") or ""
+                ).strip()
                 logger.debug(f"Loaded config from {self.config_path}")
             except Exception as e:
                 logger.warning(f"Could not load config: {e}")
@@ -93,6 +178,8 @@ class HRTIAuth:
         cfg = {"device_id": self.state.device_id}
         if self.state.aviion_ref_id:
             cfg["aviion_ref_id"] = self.state.aviion_ref_id
+        if self.state.customer_id:
+            cfg["customer_id"] = self.state.customer_id
         with open(self.config_path, "w") as f:
             json.dump(cfg, f, indent=2)
         try:
@@ -114,6 +201,10 @@ class HRTIAuth:
         cfg["email"] = username
         cfg.pop("password", None)
         cfg["device_id"] = self.state.device_id
+        if self.state.aviion_ref_id:
+            cfg["aviion_ref_id"] = self.state.aviion_ref_id
+        if self.state.customer_id:
+            cfg["customer_id"] = self.state.customer_id
         with open(self.config_path, "w") as f:
             json.dump(cfg, f, indent=2)
         try:
@@ -126,17 +217,68 @@ class HRTIAuth:
 
     def get_stored_credentials(self):
         from backend.credentials_store import get_secret
+        username = ""
+        password = ""
         if self.config_path.exists():
             try:
                 with open(self.config_path) as f:
                     cfg = json.load(f)
-                u = cfg.get("username", "")
-                p = get_secret("hrti", "password") or cfg.get("password", "")
-                if u and p:
-                    return u, p
+                username = cfg.get("username", "") or cfg.get("email", "")
+                password = get_secret("hrti", "password") or cfg.get("password", "")
             except Exception:
                 pass
+        if not username or not password:
+            try:
+                from backend.config import config
+
+                app_creds = config.get_credentials("hrti")
+                username = username or app_creds.get("username") or app_creds.get("email", "")
+                password = password or app_creds.get("password", "")
+            except Exception:
+                pass
+        if username and password:
+            return username, password
         return None, None
+
+    def restore_session_token(
+        self,
+        token: Optional[str] = None,
+        customer_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Restore an imported browser session token.
+
+        HRTi DRMtoday license requests also need CustomerId in dt-custom-data,
+        so a token without CustomerId is intentionally treated as incomplete.
+        """
+        from backend.credentials_store import get_secret
+
+        clean_token = clean_session_token(token or get_secret("hrti", "token"))
+        if not clean_token:
+            return False
+
+        resolved_customer = (
+            (customer_id or "").strip()
+            or self.state.customer_id
+            or extract_customer_id_from_payload(clean_token)
+        )
+        if not resolved_customer:
+            logger.warning("HRTi token exists, but CustomerId is missing.")
+            return False
+
+        self.state.token = clean_token
+        self.state.customer_id = resolved_customer
+        self.state.ip_address = self._get_ip()
+        self._ensure_device_id()
+        try:
+            self._register_device()
+        except Exception as exc:
+            self.state.token = ""
+            logger.warning("Stored HRTi token could not register this device: %s", exc)
+            return False
+        self._save_config()
+        logger.info("HRTi session restored from stored token.")
+        return True
 
     # ------------------------------------------------------------------
     # Internal API helpers
@@ -194,6 +336,11 @@ class HRTIAuth:
         if not username or not password:
             username, password = self.get_stored_credentials()
             if not username:
+                if self.restore_session_token():
+                    return {
+                        "CustomerId": self.state.customer_id,
+                        "SessionRestored": True,
+                    }
                 raise ValueError("No credentials provided and none stored. "
                                  "Run with --save-credentials first.")
             logger.info(f"Using stored credentials for: {username}")

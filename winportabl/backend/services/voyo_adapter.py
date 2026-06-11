@@ -22,12 +22,13 @@ class VoyoAdapter:
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
         variant = vcfg.get_variant()
+        app_creds = config.get_credentials("voyo")
+        if app_creds.get("email") or app_creds.get("token"):
+            variant = app_creds.get("variant", "") or variant
 
         if not email or not password:
-            creds = config.get_credentials("voyo")
-            email = creds.get("email", "") or email
-            password = creds.get("password", "") or password
-            variant = creds.get("variant", "") or variant
+            email = app_creds.get("email", "") or email
+            password = app_creds.get("password", "") or password
             if email and password:
                 vcfg.set_credentials(email, password, variant=variant)
 
@@ -181,11 +182,12 @@ class VoyoAdapter:
         vcfg = VoyoConfig()
         email, password, device_id = vcfg.get_credentials()
         variant = vcfg.get_variant()
+        app_creds = config.get_credentials("voyo")
+        if app_creds.get("email") or app_creds.get("token"):
+            variant = app_creds.get("variant", "") or variant
         if not email and not get_secret("voyo", "token"):
-            creds = config.get_credentials("voyo")
-            email = creds.get("email", "") or email
-            password = creds.get("password", "") or password
-            variant = creds.get("variant", "") or variant
+            email = app_creds.get("email", "") or email
+            password = app_creds.get("password", "") or password
         if not email and not get_secret("voyo", "token"):
             raise RuntimeError("Voyo kredencijali nisu podešeni.")
         auth = VoyoAuth()
@@ -199,6 +201,12 @@ class VoyoAdapter:
         if profile_id and profile_id != auth.state.profile_id:
             auth.select_profile(profile_id)
         return auth
+
+    @staticmethod
+    def parse_target_id(target: str) -> int | None:
+        from backend.core.services.voyo.downloader import _parse_id
+
+        return _parse_id(target)
 
     @staticmethod
     def create_downloader(resolution: str = "1080p") -> VoyoDownloader:

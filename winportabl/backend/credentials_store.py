@@ -22,6 +22,7 @@ SENSITIVE_FIELDS: Dict[str, List[str]] = {
     "hrti": ["password", "token"],
     "rtsplaneta": ["password", "token", "secure_streaming_token"],
     "hbomax": ["token", "access_token"],
+    "skyshowtime": ["token", "user_token"],
 }
 
 # Optional per-service native config files to migrate
@@ -29,6 +30,7 @@ _NATIVE_CONFIG_PATHS = {
     "voyo": Path.home() / ".voyo" / "config.json",
     "hrti": Path.home() / ".hrti" / "config.json",
     "rtsplaneta": Path.home() / ".rtsplaneta" / "config.json",
+    "skyshowtime": Path.home() / ".skyshowtime" / "tokens.json",
 }
 
 # Token fields stored in native JSON files (migrated to keyring, cleared from disk)
@@ -244,6 +246,8 @@ SERVICE_ALIASES = {
     "rts": "rtsplaneta",
     "hbo": "hbomax",
     "max": "hbomax",
+    "sky": "skyshowtime",
+    "skyott": "skyshowtime",
 }
 
 _PUBLIC_METADATA_CLEAR = {
@@ -252,6 +256,7 @@ _PUBLIC_METADATA_CLEAR = {
     "rtsplaneta": ("email", "username"),
     "eon": ("username", "serial", "number"),
     "hbomax": ("market",),
+    "skyshowtime": ("territory", "expiry", "token"),
 }
 
 
@@ -301,6 +306,11 @@ def clear_service_credentials(service: str, config_module) -> Dict[str, Any]:
             if native.get(tfield):
                 native[tfield] = ""
                 changed = True
+        if service == "hrti":
+            for public_key in ("email", "username", "customer_id", "CustomerId"):
+                if native.get(public_key):
+                    native[public_key] = ""
+                    changed = True
         if service == "eon" and native.get("cookies"):
             native["cookies"] = {}
             changed = True
@@ -321,6 +331,17 @@ def clear_service_credentials(service: str, config_module) -> Dict[str, Any]:
                 native_cleared.append(str(token_path))
             except OSError as exc:
                 logger.warning("Could not remove HBO token file: %s", exc)
+
+    if service == "skyshowtime":
+        sky_dir = Path.home() / ".skyshowtime"
+        for name in ("tokens.json", "cookies.txt"):
+            path = sky_dir / name
+            if path.exists():
+                try:
+                    path.unlink()
+                    native_cleared.append(str(path))
+                except OSError as exc:
+                    logger.warning("Could not remove SkyShowtime file %s: %s", path, exc)
 
     if service == "eon":
         eon_cfg = Path.home() / ".eon" / "config.json"

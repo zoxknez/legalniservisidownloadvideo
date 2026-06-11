@@ -14,7 +14,22 @@ SERVICE_ALIASES = {
     "rts": "rtsplaneta",
     "hbo": "hbomax",
     "max": "hbomax",
+    "sky": "skyshowtime",
+    "skyott": "skyshowtime",
 }
+
+
+def _write_skyshowtime_cookies_txt(cookie_path: Path, cookies: Dict[str, str]) -> None:
+    lines = [
+        "# Netscape HTTP Cookie File",
+        "# Imported by Video Download Servisi",
+        "",
+    ]
+    for name, value in cookies.items():
+        if not value:
+            continue
+        lines.append(f".skyshowtime.com\tTRUE\t/\tTRUE\t0\t{name}\t{value}")
+    cookie_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _extract_token_string(service: str, data: str) -> str:
@@ -41,6 +56,33 @@ def _extract_token_string(service: str, data: str) -> str:
                 return val.strip()
 
     return text
+
+
+def _write_hrti_session_metadata(customer_id: str = "", email: str = "") -> None:
+    if not customer_id and not email:
+        return
+    cfg_path = Path.home() / ".hrti" / "config.json"
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg: Dict[str, Any] = {}
+    if cfg_path.exists():
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                cfg = loaded
+        except Exception:
+            cfg = {}
+    if customer_id:
+        cfg["customer_id"] = customer_id
+    if email:
+        cfg["email"] = email
+        cfg["username"] = email
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    try:
+        cfg_path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def _detect_voyo_variant_from_token(token: str) -> str:
@@ -123,9 +165,40 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
         return {"service": service, "message": f"Voyo {voyo_variant.upper()} token uvezen (OS keyring)."}
 
     if service == "hrti":
-        token = _extract_token_string("hrti", data)
+        from backend.core.services.hrti.hrti_auth import (
+            clean_session_token,
+            extract_customer_id_from_payload,
+            extract_email_from_payload,
+        )
+
+        token = clean_session_token(_extract_token_string("hrti", data))
+        if not token or token.startswith("{"):
+            raise ValueError("HRTi uvoz: očekivan token ili JSON sa poljem token.")
+        customer_id = extract_customer_id_from_payload(data) or extract_customer_id_from_payload(token)
+        email = extract_email_from_payload(data) or extract_email_from_payload(token)
         set_secret("hrti", "token", token)
-        return {"service": service, "message": "HRTi token uvezen (OS keyring)."}
+        _write_hrti_session_metadata(customer_id=customer_id, email=email)
+        if email:
+            try:
+                from backend.config import config
+
+                config.update_credentials("hrti", {"email": email})
+            except Exception:
+                pass
+        if customer_id:
+            return {
+                "service": service,
+                "session_ready": True,
+                "message": "HRTi token i CustomerId uvezeni (OS keyring).",
+            }
+        return {
+            "service": service,
+            "session_ready": False,
+            "message": (
+                "HRTi token je uvezen, ali nedostaje CustomerId. "
+                "Za preuzimanje uvezite JSON sa token/customer_id ili se prijavite emailom i lozinkom."
+            ),
+        }
 
     if service == "rtsplaneta":
         token = _extract_token_string("rtsplaneta", data)
@@ -208,6 +281,49 @@ def import_session_for_service(service: str, session_data: str) -> Dict[str, Any
             set_secret("hbomax", "access_token", access)
         return {"service": service, "message": "HBO Max token uvezen."}
 
+    if service == "skyshowtime":
+        sky_dir = Path.home() / ".skyshowtime"
+        sky_dir.mkdir(parents=True, exist_ok=True)
+        cookie_path = sky_dir / "cookies.txt"
+
+        if data.startswith("#") or ("\t" in data and "skyshowtime" in data.lower()):
+            cookie_path.write_text(data, encoding="utf-8")
+        elif data.startswith("{"):
+            try:
+                js = json.loads(data)
+            except json.JSONDecodeError as exc:
+                raise ValueError("SkyShowtime uvoz: neispravan JSON.") from exc
+            if isinstance(js.get("cookies"), dict):
+                _write_skyshowtime_cookies_txt(cookie_path, js["cookies"])
+            elif isinstance(js, dict) and js and all(isinstance(v, str) for v in js.values()):
+                _write_skyshowtime_cookies_txt(cookie_path, js)
+            else:
+                raise ValueError(
+                    "SkyShowtime uvoz: očekivan Netscape cookies.txt ili JSON sa poljem cookies."
+                )
+        else:
+            raise ValueError(
+                "SkyShowtime uvoz: nalepite Netscape cookies.txt ili JSON sa kolačićima."
+            )
+
+        try:
+            cookie_path.chmod(0o600)
+        except OSError:
+            pass
+
+        try:
+            from backend.core.services.skyshowtime.skyshowtime_auth import SkyShowtimeAuth
+
+            auth = SkyShowtimeAuth()
+            auth.login_with_cookies(str(cookie_path))
+            return {"service": service, "message": "SkyShowtime kolačići uvezeni i token osvežen."}
+        except Exception as exc:
+            logger.warning("SkyShowtime token refresh after import failed: %s", exc)
+            return {
+                "service": service,
+                "message": f"SkyShowtime kolačići sačuvani u {cookie_path} (token nije osvežen: {exc})",
+            }
+
     raise ValueError(f"Uvoz sesije nije podržan za servis: {service}")
 
 
@@ -226,7 +342,10 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
     if not isinstance(blob, dict):
         return None
 
-    batch_keys = {"voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max", "eon"}
+    batch_keys = {
+        "voyo", "hrti", "rtsplaneta", "rts", "hbomax", "hbo", "max", "eon",
+        "skyshowtime", "sky", "skyott",
+    }
     if not batch_keys.intersection(k.lower() for k in blob.keys()):
         return None
 
@@ -242,6 +361,9 @@ def try_import_batch(session_data: str) -> Optional[Dict[str, Any]]:
         ("hbo", "hbomax"),
         ("max", "hbomax"),
         ("eon", "eon"),
+        ("skyshowtime", "skyshowtime"),
+        ("sky", "skyshowtime"),
+        ("skyott", "skyshowtime"),
     ]
     done: set[str] = set()
     for src_key, svc in mapping:

@@ -29,7 +29,7 @@ class YtdlpDownloadRequest(BaseModel):
     format_spec: Optional[str] = None
     extractor_args: Optional[str] = None
 
-    sponsorblock_mode: str = "remove"  # "remove", "mark", "disabled"
+    sponsorblock_mode: str = "disabled"  # "remove", "mark", "disabled"
     split_chapters: bool = False
     download_playlist: bool = False
     playlist_items: Optional[str] = None
