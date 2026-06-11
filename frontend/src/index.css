@@ -765,6 +765,12 @@ select option {
 
 /* 🧪 Service-Specific Custom Neon Theme Glows */
 
+/* Univerzalno (yt-dlp) - Blue Theme */
+.tab-content-ytdlp {
+  --frame-glow: rgba(59, 130, 246, 0.06) !important;
+  --frame-border: rgba(59, 130, 246, 0.12) !important;
+}
+
 /* Pametno Preuzimanje (Dashboard) - Golden Amber Theme */
 .tab-content-dash {
   --frame-glow: rgba(251, 191, 36, 0.06) !important;
@@ -1711,6 +1717,7 @@ textarea {
 .queue-card-rts      { border-left: 3px solid #f43f5e !important; }
 .queue-card-hbomax   { border-left: 3px solid #9333ea !important; }
 .queue-card-skyshowtime { border-left: 3px solid #06b6d4 !important; }
+.queue-card-ytdlp    { border-left: 3px solid #3b82f6 !important; }
 .queue-card-unknown  { border-left: 3px solid rgba(255,255,255,0.15) !important; }
 
 /* Service icon pill in queue */
@@ -1731,6 +1738,7 @@ textarea {
 .queue-pill-rts    { background: rgba(244,63,94,0.12);   color: #fb7185; border: 1px solid rgba(244,63,94,0.25); }
 .queue-pill-hbomax { background: rgba(147,51,234,0.12);  color: #c084fc; border: 1px solid rgba(147,51,234,0.25); }
 .queue-pill-skyshowtime { background: rgba(6,182,212,0.12);  color: #22d3ee; border: 1px solid rgba(6,182,212,0.25); }
+.queue-pill-ytdlp    { background: rgba(59,130,246,0.12);  color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
 .queue-pill-unknown{ background: rgba(255,255,255,0.04); color: var(--text-muted); border: 1px solid var(--border-glass); }
 
 /* ══════════════════════════════════════════
@@ -2466,86 +2474,7 @@ textarea {
   bottom: 6px !important;
 }
 
-/* ── yt-dlp Advanced Accordion ── */
-.ytdlp-advanced-accordion {
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.015);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  width: 100%;
-}
-.ytdlp-advanced-accordion.open {
-  border-color: rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.02);
-  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.04);
-}
-.ytdlp-advanced-header {
-  width: 100%;
-  padding: 14px 18px;
-  background: none;
-  border: none;
-  outline: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: white;
-  transition: background 0.2s ease;
-  user-select: none;
-}
-.ytdlp-advanced-header:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-.ytdlp-advanced-header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.ytdlp-advanced-chevron {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  color: var(--text-secondary);
-}
-.ytdlp-advanced-chevron.rotated {
-  transform: rotate(180deg);
-  color: #3b82f6;
-}
-.ytdlp-advanced-content {
-  padding: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  animation: slideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.ytdlp-advanced-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 16px;
-}
-@media (max-width: 768px) {
-  .ytdlp-advanced-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-@media (max-width: 480px) {
-  .ytdlp-advanced-grid {
-    grid-template-columns: 1fr;
-  }
-}
-.ytdlp-advanced-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ytdlp-advanced-field label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-}
+/* ── yt-dlp console inputs ── */
 .ytdlp-advanced-input {
   padding: 10px 12px;
   background: rgba(0, 0, 0, 0.35);
@@ -2560,17 +2489,6 @@ textarea {
 .ytdlp-advanced-input:focus {
   border-color: rgba(59, 130, 246, 0.5);
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.15);
-}
-.ytdlp-advanced-checkboxes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 4px;
-}
-@media (max-width: 640px) {
-  .ytdlp-advanced-checkboxes {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ── yt-dlp Premium Unified Console Layout ── */
@@ -2645,6 +2563,10 @@ textarea {
   }
 }
 .ytdlp-checkbox-card {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
   background: rgba(255, 255, 255, 0.015);
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 10px;
@@ -2654,6 +2576,9 @@ textarea {
   display: flex;
   align-items: flex-start;
   user-select: none;
+}
+button.ytdlp-checkbox-card {
+  appearance: none;
 }
 .ytdlp-checkbox-card:hover {
   background: rgba(255, 255, 255, 0.03);

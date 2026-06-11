@@ -1,5 +1,13 @@
 from unittest.mock import AsyncMock, patch
 
+def test_ytdlp_cookies_status(client):
+    r = client.get("/api/ytdlp/cookies/status", headers={"X-API-Key": "test-secret-key"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert "configured" in body
+
+
 def test_ytdlp_download_requires_api_key(client):
     r = client.post("/api/ytdlp/download", json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
     assert r.status_code == 401
@@ -92,7 +100,7 @@ def test_ytdlp_download_hardsub_and_template(client):
         "hardsub": True
     }
 
-    with patch("backend.routes.ytdlp.config") as mock_config, \
+    with patch("backend.services.ytdlp_adapter.config") as mock_config, \
          patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download:
         
         mock_config.get_output_dir.return_value = "C:/mock_output"
@@ -111,7 +119,7 @@ def test_ytdlp_download_hardsub_and_template(client):
         
         # Check service and title
         assert args[0] == "ytdlp"
-        assert args[1].startswith("Univerzalni")
+        assert args[1].startswith("Univerzalno")
         
         # Check command
         cmd = args[2]
@@ -121,9 +129,38 @@ def test_ytdlp_download_hardsub_and_template(client):
         # Verify custom name template was used
         assert any("%(uploader)s - %(title)s.%(ext)s" in arg for arg in cmd)
         
-        # Verify metadata hardsub was passed as keyword argument
         kwargs = mock_add_download.call_args.kwargs
-        assert kwargs.get("metadata") == {"hardsub": True}
+        meta = kwargs.get("metadata") or {}
+        assert meta.get("hardsub") is True
+        assert meta.get("output_dir") == "C:/mock_output"
+        assert "--no-embed-subs" in cmd
+
+
+def test_ytdlp_build_metadata_multi_file():
+    from backend.services.ytdlp_command_builder import build_queue_metadata
+
+    meta = build_queue_metadata({
+        "output_dir": "/tmp/out",
+        "video_title": "My Playlist",
+        "download_playlist": True,
+        "split_chapters": False,
+    })
+    assert meta.get("multi_file") is True
+    assert meta.get("file_match_prefix")
+
+
+def test_ytdlp_download_hardsub_requires_subs(client):
+    payload = {
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "hardsub": True,
+        "subs": "",
+    }
+    r = client.post(
+        "/api/ytdlp/download",
+        headers={"X-API-Key": "test-secret-key"},
+        json=payload,
+    )
+    assert r.status_code == 400
 
 
 def test_ytdlp_new_features(client):

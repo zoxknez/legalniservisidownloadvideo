@@ -21,6 +21,9 @@ const HboTab = lazy(() =>
 const SkyShowtimeTab = lazy(() =>
   import("../tabs/SkyShowtimeTab").then((m) => ({ default: m.SkyShowtimeTab })),
 );
+const UniversalTab = lazy(() =>
+  import("../tabs/UniversalTab").then((m) => ({ default: m.UniversalTab })),
+);
 const IptvTab = lazy(() =>
   import("../tabs/IptvTab").then((m) => ({ default: m.IptvTab })),
 );
@@ -51,6 +54,7 @@ export function ActiveTabContent({ activeTab }: { activeTab: string }) {
     <Suspense fallback={<TabLoadingFallback />}>
       <div key={activeTab} className="tab-content-enter">
         {activeTab === "dashboard" && <DashboardTab />}
+        {activeTab === "ytdlp" && <UniversalTab />}
         {activeTab === "voyo" && <VoyoTab />}
         {activeTab === "hrti" && <HrtiTab />}
         {activeTab === "eon" && <EonTab />}

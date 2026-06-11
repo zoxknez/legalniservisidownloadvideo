@@ -12,6 +12,7 @@ import {
   SnifferSliceProvider,
   SkyshowtimeSliceProvider,
   VoyoSliceProvider,
+  YtdlpSliceProvider,
 } from "./sliceContexts";
 
 export function ComposeSliceProviders({ store, children }: { store: AppStore; children: ReactNode }) {
@@ -25,9 +26,11 @@ export function ComposeSliceProviders({ store, children }: { store: AppStore; ch
                 <RtsSliceProvider value={store.rts}>
                   <HboSliceProvider value={store.hbo}>
                     <SkyshowtimeSliceProvider value={store.skyshowtime}>
-                      <SmartDashboardSliceProvider value={store.smart}>
-                        <SnifferSliceProvider value={store.sniffer}>{children}</SnifferSliceProvider>
-                      </SmartDashboardSliceProvider>
+                      <YtdlpSliceProvider value={store.ytdlp}>
+                        <SmartDashboardSliceProvider value={store.smart}>
+                          <SnifferSliceProvider value={store.sniffer}>{children}</SnifferSliceProvider>
+                        </SmartDashboardSliceProvider>
+                      </YtdlpSliceProvider>
                     </SkyshowtimeSliceProvider>
                   </HboSliceProvider>
                 </RtsSliceProvider>

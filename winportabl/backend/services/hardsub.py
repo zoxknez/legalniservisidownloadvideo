@@ -1,10 +1,9 @@
 import os
-import re
 import shutil
 import subprocess
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from backend.utils.cancellable_subprocess import run as run_subprocess
 
@@ -77,83 +76,79 @@ def find_and_burn_subtitles(
     output_dir: str,
     ffmpeg_path: str = "ffmpeg",
     on_start=None,
-    on_complete=None
+    on_complete=None,
+    metadata: Optional[Dict[str, Any]] = None,
+    min_mtime: float = 0,
 ):
     """
     Scans the output directory for a video and subtitle file matching the title,
     then triggers the hardsub process in a background thread.
     """
-    if not title or len(title) < 3:
+    from backend.services.output_files import (
+        file_match_hints,
+        find_all_media_files,
+        find_subtitle_for_video,
+    )
+
+    hints = file_match_hints(metadata, title)
+    if not hints and not (metadata or {}).get("multi_file"):
         if on_complete:
             on_complete(None)
         return
-        
-    sanitized_title = re.sub(r'[\\/:*?"<>|]', '_', title).strip(' .')
+
     path = Path(output_dir)
     if not path.exists() or not path.is_dir():
         if on_complete:
             on_complete(None)
         return
-        
-    video_extensions = {".mp4", ".mkv", ".ts", ".mov", ".avi"}
-    sub_extensions = {".srt", ".ass"}
 
-    best_video = None
-    best_video_time = 0
-    
-    # Find the completed video file
-    for f in path.iterdir():
-        if f.is_file() and f.suffix.lower() in video_extensions:
-            if sanitized_title in f.name or any(part in f.name for part in sanitized_title.split() if len(part) > 3):
-                mtime = f.stat().st_mtime
-                if mtime > best_video_time:
-                    best_video_time = mtime
-                    best_video = f
-
-    if not best_video:
-        logger.warning(f"Could not find video file for hardsubbing title: {title}")
+    multi_file = bool((metadata or {}).get("multi_file"))
+    match_prefix = (metadata or {}).get("file_match_prefix")
+    videos = find_all_media_files(
+        output_dir,
+        hints,
+        min_mtime=min_mtime,
+        multi_file=multi_file,
+        match_prefix=str(match_prefix) if match_prefix else None,
+    )
+    if not videos:
+        logger.warning("Could not find video file(s) for hardsubbing (hints=%s)", hints[:2])
         if on_complete:
             on_complete(None)
         return
 
-    # Find the matching subtitle file in the same folder
-    best_sub = None
-    best_sub_time = 0
-    for f in path.iterdir():
-        if f.is_file() and f.suffix.lower() in sub_extensions:
-            if f.stem.startswith(best_video.stem):
-                mtime = f.stat().st_mtime
-                if mtime > best_sub_time:
-                    best_sub_time = mtime
-                    best_sub = f
+    pairs: list[tuple[Path, Path]] = []
+    for video in videos:
+        sub = find_subtitle_for_video(video, output_dir)
+        if sub:
+            pairs.append((video, sub))
 
-    if not best_sub:
-        logger.warning(f"Could not find subtitle file for hardsubbing video: {best_video.name}")
+    if not pairs:
+        logger.warning("Could not find subtitle files for hardsubbing (%d videos)", len(videos))
         if on_complete:
             on_complete(None)
         return
-
-    if on_start:
-        try:
-            on_start(str(best_video), str(best_sub))
-        except Exception as cb_err:
-            logger.debug("Hardsub on_start callback failed: %s", cb_err)
 
     import threading
+
     def _worker():
-        result = run_hardsub(str(best_video), str(best_sub), ffmpeg_path)
-        
-        # Clean up the subtitle file after burning
-        if result and best_sub.exists():
-            try:
-                os.remove(best_sub)
-                logger.info(f"Cleaned up subtitle file after hardsub: {best_sub.name}")
-            except Exception as e:
-                logger.debug(f"Could not remove subtitle file: {e}")
-                
+        last_result: Optional[str] = None
+        for video, sub in pairs:
+            if on_start:
+                try:
+                    on_start(str(video), str(sub))
+                except Exception as cb_err:
+                    logger.debug("Hardsub on_start callback failed: %s", cb_err)
+            last_result = run_hardsub(str(video), str(sub), ffmpeg_path)
+            if last_result and sub.exists():
+                try:
+                    os.remove(sub)
+                    logger.info("Cleaned up subtitle file after hardsub: %s", sub.name)
+                except Exception as e:
+                    logger.debug("Could not remove subtitle file: %s", e)
         if on_complete:
             try:
-                on_complete(result)
+                on_complete(last_result)
             except Exception as cb_err:
                 logger.debug("Hardsub on_complete callback failed: %s", cb_err)
 

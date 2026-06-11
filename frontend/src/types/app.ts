@@ -2,7 +2,7 @@ import type { CredentialsSecurityMap } from "../components/SecurityPanels";
 
 export type ToastType = "success" | "error" | "info";
 
-export type ServiceName = "voyo" | "hrti" | "eon" | "rts" | "hbo" | "hbomax" | "skyshowtime" | "yt-dlp";
+export type ServiceName = "voyo" | "hrti" | "eon" | "rts" | "hbo" | "hbomax" | "skyshowtime" | "ytdlp";
 
 export type DownloadStatus = "pending" | "downloading" | "finished" | "failed" | "cancelled";
 
@@ -37,6 +37,8 @@ export interface ServiceStatus {
   nickname?: string;
   subscribed?: boolean;
   error?: string;
+  ytdlp_version?: string;
+  node_available?: boolean;
   serial?: string;
   number?: string;
   market?: string;
@@ -186,6 +188,9 @@ export interface SmartDetectData {
   uploader?: string;
   view_count?: number;
   upload_date?: string;
+  metadata_partial?: boolean;
+  generic_url?: boolean;
+  playlist_count?: number;
 }
 
 export interface TranscodeAcceleration {

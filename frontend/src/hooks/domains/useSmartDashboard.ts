@@ -36,7 +36,11 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [ytdlpSplitChapters, setYtdlpSplitChapters] = useState(false);
   const [ytdlpDownloadPlaylist, setYtdlpDownloadPlaylist] = useState(false);
   const [ytdlpPlaylistItems, setYtdlpPlaylistItems] = useState("");
-  
+  const [ytdlpFormatSpec, setYtdlpFormatSpec] = useState("");
+  const [ytdlpExtractorArgs, setYtdlpExtractorArgs] = useState("");
+  const [ytdlpCookiesConfigured, setYtdlpCookiesConfigured] = useState(false);
+  const [ytdlpCookiesUploading, setYtdlpCookiesUploading] = useState(false);
+
   const [smartSkyVcodec, setSmartSkyVcodec] = useState("H264");
   const [smartSkyQuality, setSmartSkyQuality] = useState("SDR");
   const [smartSkyAudioLang, setSmartSkyAudioLang] = useState("sr");
@@ -44,6 +48,53 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
   const [smartSubmitting, setSmartSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const refreshYtdlpCookiesStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/ytdlp/cookies/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setYtdlpCookiesConfigured(!!data.configured);
+      }
+    } catch {
+      setYtdlpCookiesConfigured(false);
+    }
+  }, []);
+
+  const uploadYtdlpCookies = useCallback(
+    async (file: File) => {
+      setYtdlpCookiesUploading(true);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await apiFetch(`/api/ytdlp/cookies`, { method: "POST", body: form });
+        if (res.ok) {
+          setYtdlpCookiesConfigured(true);
+          showToast("Fajl kolačića je sačuvan.", "success");
+        } else {
+          const msg = await parseApiError(res, "Otpremanje kolačića nije uspelo.");
+          showToast(msg, "error");
+        }
+      } catch (e) {
+        showToast(errorMessage(e, "Greška pri otpremanju kolačića"), "error");
+      } finally {
+        setYtdlpCookiesUploading(false);
+      }
+    },
+    [showToast],
+  );
+
+  const clearYtdlpCookies = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/ytdlp/cookies`, { method: "DELETE" });
+      if (res.ok) {
+        setYtdlpCookiesConfigured(false);
+        showToast("Sačuvani kolačići su uklonjeni.", "info");
+      }
+    } catch (e) {
+      showToast(errorMessage(e, "Greška pri brisanju kolačića"), "error");
+    }
+  }, [showToast]);
 
   const handleSmartDetect = useCallback(
     async (urlStr: string) => {
@@ -69,6 +120,10 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
             setSmartResolution("1080p");
           }
           if (data.service === "ytdlp") {
+            void refreshYtdlpCookiesStatus();
+            if (data.mode === "playlist") {
+              setYtdlpDownloadPlaylist(true);
+            }
             const manual = data.available_subtitles || [];
             const auto = data.available_auto_subtitles || [];
             const priority = ["sr", "hr", "bs", "en"];
@@ -107,7 +162,7 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         if (!controller.signal.aborted) setSmartLoading(false);
       }
     },
-    [showToast],
+    [refreshYtdlpCookiesStatus, showToast],
   );
 
   const debouncedDetect = useCallback(
@@ -231,27 +286,46 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           body: JSON.stringify(skyBody),
         });
       } else if (smartData.service === "ytdlp") {
+        let downloadPlaylist = ytdlpDownloadPlaylist;
+        let playlistItems = ytdlpPlaylistItems || null;
+        if (smartData.mode === "playlist" && smartData.episodes?.length) {
+          downloadPlaylist = true;
+          if (
+            smartSelectedEpisodes.length > 0 &&
+            smartSelectedEpisodes.length < smartData.episodes.length
+          ) {
+            const nums = smartData.episodes
+              .map((ep: SmartEpisode, idx: number) =>
+                smartSelectedEpisodes.includes(ep.id) ? String(ep.episode ?? idx + 1) : null,
+              )
+              .filter((n: string | null): n is string => n != null);
+            playlistItems = nums.join(",");
+          }
+        }
         res = await apiFetch(`/api/ytdlp/download`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: smartData.target_id,
+            video_title: smartData.title || null,
             resolution: smartResolution,
             subs: smartSubs,
             audio_only: smartAudioOnly,
             use_aria2: smartUseAria2,
             hardsub: ytdlpHardsub,
-            cookies_browser: ytdlpCookiesBrowser || null,
+            cookies_browser: ytdlpCookiesConfigured ? null : (ytdlpCookiesBrowser || null),
             impersonate_browser: ytdlpImpersonate,
             proxy: ytdlpProxy || null,
             geo_bypass: ytdlpGeoBypass,
             embed_thumbnail: ytdlpEmbedThumbnail,
             embed_metadata: ytdlpEmbedMetadata,
             limit_rate: ytdlpLimitRate || null,
+            format_spec: ytdlpFormatSpec || null,
+            extractor_args: ytdlpExtractorArgs || null,
             sponsorblock_mode: ytdlpSponsorblockMode,
             split_chapters: ytdlpSplitChapters,
-            download_playlist: ytdlpDownloadPlaylist,
-            playlist_items: ytdlpPlaylistItems || null,
+            download_playlist: downloadPlaylist,
+            playlist_items: playlistItems,
           }),
         });
       } else {
@@ -278,6 +352,8 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
         setYtdlpSplitChapters(false);
         setYtdlpDownloadPlaylist(false);
         setYtdlpPlaylistItems("");
+        setYtdlpFormatSpec("");
+        setYtdlpExtractorArgs("");
       } else {
         const msg = await parseApiError(res, "Greška pri pokretanju preuzimanja.");
         showToast(msg, "error");
@@ -313,6 +389,9 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     ytdlpSplitChapters,
     ytdlpDownloadPlaylist,
     ytdlpPlaylistItems,
+    ytdlpFormatSpec,
+    ytdlpExtractorArgs,
+    ytdlpCookiesConfigured,
     smartSkyVcodec,
     smartSkyQuality,
     smartSkyAudioLang,
@@ -368,6 +447,15 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
     setYtdlpDownloadPlaylist,
     ytdlpPlaylistItems,
     setYtdlpPlaylistItems,
+    ytdlpFormatSpec,
+    setYtdlpFormatSpec,
+    ytdlpExtractorArgs,
+    setYtdlpExtractorArgs,
+    ytdlpCookiesConfigured,
+    ytdlpCookiesUploading,
+    uploadYtdlpCookies,
+    clearYtdlpCookies,
+    refreshYtdlpCookiesStatus,
     smartSubmitting,
     smartSkyVcodec,
     setSmartSkyVcodec,

@@ -6,7 +6,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { QUEUE_SERVICE_PILL_CLASS } from "../../constants/services";
+import { QUEUE_SERVICE_PILL_CLASS, QUEUE_SERVICE_LABEL } from "../../constants/services";
 import { getLogLineClass } from "../../utils/logUtils";
 import { useDownloadQueuePanel } from "../../hooks/domains/useDownloadQueuePanel";
 
@@ -38,7 +38,7 @@ export function LogModal() {
             <Terminal className="w-5 h-5 text-indigo-400" />
             <h3 className="font-extrabold text-base text-white">Konzola Logova</h3>
             <span className={`queue-service-pill ${QUEUE_SERVICE_PILL_CLASS[selectedTask.service] || "queue-pill-unknown"}`}>
-              {selectedTask.service}
+              {QUEUE_SERVICE_LABEL[selectedTask.service] || selectedTask.service}
             </span>
           </div>
           <p className="text-[10px] text-text-muted mt-1 truncate max-w-lg font-mono">{selectedTask.title}</p>

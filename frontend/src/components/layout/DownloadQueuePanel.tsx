@@ -5,7 +5,7 @@ import {
   X,
 } from "lucide-react";
 
-import { QUEUE_SERVICE_PILL_CLASS, QUEUE_CARD_BORDER_CLASS } from "../../constants/services";
+import { QUEUE_SERVICE_PILL_CLASS, QUEUE_CARD_BORDER_CLASS, QUEUE_SERVICE_LABEL } from "../../constants/services";
 import type { DownloadTask } from "../../types/app";
 import { useDownloadQueuePanel } from "../../hooks/domains/useDownloadQueuePanel";
 
@@ -91,7 +91,7 @@ export function DownloadQueuePanel() {
                 <div style={{flex:1, minWidth:0}}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className={`queue-service-pill ${pillClass}`}>
-                      {task.service}
+                      {QUEUE_SERVICE_LABEL[task.service] || task.service}
                     </span>
                     <span className={`text-[10px] font-bold uppercase tracking-wider ${statusColorMap[task.status]}`}>
                       {task.status}

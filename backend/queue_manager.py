@@ -101,34 +101,32 @@ def redact_log_line(line: str) -> str:
     return line
 
 
-def clean_temp_files(title: str, output_dir: str):
-    """Purge orphaned temporary files (.part, .ytdl, etc.) for a given title."""
-    if not title or len(title) < 3:
-        return
+def _job_file_hints(item: "DownloadItem") -> List[str]:
+    from backend.services.output_files import file_match_hints
 
-    # Sanitize title to match filename pattern
-    sanitized_title = re.sub(r'[\\/:*?"<>|]', '_', title).strip(' .')
-    
-    path = Path(output_dir)
-    if not path.exists() or not path.is_dir():
-        return
+    return file_match_hints(item.metadata, item.title)
 
-    # Common temporary extensions used by yt-dlp, aria2, and ffmpeg
-    temp_extensions = [".part", ".ytdl", ".temp", ".tmp", ".aria2", ".aria2__temp"]
-    
+
+def _job_min_mtime(item: "DownloadItem") -> float:
+    if item.created_at:
+        return item.created_at.timestamp() - 10
+    return 0.0
+
+
+def clean_temp_files(item: "DownloadItem"):
+    """Purge orphaned temporary files (.part, .ytdl, etc.) for a download job."""
+    from backend.jobs.inprocess import get_output_dir_from_cmd
+    from backend.services.output_files import clean_temp_files_for_job
+
+    output_dir = get_output_dir_from_cmd(item.cmd, item.metadata) or config.get_output_dir()
     try:
-        for f in path.iterdir():
-            if f.is_file():
-                # Check if filename contains the sanitized title and has a temporary extension
-                if sanitized_title in f.name:
-                    if any(f.name.endswith(ext) for ext in temp_extensions) or f.suffix == ".part":
-                        try:
-                            f.unlink()
-                            logger.info(f"Cleaned up temporary file: {f.name}")
-                        except OSError as e:
-                            logger.warning(f"Could not delete temp file {f.name}: {e}")
+        clean_temp_files_for_job(
+            output_dir,
+            _job_file_hints(item),
+            min_mtime=_job_min_mtime(item),
+        )
     except Exception as e:
-        logger.error(f"Error while cleaning temp files for title '{title}': {e}")
+        logger.error("Error while cleaning temp files for '%s': %s", item.title, e)
 
 
 class DownloadDatabase:
@@ -630,12 +628,7 @@ class DownloadQueueManager:
                     except Exception as e:
                         logger.error(f"Error terminating process: {e}")
                 
-                # Retrieve output folder for cleanup
-                from backend.jobs.inprocess import get_output_dir_from_cmd
-                output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
-                
-                # Perform cleanup of temporary fragments
-                clean_temp_files(item.title, output_dir)
+                clean_temp_files(item)
                 self.db.save_download(item)
         await self.broadcast_state()
 
@@ -790,9 +783,7 @@ class DownloadQueueManager:
                 item.status = DownloadStatus.FAILED
                 item.logs.append(f"\n[✗ Download failed after {MAX_RETRIES} attempts]")
 
-                from backend.jobs.inprocess import get_output_dir_from_cmd
-                output_dir = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
-                clean_temp_files(item.title, output_dir)
+                clean_temp_files(item)
 
             self.db.save_download(item)
 
@@ -801,7 +792,9 @@ class DownloadQueueManager:
     def _run_post_download_steps(self, item: DownloadItem):
         """Runs post-download processing: first hardsub (if requested), then transcode (if enabled)."""
         from backend.jobs.inprocess import get_output_dir_from_cmd
-        output_dir_val = get_output_dir_from_cmd(item.cmd) or config.get_output_dir()
+
+        output_dir_val = get_output_dir_from_cmd(item.cmd, item.metadata) or config.get_output_dir()
+        min_mtime = _job_min_mtime(item)
         loop = asyncio.get_running_loop()
 
         def start_transcoding():
@@ -838,6 +831,8 @@ class DownloadQueueManager:
                         trans_mode,
                         on_start=on_transcode_start,
                         on_complete=on_transcode_complete,
+                        metadata=item.metadata,
+                        min_mtime=min_mtime,
                     )
             except Exception as trans_err:
                 logger.error(f"Failed to initiate automatic transcode: {trans_err}")
@@ -865,7 +860,9 @@ class DownloadQueueManager:
                     output_dir_val,
                     ffmpeg_path=ffmpeg_path,
                     on_start=on_hardsub_start,
-                    on_complete=on_hardsub_complete
+                    on_complete=on_hardsub_complete,
+                    metadata=item.metadata,
+                    min_mtime=min_mtime,
                 )
             except Exception as hardsub_err:
                 logger.error(f"Failed to initiate hardsub: {hardsub_err}")

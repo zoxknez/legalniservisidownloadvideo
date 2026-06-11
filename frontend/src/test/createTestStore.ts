@@ -10,6 +10,7 @@ import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
 import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
+import type { YtdlpSlice } from "../hooks/domains/useYtdlp";
 import type { AppStatus } from "../types/app";
 
 const noop = () => {};
@@ -355,6 +356,66 @@ function hboSlice(overrides: Partial<HboSlice> = {}): HboSlice {
   } as HboSlice;
 }
 
+function ytdlpSlice(overrides: Partial<YtdlpSlice> = {}): YtdlpSlice {
+  return {
+    ytdlpUrl: "",
+    setYtdlpUrl: noop,
+    ytdlpLoading: false,
+    ytdlpData: null,
+    ytdlpSelectedEpisodes: [],
+    setYtdlpSelectedEpisodes: noop,
+    ytdlpResolution: "1080p",
+    setYtdlpResolution: noop,
+    ytdlpSubs: "",
+    setYtdlpSubs: noop,
+    ytdlpAudioOnly: false,
+    setYtdlpAudioOnly: noop,
+    ytdlpUseAria2: false,
+    setYtdlpUseAria2: noop,
+    ytdlpCookiesBrowser: "",
+    setYtdlpCookiesBrowser: noop,
+    ytdlpImpersonate: false,
+    setYtdlpImpersonate: noop,
+    ytdlpProxy: "",
+    setYtdlpProxy: noop,
+    ytdlpGeoBypass: false,
+    setYtdlpGeoBypass: noop,
+    ytdlpEmbedThumbnail: false,
+    setYtdlpEmbedThumbnail: noop,
+    ytdlpEmbedMetadata: false,
+    setYtdlpEmbedMetadata: noop,
+    ytdlpLimitRate: "",
+    setYtdlpLimitRate: noop,
+    ytdlpHardsub: false,
+    setYtdlpHardsub: noop,
+    ytdlpSponsorblockMode: "remove",
+    setYtdlpSponsorblockMode: noop,
+    ytdlpSplitChapters: false,
+    setYtdlpSplitChapters: noop,
+    ytdlpDownloadPlaylist: false,
+    setYtdlpDownloadPlaylist: noop,
+    ytdlpPlaylistItems: "",
+    setYtdlpPlaylistItems: noop,
+    ytdlpFormatSpec: "",
+    setYtdlpFormatSpec: noop,
+    ytdlpExtractorArgs: "",
+    setYtdlpExtractorArgs: noop,
+    ytdlpCookiesConfigured: false,
+    ytdlpCookiesUploading: false,
+    uploadYtdlpCookies: noopAsync,
+    clearYtdlpCookies: noopAsync,
+    refreshYtdlpCookiesStatus: noopAsync,
+    ytdlpSubmitting: false,
+    subsOpen: true,
+    setSubsOpen: noop,
+    analyzeYtdlpUrl: noopAsync,
+    debouncedAnalyze: noop,
+    startYtdlpDownload: noopAsync,
+    cancelYtdlpPreview: noop,
+    ...overrides,
+  } as YtdlpSlice;
+}
+
 function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboardSlice {
   return {
     smartUrl: "",
@@ -407,6 +468,15 @@ function smartSlice(overrides: Partial<SmartDashboardSlice> = {}): SmartDashboar
     setYtdlpDownloadPlaylist: noop,
     ytdlpPlaylistItems: "",
     setYtdlpPlaylistItems: noop,
+    ytdlpFormatSpec: "",
+    setYtdlpFormatSpec: noop,
+    ytdlpExtractorArgs: "",
+    setYtdlpExtractorArgs: noop,
+    ytdlpCookiesConfigured: false,
+    ytdlpCookiesUploading: false,
+    uploadYtdlpCookies: noopAsync,
+    clearYtdlpCookies: noopAsync,
+    refreshYtdlpCookiesStatus: noopAsync,
     smartSkyVcodec: "H264",
     setSmartSkyVcodec: noop,
     smartSkyQuality: "SDR",
@@ -457,6 +527,7 @@ export type TestStoreOverrides = {
   rts?: Partial<RtsSlice>;
   hbo?: Partial<HboSlice>;
   skyshowtime?: Partial<SkyshowtimeSlice>;
+  ytdlp?: Partial<YtdlpSlice>;
   smart?: Partial<SmartDashboardSlice>;
   sniffer?: Partial<SnifferSlice>;
 };
@@ -472,6 +543,7 @@ export function createTestStore(overrides: TestStoreOverrides = {}): AppStore {
     rts: rtsSlice(overrides.rts),
     hbo: hboSlice(overrides.hbo),
     skyshowtime: skyshowtimeSlice(overrides.skyshowtime),
+    ytdlp: ytdlpSlice(overrides.ytdlp),
     smart: smartSlice(overrides.smart),
     sniffer: snifferSlice(overrides.sniffer),
   };

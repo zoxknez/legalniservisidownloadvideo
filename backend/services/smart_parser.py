@@ -135,7 +135,7 @@ class SmartParser:
 
         # 7. Generic URLs (Universal Downloader - yt-dlp supported sites)
         if url.lower().startswith("http://") or url.lower().startswith("https://"):
-            return {"service": "ytdlp", "mode": "video", "target_id": url}
+            return {"service": "ytdlp", "mode": "video", "target_id": url, "generic": True}
 
         return None
 
@@ -149,28 +149,9 @@ class SmartParser:
             import yt_dlp
             from urllib.parse import urlparse
 
-            # Use 'all' format to get every available format stream
-            ydl_opts = {
-                'skip_download': True,
-                'quiet': True,
-                'no_warnings': True,
-                # Koristimo node JS runtime i remote solver script da uspješno riješimo n-challenge i PO Tokene na svim klijentima
-                'js_runtimes': {'node': {}},
-                'remote_components': {'ejs:github'},
-                # Ne ograničavamo client za metadata — yt-dlp uzima sve dostupne formate
-                # (tv_embedded/ios su potrebni samo za download, ne za listing formata)
-                # Request all formats so we see every available resolution
-                'listformats': False,
-                # Don't limit format selection — we want the full formats list
-                'format': 'bestvideo*+bestaudio/best',
-                # Don't apply any geo-restrictions or age-gate filter
-                'age_limit': None,
-                # Include all formats in the extraction
-                'youtube_include_dash_manifest': True,
-                'youtube_include_hls_manifest': True,
-            }
+            from backend.services.ytdlp_common import ytdlp_metadata_opts
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ytdlp_metadata_opts()) as ydl:
                 info = ydl.extract_info(target_id, download=False)
 
             if not info:
@@ -254,10 +235,30 @@ class SmartParser:
                 except Exception:
                     extra["upload_date"] = upload_date
 
-            return {
+            mode = "video"
+            episodes = None
+            entries = info.get("entries") or []
+            if info.get("_type") == "playlist" or len(entries) > 1:
+                ep_list = []
+                for idx, ent in enumerate(entries):
+                    if not ent:
+                        continue
+                    ep_list.append({
+                        "id": ent.get("id") or str(idx + 1),
+                        "title": ent.get("title") or f"Stavka {idx + 1}",
+                        "season": 1,
+                        "episode": idx + 1,
+                    })
+                if ep_list:
+                    mode = "playlist"
+                    episodes = ep_list
+                    if not title:
+                        title = info.get("title") or f"Plejlista ({len(ep_list)} stavki)"
+
+            payload: Dict[str, Any] = {
                 "success": True,
                 "service": "ytdlp",
-                "mode": "video",
+                "mode": mode,
                 "target_id": target_id,
                 "title": title,
                 "description": description or "Preuzmite video preko univerzalnog preuzimača.",
@@ -265,8 +266,12 @@ class SmartParser:
                 "available_resolutions": avail_res,
                 "available_subtitles": avail_subs,
                 "available_auto_subtitles": avail_auto,
-                **extra
+                **extra,
             }
+            if episodes:
+                payload["episodes"] = episodes
+                payload["playlist_count"] = len(episodes)
+            return payload
 
         except Exception as ex:
             logger.warning("yt-dlp metadata extraction failed: %s", ex)
@@ -284,9 +289,15 @@ class SmartParser:
             }
 
     @staticmethod
-    def get_metadata(url: str) -> Dict[str, Any]:
+    def get_metadata(url: str, force_service: Optional[str] = None) -> Dict[str, Any]:
         """Detect service and retrieve structured metadata for preview."""
         try:
+            if force_service == "ytdlp":
+                url = url.strip()
+                if not url.lower().startswith(("http://", "https://")):
+                    return {"success": False, "error": "URL mora počinjati sa http:// ili https://"}
+                return SmartParser._extract_ytdlp_metadata(url)
+
             detected = SmartParser.detect_service(url)
             if not detected:
                 return {"success": False, "error": "URL nije prepoznat kao podržani servis."}
@@ -453,7 +464,10 @@ class SmartParser:
                 }
 
             elif service == "ytdlp":
-                return SmartParser._extract_ytdlp_metadata(target_id)
+                meta = SmartParser._extract_ytdlp_metadata(target_id)
+                if detected.get("generic"):
+                    meta["generic_url"] = True
+                return meta
 
         except Exception as e:
             logger.exception("Error fetching metadata for %s", url)

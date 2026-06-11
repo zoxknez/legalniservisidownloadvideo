@@ -10,6 +10,7 @@ import type { SmartDashboardSlice } from "../hooks/domains/useSmartDashboard";
 import type { SnifferSlice } from "../hooks/domains/useSniffer";
 import type { VoyoSlice } from "../hooks/domains/useVoyo";
 import type { SkyshowtimeSlice } from "../hooks/domains/useSkyshowtime";
+import type { YtdlpSlice } from "../hooks/domains/useYtdlp";
 import type { AppStatus, ToastType } from "../types/app";
 
 export interface AppShellSlice {
@@ -34,6 +35,7 @@ export interface AppStore {
   smart: SmartDashboardSlice;
   sniffer: SnifferSlice;
   skyshowtime: SkyshowtimeSlice;
+  ytdlp: YtdlpSlice;
 }
 
 export {
@@ -48,6 +50,7 @@ export {
   useSmartDashboardSlice,
   useSnifferSlice,
   useSkyshowtimeSlice,
+  useYtdlpSlice,
 } from "./sliceContexts";
 
 import { useAppConfigSlice } from "./sliceContexts";
@@ -69,5 +72,6 @@ export function flattenAppStore(store: AppStore) {
     ...store.smart,
     ...store.sniffer,
     ...store.skyshowtime,
+    ...store.ytdlp,
   };
 }

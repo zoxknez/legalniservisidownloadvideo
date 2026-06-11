@@ -21,3 +21,5 @@ export { useAppShell } from "./useAppShell";
 export { useIptvTab } from "./useIptvTab";
 export { useSkyshowtime, type UseSkyShowtimeOptions, type SkyshowtimeSlice } from "./useSkyshowtime";
 export { useSkyshowtimeTab } from "./useSkyshowtimeTab";
+export { useYtdlp, type UseYtdlpOptions, type YtdlpSlice } from "./useYtdlp";
+export { useYtdlpTab } from "./useYtdlpTab";

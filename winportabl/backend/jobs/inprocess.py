@@ -129,19 +129,18 @@ def execute_job(
         if service == "eon":
             from backend.jobs.eon_job import run_eon_job
             return run_eon_job(action, params, log_fn, cancel_event)
+        if service == "skyshowtime":
+            from backend.jobs.skyshowtime_job import run_skyshowtime_job
+            return run_skyshowtime_job(action, params, log_fn, cancel_event)
 
     log_fn(f"ERROR Nepoznat in-process servis: {service}")
     return False
 
 
-def get_output_dir_from_cmd(cmd: List[str]) -> Optional[str]:
-    if is_inprocess_job(cmd):
-        try:
-            params = parse_job(cmd).get("params") or {}
-            return params.get("output_dir")
-        except Exception:
-            return None
-    for idx, part in enumerate(cmd):
-        if part == "-o" and idx + 1 < len(cmd):
-            return cmd[idx + 1]
-    return None
+def get_output_dir_from_cmd(
+    cmd: List[str],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    from backend.services.output_files import get_output_dir_from_cmd as _resolve
+
+    return _resolve(cmd, metadata)

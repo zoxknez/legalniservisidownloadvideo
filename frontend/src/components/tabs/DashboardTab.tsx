@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
-  ChevronDown,
   Copy,
   Download,
   Globe,
@@ -9,11 +8,10 @@ import {
   Loader2,
   Lock,
   Search,
-  Sliders,
-  Sparkles,
   Zap,
 } from "lucide-react";
 import { CustomSelect } from "../CustomSelect";
+import { YtdlpDownloadPanel } from "../ytdlp/YtdlpDownloadPanel";
 import type { ServiceStatus, SmartEpisode } from "../../types/app";
 import { useSmartDashboardTab } from "../../hooks/domains/useSmartDashboardTab";
 import { cssVars } from "../../utils/cssVars";
@@ -73,6 +71,14 @@ export function DashboardTab() {
     setYtdlpDownloadPlaylist,
     ytdlpPlaylistItems,
     setYtdlpPlaylistItems,
+    ytdlpFormatSpec,
+    setYtdlpFormatSpec,
+    ytdlpExtractorArgs,
+    setYtdlpExtractorArgs,
+    ytdlpCookiesConfigured,
+    ytdlpCookiesUploading,
+    uploadYtdlpCookies,
+    clearYtdlpCookies,
     smartSkyVcodec,
     setSmartSkyVcodec,
     smartSkyQuality,
@@ -83,8 +89,7 @@ export function DashboardTab() {
     setSmartHboAudio,
   } = useSmartDashboardTab();
 
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [subsOpen, setSubsOpen] = useState(false);
+  const [subsOpen, setSubsOpen] = useState(true);
 // Service theme config
   const SVC_THEMES: Record<string, {emoji:string; name:string; color:string; glow:string; example:string; exampleLabel:string}> = {
     voyo:    { emoji:"🟠", name:"Voyo",        color:"#f97316", glow:"rgba(249,115,22,0.08)",   example:"https://voyo.rs/uspeh-1_50584.html", exampleLabel:"Film (video ID)" },
@@ -97,9 +102,23 @@ export function DashboardTab() {
     ytdlp:   { emoji:"🌐", name:"Univerzalno",  color:"#3b82f6", glow:"rgba(59,130,246,0.08)",   example:"https://www.youtube.com/watch?v=dQw4w9WgXcQ", exampleLabel:"YouTube, X, TikTok, FB..." },
   };
   const svcKeys = Object.keys(SVC_THEMES).filter(k => k !== "rtsplaneta");
+
+  useEffect(() => {
+    if (smartData?.service === "ytdlp") {
+      setSubsOpen(true);
+    }
+  }, [smartData?.service, smartData?.target_id]);
   // Service auth sub-text (from status if available)
   const getSvcStatus = (k: string) => {
-    if (k === "ytdlp") return { online: true, label: "Uvek aktivno" };
+    if (k === "ytdlp") {
+      const ytdlp = status?.services?.ytdlp;
+      const ready = ytdlp?.ready ?? ytdlp?.authenticated ?? true;
+      const ver = (ytdlp as { ytdlp_version?: string } | undefined)?.ytdlp_version;
+      return {
+        online: !!ready,
+        label: ready ? (ver ? `yt-dlp ${ver}` : "Uvek aktivno") : (ytdlp?.error || "Nedostaje Node.js"),
+      };
+    }
     const s = status?.services;
     if (!s) return { online: false, label: "Nije podešeno" };
     const svc = s[k === "rts" ? "rtsplaneta" : k] as ServiceStatus | undefined;
@@ -150,7 +169,7 @@ export function DashboardTab() {
             <span className="flex items-center gap-1.5 border-l border-white/[0.08] pl-2">
               <span className={`smart-svc-pill-dot ${st.online ? "online" : "offline"}`} />
               <span className={`smart-svc-pill-status ${st.online ? "text-emerald-400" : "text-text-muted"}`}>
-                {st.online ? "AKTIVAN" : "OFF"}
+                {st.online ? st.label : "Nije podešeno"}
               </span>
             </span>
           </div>
@@ -264,6 +283,16 @@ export function DashboardTab() {
                 {previewTheme.emoji} {previewTheme.name} · {smartData.mode?.toUpperCase()}
               </div>
               <h3 className="smart-preview-title">{smartData.title}</h3>
+              {smartData.generic_url && !smartData.metadata_partial && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-blue-500/25 bg-blue-500/10 text-[11px] font-bold text-blue-300">
+                  Link nije prepoznat kao poznati servis — koristi se univerzalni yt-dlp preuzimač.
+                </div>
+              )}
+              {smartData.metadata_partial && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-[11px] font-bold text-amber-300">
+                  Metapodaci nisu u potpunosti dostupni — preuzimanje je i dalje moguće. Proverite da li je Node.js instaliran.
+                </div>
+              )}
               {smartData.description && <p className="smart-preview-desc">{smartData.description}</p>}
               {/* Extra metadata pills for yt-dlp */}
               {smartData.service === "ytdlp" && (smartData.duration_str || smartData.uploader || smartData.view_count != null || smartData.upload_date) && (
@@ -308,7 +337,9 @@ export function DashboardTab() {
               <div>
                 <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
                   <label style={{margin:0}}>
-                    Epizode ({smartSelectedEpisodes.length}/{smartData.episodes.length} odabrano)
+                    {smartData.service === "ytdlp" && smartData.mode === "playlist"
+                      ? `Stavke plejliste (${smartSelectedEpisodes.length}/${smartData.episodes.length} odabrano)`
+                      : `Epizode (${smartSelectedEpisodes.length}/${smartData.episodes.length} odabrano)`}
                   </label>
                   <div style={{display:"flex", gap:12}}>
                     <button
@@ -358,390 +389,55 @@ export function DashboardTab() {
             )}
 
             {/* Config row */}
-            <div className={smartData.service === "ytdlp" ? "ytdlp-console-container" : "smart-config-row"}>
-              {smartData.service === "ytdlp" ? (
-                <div className="ytdlp-console-wrapper animate-fade-in">
-                  {/* Grid 1: Parameters (Dropdowns & Text inputs) */}
-                  <div className="ytdlp-console-section">
-                    <div className="ytdlp-console-section-header">
-                      <Sliders className="w-4 h-4 text-blue-400" />
-                      <span>Parametri preuzimanja (yt-dlp)</span>
-                    </div>
-                    <div className="ytdlp-grid-inputs">
-                      {/* Rezolucija */}
-                      <div className="ytdlp-option-group">
-                        <label>Rezolucija</label>
-                        <CustomSelect
-                          value={smartResolution}
-                          options={smartData.available_resolutions && smartData.available_resolutions.length > 0 
-                            ? smartData.available_resolutions 
-                            : ["1080p (Full HD)", "720p (HD)", "480p (SD)"]
-                          }
-                          onChange={(val) => setSmartResolution(val)}
-                        />
-                        <span className="ytdlp-option-help">Željena rezolucija video fajla.</span>
-                      </div>
-
-                      {/* SponsorBlock */}
-                      <div className="ytdlp-option-group">
-                        <label>SponsorBlock Podešavanje</label>
-                        <CustomSelect
-                          value={ytdlpSponsorblockMode === "remove" ? "Ukloni sponzore" : ytdlpSponsorblockMode === "mark" ? "Samo obeleži" : "Isključeno"}
-                          options={["Ukloni sponzore", "Samo obeleži", "Isključeno"]}
-                          onChange={(val) => {
-                            if (val === "Ukloni sponzore") setYtdlpSponsorblockMode("remove");
-                            else if (val === "Samo obeleži") setYtdlpSponsorblockMode("mark");
-                            else setYtdlpSponsorblockMode("disabled");
-                          }}
-                        />
-                        <span className="ytdlp-option-help">Uklanja ili obeležava sponzorisane segmente (YouTube).</span>
-                      </div>
-
-                      {/* Uvoz kolačića */}
-                      <div className="ytdlp-option-group">
-                        <label>Uvoz kolačića (Cookies)</label>
-                        <CustomSelect
-                          value={ytdlpCookiesBrowser ? (ytdlpCookiesBrowser.charAt(0).toUpperCase() + ytdlpCookiesBrowser.slice(1)) : "Bez uvoza"}
-                          options={["Bez uvoza", "Chrome", "Edge", "Firefox", "Brave"]}
-                          onChange={(val) => setYtdlpCookiesBrowser(val === "Bez uvoza" ? "" : val.toLowerCase())}
-                        />
-                        <span className="ytdlp-option-help">Uvozi aktivnu sesiju pretraživača za privatan sadržaj.</span>
-                      </div>
-
-                      {/* Limit brzine */}
-                      <div className="ytdlp-option-group">
-                        <label>Limit brzine preuzimanja</label>
-                        <input
-                          type="text"
-                          value={ytdlpLimitRate}
-                          onChange={e => setYtdlpLimitRate(e.target.value)}
-                          placeholder="npr. 50K ili 5M"
-                          className="ytdlp-advanced-input"
-                        />
-                        <span className="ytdlp-option-help">Ograničava protok mreže (ostavi prazno za max brzinu).</span>
-                      </div>
-
-                      {/* Proksi URL */}
-                      <div className="ytdlp-option-group">
-                        <label>Proksi (Proxy) URL</label>
-                        <input
-                          type="text"
-                          value={ytdlpProxy}
-                          onChange={e => setYtdlpProxy(e.target.value)}
-                          placeholder="npr. http://127.0.0.1:8080"
-                          className="ytdlp-advanced-input"
-                        />
-                        <span className="ytdlp-option-help">Rutira saobraćaj kroz proksi server (http/socks5).</span>
-                      </div>
-
-                      {/* Opseg videa iz plejliste */}
-                      <div className="ytdlp-option-group" style={{ opacity: ytdlpDownloadPlaylist ? 1 : 0.45 }}>
-                        <label>Opseg stavki iz plejliste</label>
-                        <input
-                          type="text"
-                          value={ytdlpPlaylistItems}
-                          onChange={e => setYtdlpPlaylistItems(e.target.value)}
-                          placeholder={ytdlpDownloadPlaylist ? "npr. 1-5, 10" : "Prvo uključi plejliste"}
-                          disabled={!ytdlpDownloadPlaylist}
-                          className="ytdlp-advanced-input"
-                          style={{ cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
-                        />
-                        <span className="ytdlp-option-help">Preuzima samo određene delove plejliste (npr. 1-3, 5).</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Grid 2: Additional Toggles (Checkbox Cards) */}
-                  <div className="ytdlp-console-section">
-                    <div className="ytdlp-console-section-header">
-                      <Sliders className="w-4 h-4 text-blue-400" />
-                      <span>Dodatne opcije i funkcije preuzimanja</span>
-                    </div>
-                    
-                    <div className="ytdlp-grid-checkboxes">
-                      {/* Preuzmi samo audio */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${smartAudioOnly ? "active" : ""}`}
-                        onClick={() => setSmartAudioOnly(!smartAudioOnly)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${smartAudioOnly ? "checked" : ""}`} style={smartAudioOnly ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Preuzmi samo audio (MP3)</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Ekstrahuje samo zvučni zapis i konvertuje ga u visokokvalitetni MP3.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Aria2 Ubrzanje */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${smartUseAria2 ? "active" : ""}`}
-                        onClick={() => setSmartUseAria2(!smartUseAria2)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${smartUseAria2 ? "checked" : ""}`} style={smartUseAria2 ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white flex items-center gap-1">Aria2 Ubrzanje <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" /></span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Koristi spoljni download engine za multi-threaded preuzimanje.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Browser Impersonation */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpImpersonate ? "active" : ""}`}
-                        onClick={() => setYtdlpImpersonate(!ytdlpImpersonate)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpImpersonate ? "checked" : ""}`} style={ytdlpImpersonate ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Browser Impersonation (Chrome)</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Imitira mrežni otisak Chrome pretraživača radi izbegavanja bot-zaštita.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Geo Bypass */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpGeoBypass ? "active" : ""}`}
-                        onClick={() => setYtdlpGeoBypass(!ytdlpGeoBypass)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpGeoBypass ? "checked" : ""}`} style={ytdlpGeoBypass ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Geo-Bypass (Zaobilaženje restrikcija)</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Šalje lažna geo-lokacijska zaglavlja kako bi se premostile regionalne blokade.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Ugradi sličicu */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpEmbedThumbnail ? "active" : ""}`}
-                        onClick={() => setYtdlpEmbedThumbnail(!ytdlpEmbedThumbnail)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpEmbedThumbnail ? "checked" : ""}`} style={ytdlpEmbedThumbnail ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Ugradi sličicu (Thumbnail) u video</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Čuva naslovnu sliku (poster) direktno kao omot (artwork) unutar preuzetog fajla.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Ugradi metapodatke */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpEmbedMetadata ? "active" : ""}`}
-                        onClick={() => setYtdlpEmbedMetadata(!ytdlpEmbedMetadata)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpEmbedMetadata ? "checked" : ""}`} style={ytdlpEmbedMetadata ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Ugradi metapodatke i poglavlja</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Zapisuje tagove (naslov, autor, opis) i vremenska poglavlja unutar kontejnera.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Podeli po poglavljima */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpSplitChapters ? "active" : ""}`}
-                        onClick={() => setYtdlpSplitChapters(!ytdlpSplitChapters)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpSplitChapters ? "checked" : ""}`} style={ytdlpSplitChapters ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Podeli video po poglavljima (Split)</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Automatski seče i čuva svako poglavlje videa kao zaseban fajl.</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Preuzmi celu plejlistu */}
-                      <div 
-                        className={`ytdlp-checkbox-card ${ytdlpDownloadPlaylist ? "active" : ""}`}
-                        onClick={() => setYtdlpDownloadPlaylist(!ytdlpDownloadPlaylist)}
-                      >
-                        <div className="flex items-start gap-3 w-full">
-                          <div className={`custom-checkbox-box ${ytdlpDownloadPlaylist ? "checked" : ""}`} style={ytdlpDownloadPlaylist ? {background:"#3b82f6", borderColor:"#3b82f6"} : {}}>
-                            <svg className="custom-checkbox-check" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
-                              <polyline points="1.5 5 4 7.5 8.5 2" />
-                            </svg>
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-extrabold text-white">Preuzmi celu plejlistu</span>
-                            <span className="text-[10px] text-text-secondary leading-normal">Omogućava preuzimanje svih snimaka iz plejliste ukoliko je unet link plejliste.</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Subtitles & Translations (Collapsible Section Card) */}
-                  <div className={`ytdlp-collapsible-card ${subsOpen ? "expanded" : ""}`}>
-                    <div 
-                      className="ytdlp-collapsible-header"
-                      onClick={() => setSubsOpen(!subsOpen)}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Globe className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs font-extrabold text-white uppercase tracking-wider">Titlovi i prevodi</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                          {smartSubs.trim() ? `Aktivno: ${smartSubs}` : "Isključeno"}
-                        </span>
-                        <ChevronDown className={`w-4 h-4 text-text-secondary transition-transform duration-300 ${subsOpen ? "rotate-180" : ""}`} />
-                      </div>
-                    </div>
-
-                    {subsOpen && (
-                      <div className="ytdlp-collapsible-content animate-slide-down">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-white/[0.04]">
-                          {/* Left sub-column: Text input */}
-                          <div className="flex flex-col gap-2">
-                            <label className="text-[10px] font-bold text-text-secondary uppercase">Jezici (odvojeni zarezom)</label>
-                            <input
-                              type="text"
-                              value={smartSubs}
-                              onChange={e => setSmartSubs(e.target.value)}
-                              placeholder="npr. en,sr,hr ili all"
-                              className="ytdlp-advanced-input w-full"
-                            />
-                            <span className="text-[10px] text-text-muted">Unesite dvoslovne oznake jezika ili "all" za sve dostupne prevode.</span>
-                          </div>
-
-                          {/* Right sub-column: Hardsub checkbox */}
-                          <div className="flex items-center gap-3 bg-black/20 p-3 rounded-lg border border-white/[0.04] self-start">
-                            <input
-                              id="ytdlpHardsub-console"
-                              type="checkbox"
-                              checked={ytdlpHardsub}
-                              disabled={!smartSubs.trim()}
-                              onChange={e => setYtdlpHardsub(e.target.checked)}
-                              className="w-4 h-4 rounded text-blue-500 bg-black/40 border-glass cursor-pointer focus:ring-blue-500"
-                            />
-                            <div className="flex flex-col">
-                              <label htmlFor="ytdlpHardsub-console" className="text-xs font-bold text-white cursor-pointer select-none">
-                                Zapeci prevod u video (Hardsub)
-                              </label>
-                              <span className="text-[10px] text-text-secondary">
-                                Trajno ugrađuje prevod (SRT) u sliku koristeći FFMPEG. Zahteva bar jedan izabran jezik.
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Manual Subtitles */}
-                        {smartData.available_subtitles && smartData.available_subtitles.length > 0 && (
-                          <div className="flex flex-col gap-2 mt-4">
-                            <div className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Detektovani prevodi (izvor):</div>
-                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
-                              {smartData.available_subtitles.map((lang: string) => {
-                                const isSel = smartSubs.split(",").map(s => s.trim().toLowerCase()).includes(lang.toLowerCase());
-                                const toggleLang = (lang: string) => {
-                                  const activeList = smartSubs ? smartSubs.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean) : [];
-                                  const l = lang.toLowerCase();
-                                  if (activeList.includes(l)) {
-                                    setSmartSubs(activeList.filter((s: string) => s !== l).join(","));
-                                  } else {
-                                    setSmartSubs([...activeList, l].join(","));
-                                  }
-                                };
-                                return (
-                                  <button
-                                    key={lang}
-                                    onClick={() => toggleLang(lang)}
-                                    className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all ${
-                                      isSel 
-                                        ? "bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_8px_rgba(59,130,246,0.25)]" 
-                                        : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
-                                    }`}
-                                  >
-                                    {lang.toUpperCase()}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Auto Subtitles */}
-                        {smartData.available_auto_subtitles && smartData.available_auto_subtitles.length > 0 && (
-                          <div className="flex flex-col gap-2 mt-4">
-                            <div className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Automatski (AI generisani):</div>
-                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
-                              {smartData.available_auto_subtitles.map((lang: string) => {
-                                const isSel = smartSubs.split(",").map(s => s.trim().toLowerCase()).includes(lang.toLowerCase());
-                                const toggleLang = (lang: string) => {
-                                  const activeList = smartSubs ? smartSubs.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean) : [];
-                                  const l = lang.toLowerCase();
-                                  if (activeList.includes(l)) {
-                                    setSmartSubs(activeList.filter((s: string) => s !== l).join(","));
-                                  } else {
-                                    setSmartSubs([...activeList, l].join(","));
-                                  }
-                                };
-                                return (
-                                  <button
-                                    key={lang}
-                                    onClick={() => toggleLang(lang)}
-                                    className={`px-2.5 py-1 rounded text-[10px] font-bold border transition-all ${
-                                      isSel 
-                                        ? "bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)]" 
-                                        : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
-                                    }`}
-                                  >
-                                    {lang.toUpperCase()}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex gap-4 mt-3 border-t border-white/[0.03] pt-2.5 justify-end">
-                          <button onClick={() => setSmartSubs("all")} className="text-[10px] font-extrabold text-blue-400 hover:underline bg-none border-none cursor-pointer">
-                            Uključi sve ("all")
-                          </button>
-                          <span className="text-white/[0.08] text-[10px]">|</span>
-                          <button onClick={() => setSmartSubs("")} className="text-[10px] font-extrabold text-text-muted hover:underline bg-none border-none cursor-pointer">
-                            Isključi sve prevode
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
+            {smartData.service === "ytdlp" ? (
+                <YtdlpDownloadPanel
+                  data={smartData}
+                  resolution={smartResolution}
+                  setResolution={setSmartResolution}
+                  subs={smartSubs}
+                  setSubs={setSmartSubs}
+                  audioOnly={smartAudioOnly}
+                  setAudioOnly={setSmartAudioOnly}
+                  useAria2={smartUseAria2}
+                  setUseAria2={setSmartUseAria2}
+                  ytdlpCookiesBrowser={ytdlpCookiesBrowser}
+                  setYtdlpCookiesBrowser={setYtdlpCookiesBrowser}
+                  ytdlpImpersonate={ytdlpImpersonate}
+                  setYtdlpImpersonate={setYtdlpImpersonate}
+                  ytdlpProxy={ytdlpProxy}
+                  setYtdlpProxy={setYtdlpProxy}
+                  ytdlpGeoBypass={ytdlpGeoBypass}
+                  setYtdlpGeoBypass={setYtdlpGeoBypass}
+                  ytdlpEmbedThumbnail={ytdlpEmbedThumbnail}
+                  setYtdlpEmbedThumbnail={setYtdlpEmbedThumbnail}
+                  ytdlpEmbedMetadata={ytdlpEmbedMetadata}
+                  setYtdlpEmbedMetadata={setYtdlpEmbedMetadata}
+                  ytdlpLimitRate={ytdlpLimitRate}
+                  setYtdlpLimitRate={setYtdlpLimitRate}
+                  ytdlpHardsub={ytdlpHardsub}
+                  setYtdlpHardsub={setYtdlpHardsub}
+                  ytdlpSponsorblockMode={ytdlpSponsorblockMode}
+                  setYtdlpSponsorblockMode={setYtdlpSponsorblockMode}
+                  ytdlpSplitChapters={ytdlpSplitChapters}
+                  setYtdlpSplitChapters={setYtdlpSplitChapters}
+                  ytdlpDownloadPlaylist={ytdlpDownloadPlaylist}
+                  setYtdlpDownloadPlaylist={setYtdlpDownloadPlaylist}
+                  ytdlpPlaylistItems={ytdlpPlaylistItems}
+                  setYtdlpPlaylistItems={setYtdlpPlaylistItems}
+                  ytdlpFormatSpec={ytdlpFormatSpec}
+                  setYtdlpFormatSpec={setYtdlpFormatSpec}
+                  ytdlpExtractorArgs={ytdlpExtractorArgs}
+                  setYtdlpExtractorArgs={setYtdlpExtractorArgs}
+                  ytdlpCookiesConfigured={ytdlpCookiesConfigured}
+                  ytdlpCookiesUploading={ytdlpCookiesUploading}
+                  uploadYtdlpCookies={uploadYtdlpCookies}
+                  clearYtdlpCookies={clearYtdlpCookies}
+                  subsOpen={subsOpen}
+                  setSubsOpen={setSubsOpen}
+                  hardsubInputId="ytdlpHardsub-dashboard"
+                />
+            ) : (
+              <div className="smart-config-row">
                 <>
                   {smartData.service === "hbomax" && (
                     <div>
@@ -787,131 +483,28 @@ export function DashboardTab() {
                       </div>
                     </>
                   )}
-                  {(smartData.service === "voyo" || smartData.service === "ytdlp") && (
+                  {smartData.service === "voyo" && (
                     <div>
                       <label>Rezolucija</label>
                       <CustomSelect
                         value={smartResolution}
-                        options={smartData.service === "ytdlp" && smartData.available_resolutions && smartData.available_resolutions.length > 0 
-                          ? smartData.available_resolutions 
-                          : ["1080p (Full HD)", "720p (HD)", "480p (SD)"]
-                        }
+                        options={["1080p (Full HD)", "720p (HD)", "480p (SD)"]}
                         onChange={(val) => setSmartResolution(val)}
-                        formatLabel={(val) => {
-                          return val;
-                        }}
                       />
                     </div>
                   )}
-                  {(smartData.service === "hbomax" || smartData.service === "ytdlp") && (() => {
-                    const activeList = smartSubs ? smartSubs.split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean) : [];
-                    const toggleLang = (lang: string) => {
-                      const l = lang.toLowerCase();
-                      if (activeList.includes(l)) {
-                        setSmartSubs(activeList.filter((s: string) => s !== l).join(","));
-                      } else {
-                        setSmartSubs([...activeList, l].join(","));
-                      }
-                    };
-                    return (
-                      <div>
-                        <label>Prevodi (odaberi klikom na oznaku jezika)</label>
-                        <input type="text" value={smartSubs} onChange={e=>setSmartSubs(e.target.value)}
-                          placeholder={smartData.service === "hbomax" ? "all ili sr,hr,en — none za bez titlova" : "npr. en,sr,hr ili all (ostavi prazno za bez prevoda)"}
-                          className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full" />
-                        
-                        {smartData.service === "ytdlp" && (
-                          <div className="mt-2.5 flex flex-col gap-2 bg-black/25 p-3 rounded-lg border border-white/[0.04]">
-                            {/* Manual Subtitles */}
-                            {smartData.available_subtitles && smartData.available_subtitles.length > 0 && (
-                              <div>
-                                <div className="text-[10px] text-text-muted font-bold mb-1 uppercase tracking-wider">Detektovani prevodi (izvor):</div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {smartData.available_subtitles.map((lang: string) => {
-                                    const isSel = activeList.includes(lang.toLowerCase());
-                                    return (
-                                      <button
-                                        key={lang}
-                                        onClick={() => toggleLang(lang)}
-                                        className={`px-2 py-1 rounded text-[10px] font-bold border transition-all ${
-                                          isSel 
-                                            ? "bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_8px_rgba(59,130,246,0.25)]" 
-                                            : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
-                                        }`}
-                                      >
-                                        {lang.toUpperCase()}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {/* Auto Subtitles */}
-                            {smartData.available_auto_subtitles && smartData.available_auto_subtitles.length > 0 && (
-                              <div>
-                                <div className="text-[10px] text-text-muted font-bold mb-1 uppercase tracking-wider">Automatski titlovi (AI generisani):</div>
-                                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-                                  {smartData.available_auto_subtitles.map((lang: string) => {
-                                    const isSel = activeList.includes(lang.toLowerCase());
-                                    return (
-                                      <button
-                                        key={lang}
-                                        onClick={() => toggleLang(lang)}
-                                        className={`px-2 py-1 rounded text-[10px] font-bold border transition-all ${
-                                          isSel 
-                                            ? "bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)]" 
-                                            : "bg-white/[0.02] text-text-secondary border-white/[0.04] hover:bg-white/[0.05]"
-                                        }`}
-                                      >
-                                        {lang.toUpperCase()}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                            
-                            <div className="flex gap-2.5 mt-1 border-t border-white/[0.03] pt-2">
-                              <button
-                                onClick={() => setSmartSubs("all")}
-                                className="text-[9px] font-extrabold text-blue-400 hover:underline bg-none border-none cursor-pointer"
-                              >
-                                Uključi sve jezike ("all")
-                              </button>
-                              <span className="text-white/[0.08] text-[9px]">|</span>
-                              <button
-                                onClick={() => setSmartSubs("")}
-                                className="text-[9px] font-extrabold text-text-muted hover:underline bg-none border-none cursor-pointer"
-                              >
-                                Isključi sve prevode
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {smartData.service === "ytdlp" && (
-                          <div className="mt-3.5 flex items-center gap-2 bg-black/30 p-3 rounded-lg border border-white/[0.05]">
-                            <input
-                              id="ytdlpHardsub"
-                              type="checkbox"
-                              checked={ytdlpHardsub}
-                              disabled={!smartSubs.trim()}
-                              onChange={e => setYtdlpHardsub(e.target.checked)}
-                              className="w-4 h-4 rounded text-blue-500 bg-black/40 border-glass cursor-pointer focus:ring-blue-500"
-                            />
-                            <div className="flex flex-col">
-                              <label htmlFor="ytdlpHardsub" className="text-xs font-bold text-white cursor-pointer select-none">
-                                Zapeci prevod u video (Hardsub)
-                              </label>
-                              <span className="text-[10px] text-text-secondary">
-                                Trajno ugrađuje prevod (SRT) u sliku koristeći FFMPEG. Zahteva bar jedan izabran jezik.
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  {smartData.service === "hbomax" && (
+                    <div>
+                      <label>Titlovi</label>
+                      <input
+                        type="text"
+                        value={smartSubs}
+                        onChange={e => setSmartSubs(e.target.value)}
+                        placeholder="all ili sr,hr,en — none za bez titlova"
+                        className="py-2.5 px-3 bg-black/40 border border-glass text-white rounded focus:outline-none w-full"
+                      />
+                    </div>
+                  )}
                   {(smartData.mode === "series" && !smartData.episodes) && (
                     <div>
                       <label>Raspon epizoda (opciono)</label>
@@ -954,8 +547,8 @@ export function DashboardTab() {
                     </div>
                   )}
                 </>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* CTA */}
             <div style={{display:"flex", alignItems:"center", gap:14}}>
@@ -994,7 +587,10 @@ export function DashboardTab() {
                   setYtdlpSplitChapters(false);
                   setYtdlpDownloadPlaylist(false);
                   setYtdlpPlaylistItems("");
-                  setAdvancedOpen(false);
+                  setYtdlpHardsub(false);
+                  setSmartAudioOnly(false);
+                  setSmartUseAria2(false);
+                  setSubsOpen(true);
                 }}
                 disabled={smartSubmitting}
                 style={{fontSize:"0.75rem", color:"var(--text-muted)", background:"none", border:"none", cursor: smartSubmitting ? "not-allowed" : "pointer", opacity: smartSubmitting ? 0.4 : 1}}
@@ -1151,7 +747,9 @@ export function DashboardTab() {
               <span>🌐</span> Univerzalno
             </div>
             <div className="smart-info-card-badge text-blue-400 border-blue-500/20">
-              do 4K · yt-dlp
+              {status?.services?.ytdlp && (status.services.ytdlp as { ytdlp_version?: string }).ytdlp_version
+                ? `yt-dlp ${(status.services.ytdlp as { ytdlp_version?: string }).ytdlp_version}`
+                : "do 4K · yt-dlp"}
             </div>
           </div>
           <div className="smart-info-card-features">

@@ -13,6 +13,7 @@ import { useSniffer } from "../hooks/domains/useSniffer";
 import { useDownloadQueue } from "../hooks/domains/useDownloadQueue";
 import { useAppConfig } from "../hooks/domains/useAppConfig";
 import { useSkyshowtime } from "../hooks/domains/useSkyshowtime";
+import { useYtdlp } from "../hooks/domains/useYtdlp";
 
 type BootState = "loading" | "ready" | "error";
 
@@ -74,6 +75,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const rts = useRts({ showToast });
   const hbo = useHbo({ showToast });
   const skyshowtime = useSkyshowtime({ showToast });
+  const ytdlp = useYtdlp({ showToast, activeTab });
   const smart = useSmartDashboard({ showToast });
   const sniffer = useSniffer({
     showToast,
@@ -187,6 +189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     smart,
     sniffer,
     skyshowtime,
+    ytdlp,
   };
 
   flattenAppStore(store) satisfies AppContextValue;

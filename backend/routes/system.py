@@ -16,6 +16,7 @@ from backend.services.eon_adapter import EonAdapter
 from backend.services.rts_adapter import RtsAdapter
 from backend.services.hbo_adapter import HboAdapter
 from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
+from backend.services.ytdlp_adapter import YtdlpAdapter
 from backend.services.smart_parser import SmartParser
 
 router = APIRouter()
@@ -62,6 +63,7 @@ async def get_system_status():
     rts_task = loop.run_in_executor(None, RtsAdapter.get_auth_status)
     hbo_task = loop.run_in_executor(None, HboAdapter.get_auth_status)
     sky_task = loop.run_in_executor(None, SkyShowtimeAdapter.get_auth_status)
+    ytdlp_task = loop.run_in_executor(None, YtdlpAdapter.get_health_status)
 
     async def safe_check(task, name):
         try:
@@ -75,13 +77,14 @@ async def get_system_status():
         except Exception as e:
             return {"authenticated": False, "error": str(e)}
 
-    voyo, hrti, eon, rts, hbomax, skyshowtime = await asyncio.gather(
+    voyo, hrti, eon, rts, hbomax, skyshowtime, ytdlp = await asyncio.gather(
         safe_check(voyo_task, "Voyo"),
         safe_check(hrti_task, "HRTi"),
         safe_check(eon_task, "EON"),
         safe_check(rts_task, "RTS Planeta"),
         safe_check(hbo_task, "HBO Max"),
         safe_check(sky_task, "SkyShowtime"),
+        safe_check(ytdlp_task, "Univerzalno"),
     )
 
     from backend.credentials_store import all_credential_security_status
@@ -123,6 +126,7 @@ async def get_system_status():
             "rtsplaneta": rts,
             "hbomax": hbomax,
             "skyshowtime": skyshowtime,
+            "ytdlp": ytdlp,
         },
         "system_metrics": metrics,
         "drm": drm_status,
@@ -192,14 +196,16 @@ def update_config(data: ConfigUpdate):
 
 
 @router.get("/api/smart-detect")
-async def smart_detect(url: str):
+async def smart_detect(url: str, force: Optional[str] = None):
     url = url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL parametar je obavezan.")
+    if force and force not in ("ytdlp",):
+        raise HTTPException(status_code=400, detail=f"Nepoznat force parametar: {force}")
     loop = asyncio.get_running_loop()
     try:
         res = await asyncio.wait_for(
-            loop.run_in_executor(None, SmartParser.get_metadata, url),
+            loop.run_in_executor(None, lambda: SmartParser.get_metadata(url, force_service=force)),
             timeout=60.0,
         )
     except asyncio.TimeoutError:

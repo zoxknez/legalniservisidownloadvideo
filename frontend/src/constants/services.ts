@@ -1,8 +1,9 @@
-import { Zap, Tv, Film, Play, Radio, Clapperboard, Video, Server, Shield, Settings, Info } from "lucide-react";
+import { Zap, Tv, Film, Play, Radio, Clapperboard, Video, Globe, Server, Shield, Settings, Info } from "lucide-react";
 
 // Service metadata for sidebar
 export const SERVICE_META = [
   { id: "dashboard", label: "Pametno Preuzimanje", icon: Zap,         colorClass: "text-amber-400",   activeBg: "bg-amber-500",  activeGlow: "rgba(251,191,36,0.3)"  },
+  { id: "ytdlp",    label: "Univerzalno",          icon: Globe,        colorClass: "text-blue-400",    activeBg: "bg-blue-600",   activeGlow: "rgba(59,130,246,0.3)"  },
   { id: "voyo",     label: "Voyo",                 icon: Tv,           colorClass: "service-voyo",     activeBg: "bg-orange-600", activeGlow: "rgba(249,115,22,0.3)"  },
   { id: "hrti",     label: "HRTi Catalog",         icon: Film,         colorClass: "service-hrti",     activeBg: "bg-cyan-600",   activeGlow: "rgba(6,182,212,0.3)"   },
   { id: "eon",      label: "EON TV",               icon: Play,         colorClass: "service-eon",      activeBg: "bg-emerald-600",activeGlow: "rgba(16,185,129,0.3)"  },
@@ -16,6 +17,17 @@ export const SERVICE_META = [
 ];
 
 // Queue service helpers
+export const QUEUE_SERVICE_LABEL: Record<string, string> = {
+  voyo: "Voyo",
+  hrti: "HRTi",
+  eon: "EON TV",
+  rts: "RTS Planeta",
+  rtsplaneta: "RTS Planeta",
+  hbomax: "HBO Max",
+  skyshowtime: "SkyShowtime",
+  ytdlp: "Univerzalno",
+};
+
 export const QUEUE_SERVICE_PILL_CLASS: Record<string, string> = {
   voyo:       "queue-pill-voyo",
   hrti:       "queue-pill-hrti",
@@ -24,6 +36,7 @@ export const QUEUE_SERVICE_PILL_CLASS: Record<string, string> = {
   rtsplaneta: "queue-pill-rts",
   hbomax:     "queue-pill-hbomax",
   skyshowtime: "queue-pill-skyshowtime",
+  ytdlp:      "queue-pill-ytdlp",
 };
 export const QUEUE_CARD_BORDER_CLASS: Record<string, string> = {
   voyo:       "queue-card-voyo",
@@ -33,4 +46,5 @@ export const QUEUE_CARD_BORDER_CLASS: Record<string, string> = {
   rtsplaneta: "queue-card-rts",
   hbomax:     "queue-card-hbomax",
   skyshowtime: "queue-card-skyshowtime",
+  ytdlp:      "queue-card-ytdlp",
 };

@@ -176,55 +176,55 @@ def find_and_transcode_completed(
     codec: str = "hevc",
     on_start=None,
     on_complete=None,
+    metadata=None,
+    min_mtime: float = 0,
 ):
     """
     Scans the output directory for a file matching the downloaded title
     and initiates the transcoding pipeline in the background.
     """
-    if not title or len(title) < 3:
+    from backend.services.output_files import file_match_hints, find_all_media_files
+
+    hints = file_match_hints(metadata, title)
+    if not hints and not (metadata or {}).get("multi_file"):
         return
-        
-    sanitized_title = re.sub(r'[\\/:*?"<>|]', '_', title).strip(' .')
+
     path = Path(output_dir)
     if not path.exists() or not path.is_dir():
         return
-        
-    # Find most recently modified file that matches the title
-    best_file = None
-    best_time = 0
-    
-    # Standard extensions for completed files
-    extensions = {".mp4", ".mkv", ".ts", ".mov", ".avi"}
-    
+
     try:
-        import shutil
         import threading
-        for f in path.iterdir():
-            if f.is_file() and f.suffix.lower() in extensions:
-                if sanitized_title in f.name or any(part in f.name for part in sanitized_title.split() if len(part) > 3):
-                    mtime = f.stat().st_mtime
-                    if mtime > best_time:
-                        best_time = mtime
-                        best_file = f
-                        
-        if best_file:
-            # We found the completed file! Start the transcode in a background thread
-            logger.info(f"Triggering background compression ({codec}) for: {best_file.name}")
-            if on_start:
-                try:
-                    on_start(str(best_file))
-                except Exception as cb_err:
-                    logger.debug("Transcode on_start callback failed: %s", cb_err)
 
-            def _worker():
-                result = run_transcode(str(best_file), codec)
-                if on_complete:
+        multi_file = bool((metadata or {}).get("multi_file"))
+        match_prefix = (metadata or {}).get("file_match_prefix")
+        targets = find_all_media_files(
+            output_dir,
+            hints,
+            min_mtime=min_mtime,
+            multi_file=multi_file,
+            match_prefix=str(match_prefix) if match_prefix else None,
+        )
+        if not targets:
+            return
+
+        def _worker():
+            last_result = None
+            for target in targets:
+                logger.info("Triggering background compression (%s) for: %s", codec, target.name)
+                if on_start:
                     try:
-                        on_complete(result)
+                        on_start(str(target))
                     except Exception as cb_err:
-                        logger.debug("Transcode on_complete callback failed: %s", cb_err)
+                        logger.debug("Transcode on_start callback failed: %s", cb_err)
+                last_result = run_transcode(str(target), codec)
+            if on_complete:
+                try:
+                    on_complete(last_result)
+                except Exception as cb_err:
+                    logger.debug("Transcode on_complete callback failed: %s", cb_err)
 
-            threading.Thread(target=_worker, daemon=True).start()
+        threading.Thread(target=_worker, daemon=True).start()
     except Exception as e:
         logger.error(f"Error searching for transcode target for title '{title}': {e}")
 

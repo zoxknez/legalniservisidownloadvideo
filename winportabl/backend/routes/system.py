@@ -15,6 +15,8 @@ from backend.services.hrti_adapter import HrtiAdapter
 from backend.services.eon_adapter import EonAdapter
 from backend.services.rts_adapter import RtsAdapter
 from backend.services.hbo_adapter import HboAdapter
+from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
+from backend.services.ytdlp_adapter import YtdlpAdapter
 from backend.services.smart_parser import SmartParser
 
 router = APIRouter()
@@ -60,6 +62,8 @@ async def get_system_status():
     eon_task = loop.run_in_executor(None, EonAdapter.get_auth_status)
     rts_task = loop.run_in_executor(None, RtsAdapter.get_auth_status)
     hbo_task = loop.run_in_executor(None, HboAdapter.get_auth_status)
+    sky_task = loop.run_in_executor(None, SkyShowtimeAdapter.get_auth_status)
+    ytdlp_task = loop.run_in_executor(None, YtdlpAdapter.get_health_status)
 
     async def safe_check(task, name):
         try:
@@ -73,12 +77,14 @@ async def get_system_status():
         except Exception as e:
             return {"authenticated": False, "error": str(e)}
 
-    voyo, hrti, eon, rts, hbomax = await asyncio.gather(
+    voyo, hrti, eon, rts, hbomax, skyshowtime, ytdlp = await asyncio.gather(
         safe_check(voyo_task, "Voyo"),
         safe_check(hrti_task, "HRTi"),
         safe_check(eon_task, "EON"),
         safe_check(rts_task, "RTS Planeta"),
         safe_check(hbo_task, "HBO Max"),
+        safe_check(sky_task, "SkyShowtime"),
+        safe_check(ytdlp_task, "Univerzalno"),
     )
 
     from backend.credentials_store import all_credential_security_status
@@ -119,6 +125,8 @@ async def get_system_status():
             "eon": eon,
             "rtsplaneta": rts,
             "hbomax": hbomax,
+            "skyshowtime": skyshowtime,
+            "ytdlp": ytdlp,
         },
         "system_metrics": metrics,
         "drm": drm_status,
@@ -297,7 +305,7 @@ async def auto_sync_browser():
                 "unsupported_platform": True,
                 "synced_any": False,
                 "browser_locked": False,
-                "services": {s: False for s in ("voyo", "hrti", "rtsplaneta", "eon")},
+                "services": {s: False for s in ("voyo", "hrti", "rtsplaneta", "eon", "skyshowtime")},
                 "message": (
                     "Automatska sinhronizacija iz pretraživača je dostupna samo na Windows-u "
                     "(Chrome/Edge/Brave + DPAPI)."

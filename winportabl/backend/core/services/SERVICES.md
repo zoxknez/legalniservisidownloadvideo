@@ -9,11 +9,14 @@
 | EON | `backend.core.services.eon.eon_downloader` | `eon.engine.EONEngine` (in-process browse/API) |
 | RTS Planeta | `backend.core.services.rtsplaneta.rtsplaneta_downloader` | `rtsplaneta_auth` (in-process) |
 | HBO Max | `backend.core.services.hbomax.hbomax_downloader` | `hbomax_auth` |
+| SkyShowtime | `backend.core.services.skyshowtime.skyshowtime_downloader` | `skyshowtime.skyshowtime_auth` |
+| Univerzalno (yt-dlp) | `backend.services.ytdlp_command_builder` + yt-dlp CLI | `backend.services.ytdlp_adapter` |
 
 Red preuzimanja pokreće **in-process** poslove preko `backend/jobs/` (bez subprocessa za glavne servise):
 
-- **In-process**: Voyo, HBO Max, HRTi, EON, RTS — vidi `backend/jobs/*_job.py` i `build_job()` u adapterima
-- **Subprocess** `python -m <modul>` / yt-dlp: legacy shim skripte u rootu i Smart (yt-dlp) mod
+- **In-process**: Voyo, HBO Max, HRTi, EON, RTS, SkyShowtime — vidi `backend/jobs/*_job.py` i `build_job()` u adapterima
+- **Subprocess** yt-dlp: `backend/routes/ytdlp.py` → `YtdlpAdapter` → `queue_manager` (Pametno preuzimanje)
+- **CLI shim**: `ytdlp_downloader.py` → `backend.core.services.ytdlp.cli`
 
 ## Root skripte
 

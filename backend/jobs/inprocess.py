@@ -137,14 +137,10 @@ def execute_job(
     return False
 
 
-def get_output_dir_from_cmd(cmd: List[str]) -> Optional[str]:
-    if is_inprocess_job(cmd):
-        try:
-            params = parse_job(cmd).get("params") or {}
-            return params.get("output_dir")
-        except Exception:
-            return None
-    for idx, part in enumerate(cmd):
-        if part == "-o" and idx + 1 < len(cmd):
-            return cmd[idx + 1]
-    return None
+def get_output_dir_from_cmd(
+    cmd: List[str],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    from backend.services.output_files import get_output_dir_from_cmd as _resolve
+
+    return _resolve(cmd, metadata)
