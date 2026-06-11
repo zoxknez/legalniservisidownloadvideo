@@ -1,10 +1,10 @@
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Dict, Any, List
 
 from backend.config import config
+from backend.core.services.hbomax.hbomax_auth import is_token_valid
 from backend.jobs.inprocess import build_job
 
 logger = logging.getLogger(__name__)
@@ -22,24 +22,32 @@ class HboAdapter:
 
         authenticated = False
         resolved_path = ""
+        error = ""
 
         if token_path.exists():
             resolved_path = str(token_path.resolve())
             try:
                 data = json.loads(token_path.read_text(encoding="utf-8"))
-                expires = data.get("expires_at", 0)
-                if expires > time.time() + 60:
+                if not isinstance(data, dict):
+                    raise ValueError("token.json mora biti JSON objekat")
+                if is_token_valid(data):
                     authenticated = True
                 elif data.get("refresh_token"):
                     authenticated = True
-            except Exception:
-                authenticated = True
+                else:
+                    error = "HBO Max token je istekao ili ne sadrži access/refresh token."
+            except Exception as exc:
+                authenticated = False
+                error = f"HBO Max token fajl je neispravan: {exc}"
 
-        return {
+        result = {
             "authenticated": authenticated,
             "market": market,
             "token_path": resolved_path,
         }
+        if error:
+            result["error"] = error
+        return result
 
     @staticmethod
     def make_login_cmd(market: str = "emea") -> List[str]:

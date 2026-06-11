@@ -15,11 +15,21 @@ class RtsAdapter:
         email = creds.get("email", "")
         token = (creds.get("token") or creds.get("secure_streaming_token") or "").strip()
         password = creds.get("password", "")
+
+        try:
+            native_cfg = RTSPlanetaConfig()
+            native_email, native_password = native_cfg.get_credentials()
+            email = email or native_email
+            password = password or native_password
+            token = token or native_cfg.get_session_token()
+        except Exception as exc:
+            logger.debug("RTS native auth status lookup failed: %s", exc)
+
         if token:
-            return {"authenticated": True, "email": email or "(sesija iz pretraživača)"}
+            return {"authenticated": True, "email": email or "(sesija iz browsera)"}
         if email and password:
             return {"authenticated": True, "email": email}
-        return {"authenticated": False, "email": email, "error": "Nema sačuvanih kredencijala ili sesije"}
+        return {"authenticated": False, "email": email, "error": "Nema sacuvanih kredencijala ili sesije"}
 
     @staticmethod
     def save_credentials(email: str, password: str) -> Dict[str, Any]:
@@ -62,7 +72,7 @@ class RtsAdapter:
             info = auth.get_video_info(video_id)
             video_list = info.get("video", [])
             if not video_list:
-                raise ValueError("Video podaci nisu pronađeni na RTS API-ju.")
+                raise ValueError("Video podaci nisu pronadjeni na RTS API-ju.")
             video = video_list[0]
 
             raw_title = video.get("title", f"RTS Video {video_id}")

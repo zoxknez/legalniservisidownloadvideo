@@ -81,6 +81,24 @@ def run_voyo_job(
             log_fn(f"INFO Voyo serija završena: {ok_count}/{total} epizoda")
             return ok_count > 0
 
+        if action == "videos":
+            raw_ids = params.get("video_ids") or []
+            video_ids = [int(video_id) for video_id in raw_ids if str(video_id).strip()]
+            if not video_ids:
+                raise RuntimeError("Voyo video_ids list is required.")
+            success = 0
+            total = len(video_ids)
+            for idx, video_id in enumerate(video_ids, 1):
+                _check_cancelled(cancel_event)
+                log_fn(f"INFO Voyo epizoda {idx}/{total}: video {video_id}")
+                if downloader.download_video(video_id):
+                    success += 1
+                else:
+                    log_fn(f"ERROR Voyo epizoda nije uspela: video {video_id}")
+            _check_cancelled(cancel_event)
+            log_fn(f"INFO Voyo batch zavrsen: {success}/{total} epizoda")
+            return success > 0
+
         if action == "url":
             _check_cancelled(cancel_event)
             ok = downloader.download_video_url(target)

@@ -1,4 +1,5 @@
 import logging
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -66,10 +67,16 @@ def hrti_series_episodes(series_uuid: str):
         raise HTTPException(status_code=503, detail=str(e))
 
 
-class HrtiDownloadRequest(BaseModel):
+class HrtiDownloadItem(BaseModel):
     ref_id: str = Field(min_length=1)
     title: str = ""
+
+
+class HrtiDownloadRequest(BaseModel):
+    ref_id: str = ""
+    title: str = ""
     workers: int = Field(default=16, ge=1, le=64)
+    items: Optional[List[HrtiDownloadItem]] = None
 
 
 @router.post("/download")
@@ -80,6 +87,22 @@ async def hrti_download(req: HrtiDownloadRequest):
             status_code=401,
             detail="Niste prijavljeni na HRTi. Unesite kredencijale u Postavkama.",
         )
+    if req.items:
+        items = [
+            {"ref_id": item.ref_id.strip(), "title": item.title.strip()}
+            for item in req.items
+            if item.ref_id.strip()
+        ]
+        if not items:
+            raise HTTPException(status_code=400, detail="Lista HRTi epizoda je prazna.")
+        cmd = HrtiAdapter.make_download_batch_cmd(items, req.workers)
+        title = f"HRTi: {len(items)} epizoda"
+        task_id = await queue_manager.add_download("hrti", title, cmd)
+        return {"success": True, "queued": len(items), "task_id": task_id}
+
+    if not req.ref_id.strip():
+        raise HTTPException(status_code=400, detail="HRTi ref_id je obavezan.")
+
     cmd = HrtiAdapter.make_download_cmd(req.ref_id.strip(), req.title.strip(), req.workers)
     title = f"HRTi: {req.title.strip() or req.ref_id.strip()}"
     task_id = await queue_manager.add_download("hrti", title, cmd)

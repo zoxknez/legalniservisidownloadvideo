@@ -68,7 +68,8 @@ export function useDownloadWebSocket({
       try {
         const res = await apiFetch("/api/queue", { timeoutMs: 5000 });
         if (res.ok) {
-          const queue = (await res.json()) as DownloadTask[];
+          const body = (await res.json()) as DownloadTask[] | { items?: DownloadTask[] };
+          const queue = Array.isArray(body) ? body : (body.items ?? []);
           setDownloads(queue);
           prevQueueRef.current = queue;
         }
@@ -82,6 +83,7 @@ export function useDownloadWebSocket({
       ws = new WebSocket(buildWebSocketUrl());
 
       ws.onopen = () => {
+        const wasReconnect = attempt > 0;
         setConnected(true);
         attempt = 0;
 
@@ -92,8 +94,7 @@ export function useDownloadWebSocket({
           }
         }, HEARTBEAT_INTERVAL);
 
-        if (attempt === 0) return;
-        void syncStateOnReconnect();
+        if (wasReconnect) void syncStateOnReconnect();
       };
 
       ws.onmessage = (event) => {

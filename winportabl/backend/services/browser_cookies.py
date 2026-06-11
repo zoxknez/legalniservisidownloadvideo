@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from Crypto.Cipher import AES
 
+from backend.utils.cancellable_subprocess import run as run_subprocess
+
 logger = logging.getLogger("BrowserCookies")
 
 DOMAIN_TO_SERVICE = {
@@ -129,12 +131,12 @@ def _extract_cookies_from_db(db_path: Path, key: bytes, domains: List[str]) -> T
         import subprocess
         import sys
         if sys.platform == "win32":
-            subprocess.run(
+            run_subprocess(
                 ["cmd", "/c", "copy", "/y", str(db_path), str(temp_db_path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         else:
-            subprocess.run(
+            run_subprocess(
                 ["cp", "--", str(db_path), str(temp_db_path)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )

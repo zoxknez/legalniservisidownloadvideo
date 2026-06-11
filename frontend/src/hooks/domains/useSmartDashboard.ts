@@ -147,34 +147,28 @@ export function useSmartDashboard({ showToast }: UseSmartDashboardOptions) {
           const selectedEps = smartData.episodes.filter((ep: SmartEpisode) =>
             smartSelectedEpisodes.includes(ep.id),
           );
-          let allOk = true;
-          for (const ep of selectedEps) {
-            const r = await apiFetch(`/api/hrti/download`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ref_id: ep.id, title: ep.title, workers: 16 }),
-            });
-            if (!r.ok) allOk = false;
-          }
-          if (allOk) {
-            showToast(`${selectedEps.length} epizoda uspešno dodato u red!`, "success");
-            setSmartUrl("");
-            setSmartData(null);
-            setSmartSelectedEpisodes([]);
-          } else {
-            showToast("Neke epizode nisu mogle biti dodate.", "error");
-          }
-          return;
+          res = await apiFetch(`/api/hrti/download`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: selectedEps.map((ep: SmartEpisode) => ({
+                ref_id: String(ep.id),
+                title: ep.title || String(ep.id),
+              })),
+              workers: 16,
+            }),
+          });
+        } else {
+          res = await apiFetch(`/api/hrti/download`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ref_id: smartData.target_id,
+              title: smartData.title,
+              workers: 16,
+            }),
+          });
         }
-        res = await apiFetch(`/api/hrti/download`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ref_id: smartData.target_id,
-            title: smartData.title,
-            workers: 16,
-          }),
-        });
       } else if (smartData.service === "eon") {
         res = await apiFetch(`/api/eon/download`, {
           method: "POST",

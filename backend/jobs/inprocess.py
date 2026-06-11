@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 import threading
 
 from backend.config import config
+from backend.utils.cancellable_subprocess import subprocess_cancel_scope
 
 INPROCESS_MARKER = "@inprocess"
 LogFn = Callable[[str], None]
@@ -109,24 +110,25 @@ def execute_job(
     action = payload.get("action", "")
     params = payload.get("params") or {}
 
-    if service == "voyo":
-        from backend.jobs.voyo_job import run_voyo_job
-        return run_voyo_job(action, params, log_fn, cancel_event)
-    if service in ("hbomax", "hbo"):
-        from backend.jobs.hbo_job import run_hbo_job
-        return run_hbo_job(action, params, log_fn, cancel_event)
-    if service == "sniffer":
-        from backend.jobs.sniffer_job import run_sniffer_job
-        return run_sniffer_job(action, params, log_fn, cancel_event)
-    if service == "hrti":
-        from backend.jobs.hrti_job import run_hrti_job
-        return run_hrti_job(action, params, log_fn, cancel_event)
-    if service == "rtsplaneta":
-        from backend.jobs.rts_job import run_rts_job
-        return run_rts_job(action, params, log_fn, cancel_event)
-    if service == "eon":
-        from backend.jobs.eon_job import run_eon_job
-        return run_eon_job(action, params, log_fn, cancel_event)
+    with subprocess_cancel_scope(cancel_event):
+        if service == "voyo":
+            from backend.jobs.voyo_job import run_voyo_job
+            return run_voyo_job(action, params, log_fn, cancel_event)
+        if service in ("hbomax", "hbo"):
+            from backend.jobs.hbo_job import run_hbo_job
+            return run_hbo_job(action, params, log_fn, cancel_event)
+        if service == "sniffer":
+            from backend.jobs.sniffer_job import run_sniffer_job
+            return run_sniffer_job(action, params, log_fn, cancel_event)
+        if service == "hrti":
+            from backend.jobs.hrti_job import run_hrti_job
+            return run_hrti_job(action, params, log_fn, cancel_event)
+        if service == "rtsplaneta":
+            from backend.jobs.rts_job import run_rts_job
+            return run_rts_job(action, params, log_fn, cancel_event)
+        if service == "eon":
+            from backend.jobs.eon_job import run_eon_job
+            return run_eon_job(action, params, log_fn, cancel_event)
 
     log_fn(f"ERROR Nepoznat in-process servis: {service}")
     return False

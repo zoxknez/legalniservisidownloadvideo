@@ -28,6 +28,8 @@ from typing import Optional, List, Dict, Any
 import xmltodict
 from yt_dlp import YoutubeDL
 
+from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+
 # Import our auth module
 from .rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
 
@@ -550,7 +552,7 @@ class RTSPlanetaDownloader:
         ]
         
         logger.info(f"Downloading {len(urls)} fragments to {output_dir}")
-        subprocess.run(cmd, check=True)
+        run_subprocess(cmd, check=True)
     
     @staticmethod
     def natural_sort_key(s):
@@ -684,7 +686,7 @@ class RTSPlanetaDownloader:
         cmd.extend([str(input_file), str(output_file)])
         
         logger.info(f"Decrypting {input_file.name}")
-        subprocess.run(cmd, check=True)
+        run_subprocess(cmd, check=True)
     
     def fix_media_container(self, input_file: Path, output_file: Path):
         """Fix container issues with ffmpeg"""
@@ -697,7 +699,7 @@ class RTSPlanetaDownloader:
         ]
         
         logger.info(f"Fixing container: {input_file.name}")
-        subprocess.run(cmd, check=True, capture_output=True)
+        run_subprocess(cmd, check=True, capture_output=True)
     
     @staticmethod
     def _is_encrypted(mp4_path: Path) -> bool:
@@ -733,7 +735,7 @@ class RTSPlanetaDownloader:
             str(output_file),
         ]
         logger.info(f"Muxing to: {output_file.name}")
-        subprocess.run(cmd, check=True, capture_output=True)
+        run_subprocess(cmd, check=True, capture_output=True)
 
     def mux_to_mkv(self, video_file: Path, audio_file: Path, output_file: Path):
         """Mux video and audio into MKV container using mkvmerge"""
@@ -750,7 +752,7 @@ class RTSPlanetaDownloader:
         ]
         
         logger.info(f"Muxing to: {output_file.name}")
-        subprocess.run(cmd, check=True)
+        run_subprocess(cmd, check=True)
     
     def sanitize_filename(self, name: str) -> str:
         """Create safe filename"""
@@ -778,6 +780,9 @@ class RTSPlanetaDownloader:
         enc_video = self.temp_dir / 'encrypted_video.mp4'
         enc_audio = self.temp_dir / 'encrypted_audio.m4a'
 
+        def _progress(_data):
+            raise_if_cancelled()
+
         opts_video = {
             'quiet': True,
             'no_warnings': True,
@@ -785,6 +790,7 @@ class RTSPlanetaDownloader:
             'format': 'bestvideo',
             'outtmpl': str(enc_video),
             'fixup': 'never',
+            'progress_hooks': [_progress],
         }
         opts_audio = {
             'quiet': True,
@@ -793,6 +799,7 @@ class RTSPlanetaDownloader:
             'format': 'bestaudio',
             'outtmpl': str(enc_audio),
             'fixup': 'never',
+            'progress_hooks': [_progress],
         }
 
         logger.info("Downloading encrypted video stream...")

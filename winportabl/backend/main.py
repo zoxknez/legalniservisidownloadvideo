@@ -97,19 +97,23 @@ app.add_middleware(ApiKeyMiddleware)
 
 # ── Bridge CORS middleware ────────────────────────────────────────────────────
 
-BRIDGE_CORS_PATHS = ("/api/bridge/", "/api/sniffer/detect")
+BRIDGE_CORS_PATHS = frozenset({
+    "/api/bridge/session",
+    "/api/bridge/sniffer",
+    "/api/sniffer/detect",
+})
 
 
 @app.middleware("http")
 async def bridge_cors_middleware(request: Request, call_next):
     path = request.url.path
-    if not any(path.startswith(p) for p in BRIDGE_CORS_PATHS):
+    if path not in BRIDGE_CORS_PATHS:
         return await call_next(request)
 
     cors_headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, X-API-Key, Authorization",
+        "Access-Control-Allow-Headers": "Content-Type, X-VDS-Bridge-Token, X-API-Key, Authorization",
     }
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=cors_headers)

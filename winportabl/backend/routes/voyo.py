@@ -88,11 +88,10 @@ async def voyo_download(req: VoyoDownloadRequest):
         )
 
     if req.video_ids and req.mode == "series":
-        for vid in req.video_ids:
-            cmd = VoyoAdapter.make_download_cmd(str(vid), "video", resolution=req.resolution)
-            title = f"Voyo: video {vid}"
-            await queue_manager.add_download("voyo", title, cmd)
-        return {"success": True, "queued": len(req.video_ids)}
+        cmd = VoyoAdapter.make_download_batch_cmd(req.video_ids, resolution=req.resolution)
+        title = f"Voyo: {len(req.video_ids)} epizoda"
+        task_id = await queue_manager.add_download("voyo", title, cmd)
+        return {"success": True, "queued": len(req.video_ids), "task_id": task_id}
 
     cmd = VoyoAdapter.make_download_cmd(
         req.target.strip(), req.mode, req.episodes.strip(), req.resolution

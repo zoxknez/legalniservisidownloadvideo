@@ -28,6 +28,8 @@ Usage:
 
 import json
 import logging
+import base64
+import time
 import uuid
 import requests
 from dataclasses import dataclass
@@ -41,6 +43,26 @@ requests.packages.urllib3.disable_warnings()
 logger = logging.getLogger(__name__)
 
 SITE_ID = 30005   # voyo.rs site identifier
+
+
+def _jwt_payload(token: str) -> Dict[str, Any]:
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload.encode()).decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def _jwt_is_expired(token: str, leeway_seconds: int = 120) -> bool:
+    payload = _jwt_payload(token)
+    exp = payload.get("exp")
+    if not exp:
+        return False
+    try:
+        return time.time() >= float(exp) - leeway_seconds
+    except (TypeError, ValueError):
+        return False
 
 
 class ChromeTLSAdapter(HTTPAdapter):
@@ -233,13 +255,19 @@ class VoyoAuth:
 
     # ── auth ─────────────────────────────────────────────────────────────────
 
-    def restore_session_token(self, token: str) -> bool:
+    def restore_session_token(self, token: str, validate: bool = True) -> bool:
         """Validate and activate an imported session token (browser / bookmarklet)."""
         token = (token or '').strip()
         if not token:
             return False
+        if _jwt_is_expired(token):
+            logger.info('Stored Voyo session token is expired; password login is required')
+            return False
         self.state.token = token
         self.state.device_linked = True
+        if not validate:
+            logger.info('Voyo session restored from stored token')
+            return True
         try:
             profiles = self.get_profiles()
             if profiles:
@@ -257,7 +285,7 @@ class VoyoAuth:
         from backend.credentials_store import get_secret
 
         stored_token = get_secret('voyo', 'token')
-        if stored_token and self.restore_session_token(stored_token):
+        if stored_token and self.restore_session_token(stored_token, validate=False):
             return {'token': self.state.token, 'nickname': self.state.nickname}
         if not email or not password:
             raise RuntimeError('Voyo credentials are not configured.')
@@ -308,8 +336,19 @@ class VoyoAuth:
 
         # Step 2 – register device with account (REQUIRED for videoUrlV2)
         self.link_device()
+        self._persist_session_token()
 
         return login_data
+
+    def _persist_session_token(self) -> None:
+        if not self.state.token:
+            return
+        try:
+            from backend.credentials_store import set_secret
+
+            set_secret('voyo', 'token', self.state.token)
+        except Exception as exc:
+            logger.debug('Could not persist Voyo session token: %s', exc)
 
     def link_device(self) -> Dict[str, Any]:
         """

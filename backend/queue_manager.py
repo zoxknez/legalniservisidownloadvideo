@@ -901,7 +901,8 @@ class DownloadQueueManager:
             except Exception as exc:
                 from backend.jobs.exceptions import JobCancelled
                 if isinstance(exc, JobCancelled):
-                    log_line("INFO Preuzimanje otkazano od strane korisnika.")
+                    item.logs.append(redact_log_line("INFO Preuzimanje otkazano od strane korisnika."))
+                    asyncio.run_coroutine_threadsafe(self.broadcast_state(), loop)
                     return False
                 log_line(f"ERROR {exc}")
                 logger.exception("In-process job failed")
@@ -994,4 +995,3 @@ class DownloadQueueManager:
 
 # Singleton queue manager
 queue_manager = DownloadQueueManager()
-

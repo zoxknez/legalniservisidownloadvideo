@@ -140,11 +140,13 @@ export function VoyoTab() {
     startVoyoDownload,
     status,
     voyoMode,
+    voyoEpisodesRange,
     voyoRes,
     voyoSearching,
     voyoSeriesData,
     voyoSubmitting,
     voyoTarget,
+    setVoyoEpisodesRange,
   } = useVoyoTab();
   return (
 <div key="voyo" className="tab-content tab-content-voyo">
@@ -242,6 +244,23 @@ export function VoyoTab() {
             )}
           </div>
         </div>
+
+        {voyoMode === "series" && !voyoSeriesData && (
+          <div>
+            <label>Opseg epizoda</label>
+            <div className="password-wrapper">
+              <List className="absolute left-4 text-text-muted w-4 h-4" />
+              <input
+                type="text"
+                placeholder="npr. 1-3,5 ili prazno za sve"
+                value={voyoEpisodesRange}
+                onChange={(e) => setVoyoEpisodesRange(e.target.value)}
+                className="input-premium pl-11"
+                style={cssVars({"--focused-border": "#f97316", "--focused-glow": "rgba(249,115,22,0.25)"})}
+              />
+            </div>
+          </div>
+        )}
 
         <div>
           <label>Kvalitet preuzimanja (Resolution)</label>

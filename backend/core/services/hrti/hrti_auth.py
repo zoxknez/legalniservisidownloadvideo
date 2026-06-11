@@ -83,6 +83,7 @@ class HRTIAuth:
                 with open(self.config_path) as f:
                     cfg = json.load(f)
                 self.state.device_id = cfg.get("device_id", "")
+                self.state.aviion_ref_id = cfg.get("aviion_ref_id", "")
                 logger.debug(f"Loaded config from {self.config_path}")
             except Exception as e:
                 logger.warning(f"Could not load config: {e}")
@@ -90,10 +91,6 @@ class HRTIAuth:
     def _save_config(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         cfg = {"device_id": self.state.device_id}
-        if self.state.token:
-            cfg["token"] = self.state.token
-        if self.state.customer_id:
-            cfg["customer_id"] = self.state.customer_id
         if self.state.aviion_ref_id:
             cfg["aviion_ref_id"] = self.state.aviion_ref_id
         with open(self.config_path, "w") as f:

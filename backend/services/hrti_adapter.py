@@ -157,3 +157,28 @@ class HrtiAdapter:
                 "output_dir": config.get_output_dir(),
             },
         )
+
+    @staticmethod
+    def make_download_batch_cmd(items: List[Dict[str, Any]], workers: int = 16) -> List[str]:
+        clean_items = []
+        for item in items:
+            ref_id = str(item.get("ref_id") or item.get("id") or "").strip()
+            if not ref_id:
+                continue
+            clean_items.append(
+                {
+                    "ref_id": ref_id,
+                    "title": str(item.get("title") or "").strip(),
+                }
+            )
+        if not clean_items:
+            raise ValueError("Lista HRTi epizoda je prazna.")
+        return build_job(
+            "hrti",
+            "downloads",
+            {
+                "items": clean_items,
+                "workers": max(1, min(workers, 64)),
+                "output_dir": config.get_output_dir(),
+            },
+        )

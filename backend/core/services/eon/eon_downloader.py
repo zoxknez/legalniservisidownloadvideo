@@ -41,6 +41,8 @@ from urllib.parse import urlparse
 import requests
 import xmltodict
 
+from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+
 from .eon_auth import (
     CONFIG_DIR,
     EonAuthError,
@@ -854,6 +856,7 @@ class EONDownloader:
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
 
         def _progress(d):
+            raise_if_cancelled()
             if d.get("status") == "downloading":
                 fname = d.get("filename", "")
                 track = "Video" if "video" in fname.lower() else "Audio"
@@ -934,16 +937,25 @@ class EONDownloader:
                 return merged[0], merged[0]
             raise FileNotFoundError("yt-dlp produced no output files")
 
+        selected_video = None
         if v_candidates:
             v_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
-            shutil.copy2(v_candidates[0], video_out)
+            selected_video = v_candidates[0]
+            shutil.copy2(selected_video, video_out)
         if a_candidates:
+            if selected_video:
+                a_candidates = [p for p in a_candidates if p.resolve() != selected_video.resolve()]
+            if not a_candidates:
+                raise FileNotFoundError("yt-dlp produced no separate audio fragment")
             a_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
             shutil.copy2(a_candidates[0], audio_out)
+        if not video_out.exists():
+            raise FileNotFoundError("yt-dlp produced no separate video fragment")
+        if not audio_out.exists():
+            raise FileNotFoundError("yt-dlp produced no separate audio fragment")
 
         logger.info(f"Video fragment: {video_out} ({video_out.stat().st_size // 1024}KB)")
-        if audio_out.exists():
-            logger.info(f"Audio fragment: {audio_out} ({audio_out.stat().st_size // 1024}KB)")
+        logger.info(f"Audio fragment: {audio_out} ({audio_out.stat().st_size // 1024}KB)")
 
         return video_out, audio_out
 
@@ -956,7 +968,7 @@ class EONDownloader:
         cmd += [str(encrypted), str(decrypted)]
 
         logger.info(f"Decrypting: {encrypted.name} -> {decrypted.name}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise EonSafeError(f"mp4decrypt failed: {result.stderr}")
         logger.info(f"Decrypted: {decrypted.name} ({decrypted.stat().st_size // 1024}KB)")
@@ -971,7 +983,7 @@ class EONDownloader:
             "-c", "copy",
             str(fixed),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.warning(f"ffmpeg fix failed (non-fatal): {result.stderr[-300:]}")
             return input_path
@@ -991,7 +1003,7 @@ class EONDownloader:
                 str(audio_path),
             ]
             logger.info(f"Muxing with mkvmerge to: {output_path}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_subprocess(cmd, capture_output=True, text=True)
             if result.returncode in (0, 1):
                 logger.info(f"Output: {output_path} ({output_path.stat().st_size // 1024 // 1024}MB)")
                 return output_path
@@ -1012,7 +1024,7 @@ class EONDownloader:
                 str(output_mp4),
             ]
             logger.info(f"Muxing with ffmpeg to: {output_mp4}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_subprocess(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 logger.info(f"Output: {output_mp4} ({output_mp4.stat().st_size // 1024 // 1024}MB)")
                 return output_mp4
@@ -1101,6 +1113,9 @@ class EONDownloader:
         from yt_dlp import YoutubeDL
 
         output_template = str(self.output_dir / f"{safe_name}.%(ext)s")
+        def _progress(_data):
+            raise_if_cancelled()
+
         ydl_opts = {
             "outtmpl": output_template,
             "format": "bestvideo+bestaudio/best",
@@ -1108,6 +1123,7 @@ class EONDownloader:
             "concurrent_fragment_downloads": workers,
             "retries": 10,
             "fragment_retries": 10,
+            "progress_hooks": [_progress],
         }
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -1156,7 +1172,7 @@ class EONDownloader:
                 cmd += ["-t", str(duration)]
             cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(output_file)]
             print("[EON] Recording non-DRM live stream with ffmpeg...")
-            subprocess.run(cmd)
+            run_subprocess(cmd)
             print(f"[EON] ✓ Live capture saved: {output_file}")
             return output_file
 
@@ -1178,7 +1194,7 @@ class EONDownloader:
         cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(enc_output)]
         try:
             print(f"[EON] Capturing encrypted live stream ({duration}s)...")
-            subprocess.run(cmd)
+            run_subprocess(cmd)
         except KeyboardInterrupt:
             print("\n[EON] Snimanje prekinuto od strane korisnika. Pokušavam dešifrovati do sada snimljeni deo...")
 
@@ -1235,7 +1251,7 @@ def run_yt_dlp(
     if verbose:
         cmd.insert(-1, "--verbose")
     print("[EON] Downloading with yt-dlp")
-    return subprocess.run(cmd).returncode
+    return run_subprocess(cmd).returncode
 
 
 def run_live_capture(url: str, output_dir: Path, title: str, duration: int, player: str = "", play: bool = False) -> int:
@@ -1258,7 +1274,7 @@ def run_live_capture(url: str, output_dir: Path, title: str, duration: int, play
     cmd += ["-i", url, "-c", "copy", str(output_file)]
     try:
         print("[EON] Capturing live stream with ffmpeg")
-        return subprocess.run(cmd).returncode
+        return run_subprocess(cmd).returncode
     except KeyboardInterrupt:
         print("\n[EON] Snimanje uživo prekinuto od strane korisnika.")
         if output_file.exists() and output_file.stat().st_size >= 1024:

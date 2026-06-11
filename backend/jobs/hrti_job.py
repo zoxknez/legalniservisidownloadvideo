@@ -30,7 +30,7 @@ def run_hrti_job(
     log_fn: LogFn,
     cancel_event: Optional[threading.Event] = None,
 ) -> bool:
-    if action != "download":
+    if action not in {"download", "downloads"}:
         raise RuntimeError(f"Unknown HRTi job action: {action}")
 
     ref_id = str(params.get("ref_id") or params.get("url") or "").strip()
@@ -38,8 +38,10 @@ def run_hrti_job(
     workers = max(1, min(int(params.get("workers") or 16), 64))
     output_dir = params.get("output_dir") or config.get_output_dir()
 
-    if not ref_id:
+    if action == "download" and not ref_id:
         raise RuntimeError("HRTi ref_id or url is required.")
+    if action == "downloads" and not params.get("items"):
+        raise RuntimeError("HRTi items list is required.")
 
     _check_cancelled(cancel_event)
 
@@ -52,6 +54,41 @@ def run_hrti_job(
         _check_cancelled(cancel_event)
         downloader.login()
         _check_cancelled(cancel_event)
-        downloader.download(ref_id, title or None)
+
+        if action == "download":
+            downloader.download(ref_id, title or None)
+            _check_cancelled(cancel_event)
+            return True
+
+        raw_items = params.get("items") or []
+        items = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            item_ref = str(item.get("ref_id") or item.get("id") or "").strip()
+            if not item_ref:
+                continue
+            items.append(
+                {
+                    "ref_id": item_ref,
+                    "title": str(item.get("title") or "").strip(),
+                }
+            )
+        if not items:
+            raise RuntimeError("HRTi items list is required.")
+
+        success = 0
+        total = len(items)
+        for idx, item in enumerate(items, 1):
+            _check_cancelled(cancel_event)
+            label = item["title"] or item["ref_id"]
+            log_fn(f"INFO HRTi epizoda {idx}/{total}: {label}")
+            try:
+                downloader.download(item["ref_id"], item["title"] or None)
+                success += 1
+            except Exception as exc:
+                log_fn(f"ERROR HRTi epizoda nije uspela: {label} ({exc})")
+
         _check_cancelled(cancel_event)
-        return True
+        log_fn(f"INFO HRTi batch zavrsen: {success}/{total} epizoda")
+        return success > 0

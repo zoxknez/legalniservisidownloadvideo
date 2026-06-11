@@ -1,11 +1,14 @@
 import os
 import re
+import shutil
 import subprocess
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List, Any
 
 logger = logging.getLogger("Transcoder")
+
+from backend.utils.cancellable_subprocess import run as run_subprocess
 
 # Global hardware encoders cache
 _encoders_cache: Optional[List[str]] = None
@@ -21,7 +24,7 @@ def _get_supported_encoders() -> List[str]:
     ffmpeg_path = binaries.get("ffmpeg", {}).get("path") or "ffmpeg"
     
     try:
-        res = subprocess.run(
+        res = run_subprocess(
             [ffmpeg_path, "-encoders"],
             capture_output=True,
             text=True,
@@ -134,7 +137,7 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
     
     logger.info(f"Starting background transcode pipeline for: {input_path.name}")
     try:
-        res = subprocess.run(
+        res = run_subprocess(
             cmd,
             capture_output=True,
             text=True,
@@ -308,5 +311,4 @@ def get_transcode_diagnostics() -> Dict[str, Any]:
             }
         }
     }
-
 

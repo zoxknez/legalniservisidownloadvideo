@@ -22,6 +22,7 @@
   'use strict';
 
   const BACKEND = '__BACKEND_URL__';
+  const BRIDGE_TOKEN = '__BRIDGE_TOKEN__';
   const SESSION_URL = BACKEND + '/api/bridge/session';
   const SNIFFER_URL = BACKEND + '/api/bridge/sniffer';
   const SESSION_INTERVAL_MS = 3 * 60 * 1000;
@@ -47,7 +48,7 @@
     GM_xmlhttpRequest({
       method: 'POST',
       url: url,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-VDS-Bridge-Token': BRIDGE_TOKEN },
       data: JSON.stringify(body),
       onload: function (res) {
         if (res.status >= 200 && res.status < 300) {

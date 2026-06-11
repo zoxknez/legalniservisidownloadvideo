@@ -25,15 +25,17 @@ import os
 import platform
 import re
 import shutil
-import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import requests
 import xmltodict
 from yt_dlp import YoutubeDL
+
+from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
 
 from .hrti_auth import HRTIAuth
 
@@ -329,6 +331,21 @@ class HRTIDownloader:
             return m.group(1)
         raise ValueError(f"Could not extract reference ID from URL: {url}")
 
+    def resolve_reference_id(self, url_or_ref: str) -> str:
+        """
+        Resolve a HRTI input value to the ReferenceId expected by the API.
+
+        HRTI catalogue values are already ReferenceIds, while public URLs usually
+        embed a UUID ReferenceId. Keep URL parsing strict, but allow direct IDs
+        from the browser/search flow without forcing a UUID shape.
+        """
+        value = (url_or_ref or "").strip()
+        if not value:
+            raise ValueError("Reference ID or HRTI URL is required")
+        if "/" not in value and not re.match(r"^https?://", value, re.IGNORECASE):
+            return value
+        return self.extract_reference_id(value)
+
     # ------------------------------------------------------------------
     # Core download steps
     # ------------------------------------------------------------------
@@ -391,6 +408,7 @@ class HRTIDownloader:
         _last_log = [0.0]
 
         def _progress(d):
+            raise_if_cancelled()
             if d.get("status") == "downloading":
                 now = time.time()
                 if now - _last_log[0] < 2.0:
@@ -472,12 +490,22 @@ class HRTIDownloader:
                 return merged[0], merged[0]
             raise FileNotFoundError("yt-dlp produced no output files")
 
+        selected_video = None
         if v_candidates:
             v_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
-            shutil.copy2(v_candidates[0], video_out)
+            selected_video = v_candidates[0]
+            shutil.copy2(selected_video, video_out)
         if a_candidates:
+            if selected_video:
+                a_candidates = [p for p in a_candidates if p.resolve() != selected_video.resolve()]
+            if not a_candidates:
+                raise FileNotFoundError("yt-dlp produced no separate audio fragment")
             a_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
             shutil.copy2(a_candidates[0], audio_out)
+        if not video_out.exists():
+            raise FileNotFoundError("yt-dlp produced no separate video fragment")
+        if not audio_out.exists():
+            raise FileNotFoundError("yt-dlp produced no separate audio fragment")
 
         logger.info(f"Video fragment: {video_out} ({video_out.stat().st_size // 1024}KB)")
         logger.info(f"Audio fragment: {audio_out} ({audio_out.stat().st_size // 1024}KB)")
@@ -493,7 +521,7 @@ class HRTIDownloader:
         cmd += [str(encrypted), str(decrypted)]
 
         logger.info(f"Decrypting: {encrypted.name} -> {decrypted.name}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise Exception(f"mp4decrypt failed: {result.stderr}")
         return decrypted
@@ -507,7 +535,7 @@ class HRTIDownloader:
             "-c", "copy",
             str(fixed),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.warning(f"ffmpeg fix failed (non-fatal): {result.stderr[-300:]}")
             return input_path
@@ -522,7 +550,7 @@ class HRTIDownloader:
             str(audio_path),
         ]
         logger.info(f"Muxing to: {output_path}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode not in (0, 1):
             raise Exception(f"mkvmerge failed: {result.stderr}")
         logger.info(f"Output: {output_path}")
@@ -539,6 +567,8 @@ class HRTIDownloader:
 
     @staticmethod
     def sanitize_filename(name: str) -> str:
+        name = unicodedata.normalize("NFKD", name)
+        name = name.encode("ascii", "ignore").decode("ascii")
         name = re.sub(r'[<>:"/\\|?*]', "", name)
         name = re.sub(r"\s+", ".", name)
         return name.strip(".") or "hrti_video"
@@ -556,11 +586,7 @@ class HRTIDownloader:
         if not self.auth.is_authenticated():
             raise Exception("Not authenticated. Call login() first.")
 
-        if re.match(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-                    url_or_ref, re.IGNORECASE):
-            ref_id = url_or_ref
-        else:
-            ref_id = self.extract_reference_id(url_or_ref)
+        ref_id = self.resolve_reference_id(url_or_ref)
         logger.info(f"Reference ID: {ref_id}")
 
         info = self.auth.get_stream_info(ref_id)

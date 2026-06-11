@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from backend.utils.cancellable_subprocess import run as run_subprocess
+
 logger = logging.getLogger("Hardsub")
 
 def run_hardsub(video_file: str, subtitle_file: str, ffmpeg_path: str = "ffmpeg") -> Optional[str]:
@@ -42,7 +44,7 @@ def run_hardsub(video_file: str, subtitle_file: str, ffmpeg_path: str = "ffmpeg"
 
     logger.info(f"Burning subtitles '{rel_sub}' into '{rel_video}'")
     try:
-        res = subprocess.run(
+        res = run_subprocess(
             cmd,
             cwd=str(video_path.parent),
             capture_output=True,

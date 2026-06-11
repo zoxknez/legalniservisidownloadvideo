@@ -22,6 +22,29 @@ def get_item_type(item: Dict[str, Any]) -> str:
     return "movie"
 
 
+def _coerce_items(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("Items", "items", "Results", "results"):
+            items = value.get(key)
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+    return []
+
+
+def _coerce_total_items(value: Any, items: List[Dict[str, Any]]) -> int:
+    if isinstance(value, dict):
+        for key in ("NumberOfItems", "TotalItems", "TotalCount", "total_items", "total"):
+            raw = value.get(key)
+            if raw is not None:
+                try:
+                    return int(raw)
+                except (TypeError, ValueError):
+                    pass
+    return len(items)
+
+
 def _items_payload(items: List[Dict[str, Any]], page: int, total_items: int, page_size: int = 24) -> Dict[str, Any]:
     total_pages = (total_items + page_size - 1) // page_size if total_items > 0 else 1
     return {
@@ -91,8 +114,8 @@ class HRTIBrowser:
     def list_category_items(self, category: str, page: int = 1, page_size: int = 24) -> Dict[str, Any]:
         self.ensure_login()
         cat = self.auth.get_catalogue(category_id=category, page=page, page_size=page_size)
-        items = cat.get("Items") or []
-        total_items = int(cat.get("NumberOfItems") or len(items))
+        items = _coerce_items(cat)
+        total_items = _coerce_total_items(cat, items)
         return _items_payload(items, page, total_items, page_size)
 
     def search_items(self, query: str) -> Dict[str, Any]:
@@ -104,8 +127,13 @@ class HRTIBrowser:
             timeout=15,
         )
         resp.raise_for_status()
-        items = resp.json().get("Result") or []
-        return _items_payload(items, 1, len(items), page_size=100)
+        res = resp.json()
+        if res.get("ErrorCode", -1) != 0:
+            raise RuntimeError(res.get("ErrorDescription", "Search failed"))
+        result = res.get("Result") or []
+        items = _coerce_items(result)
+        total_items = _coerce_total_items(result, items)
+        return _items_payload(items, 1, total_items, page_size=100)
 
     def list_series_episodes(self, series_uuid: str) -> Dict[str, Any]:
         self.ensure_login()
@@ -116,11 +144,16 @@ class HRTIBrowser:
             timeout=15,
         )
         resp.raise_for_status()
-        seasons = resp.json().get("Result") or []
+        res = resp.json()
+        if res.get("ErrorCode", -1) != 0:
+            raise RuntimeError(res.get("ErrorDescription", "GetSeasons failed"))
+        seasons = _coerce_items(res.get("Result") or [])
 
         episodes: List[Dict[str, Any]] = []
         for season in seasons:
             season_uuid = season.get("ReferenceId")
+            if not season_uuid:
+                continue
             resp_ep = self.auth.session.post(
                 "https://hrti.hrt.hr/api/api/ott/GetEpisodes",
                 json={
@@ -131,7 +164,10 @@ class HRTIBrowser:
                 timeout=15,
             )
             resp_ep.raise_for_status()
-            episodes.extend(resp_ep.json().get("Result") or [])
+            ep_res = resp_ep.json()
+            if ep_res.get("ErrorCode", -1) != 0:
+                raise RuntimeError(ep_res.get("ErrorDescription", "GetEpisodes failed"))
+            episodes.extend(_coerce_items(ep_res.get("Result") or []))
 
         return _items_payload(episodes, 1, len(episodes), page_size=max(len(episodes), 1))
 

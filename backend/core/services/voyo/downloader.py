@@ -35,6 +35,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+
 from .auth import VoyoAuth, VoyoConfig
 
 logger = logging.getLogger(__name__)
@@ -241,6 +243,7 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
     from backend.core.services.async_engine import AsyncDownloadEngine
     import aiohttp
     
+    raise_if_cancelled()
     logger.info(f"Using high-performance native HLS async engine for: {title}")
     
     headers = dict(auth.session.headers)
@@ -300,6 +303,7 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
         total_estimated_bytes = len(segments) * 1.5 * 1024 * 1024  # estimate 1.5MB per segment
         
         def progress_callback(downloaded_bytes, total_bytes):
+            raise_if_cancelled()
             pct = (downloaded_bytes / total_bytes) * 100 if total_bytes > 0 else 0
             if pct > 100: pct = 100.0
             elapsed = time.monotonic() - start_time
@@ -328,6 +332,7 @@ async def download_native_async(m3u8_url: str, temp_stem: str, auth: VoyoAuth, t
         
         with open(output_ts, "wb") as out_f:
             for i, path in enumerate(dest_paths):
+                raise_if_cancelled()
                 if not path.exists():
                     logger.error(f"Decryption failed: segment {i} file missing!")
                     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -404,6 +409,7 @@ def download_with_ytdlp(m3u8_url: str, temp_stem: str,
 
 
 def _progress_hook(d: dict):
+    raise_if_cancelled()
     if d['status'] == 'finished':
         logger.info("Post-processing...")
     elif d['status'] == 'downloading':
@@ -429,7 +435,7 @@ def mux_to_mkv(input_path: str, output_path: str, title: str = '') -> bool:
 
     logger.info(f'Muxing → {Path(output_path).name}')
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode in (0, 1):   # 0 = OK, 1 = warnings
             Path(input_path).unlink(missing_ok=True)
             logger.info(f'✓ {Path(output_path).name}')

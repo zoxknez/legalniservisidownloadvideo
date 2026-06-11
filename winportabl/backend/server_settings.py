@@ -34,6 +34,14 @@ def get_api_key() -> str:
     return (server.get("api_key") or "").strip()
 
 
+def get_bridge_token() -> str:
+    env_token = os.environ.get("VIDEODOWNLOAD_BRIDGE_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    server = config.data.get("server") or {}
+    return (server.get("bridge_token") or "").strip()
+
+
 def ensure_api_key() -> str:
     """Generate and persist API key on first run if none is configured."""
     existing = get_api_key()
@@ -45,6 +53,19 @@ def ensure_api_key() -> str:
     config.data["server"]["api_key"] = new_key
     config.save()
     return new_key
+
+
+def ensure_bridge_token() -> str:
+    """Generate and persist the browser bridge token used by the userscript."""
+    existing = get_bridge_token()
+    if existing:
+        return existing
+    new_token = secrets.token_urlsafe(32)
+    if "server" not in config.data:
+        config.data["server"] = {}
+    config.data["server"]["bridge_token"] = new_token
+    config.save()
+    return new_token
 
 
 def set_api_key(value: str) -> None:

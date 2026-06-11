@@ -127,7 +127,7 @@ class VoyoAdapter:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id
             
-            auth.login(email, password)
+            auth.authenticate(email, password)
             return auth.get_profiles()
         except Exception:
             return []
@@ -144,7 +144,7 @@ class VoyoAdapter:
         if device_id:
             auth.state.device_id = device_id
             auth.session.headers["device-id"] = device_id
-        auth.login(email, password)
+        auth.authenticate(email, password)
         vcfg.update_device_id(auth.state.device_id)
         return auth
 
@@ -257,6 +257,21 @@ class VoyoAdapter:
         return build_job("voyo", "video", params)
 
     @staticmethod
+    def make_download_batch_cmd(video_ids: List[int], resolution: str = "1080p") -> List[str]:
+        ids = [int(video_id) for video_id in video_ids if str(video_id).strip()]
+        if not ids:
+            raise ValueError("Lista Voyo epizoda je prazna.")
+        return build_job(
+            "voyo",
+            "videos",
+            {
+                "video_ids": ids,
+                "resolution": resolution,
+                "output_dir": config.get_output_dir(),
+            },
+        )
+
+    @staticmethod
     def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:
         """Download a single Voyo video."""
         try:
@@ -271,7 +286,7 @@ class VoyoAdapter:
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id
-            auth.login(email, password)
+            auth.authenticate(email, password)
             vcfg.update_device_id(auth.state.device_id)
             
             out_dir = output_dir or config.get_output_dir()
@@ -297,7 +312,7 @@ class VoyoAdapter:
             if device_id:
                 auth.state.device_id = device_id
                 auth.session.headers['device-id'] = device_id
-            auth.login(email, password)
+            auth.authenticate(email, password)
             vcfg.update_device_id(auth.state.device_id)
             
             out_dir = output_dir or config.get_output_dir()

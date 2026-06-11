@@ -1,9 +1,12 @@
 from typing import Dict, Optional, Any
 
-from fastapi import APIRouter, HTTPException, Response
+import hmac
+
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from backend.queue_manager import queue_manager
+from backend.server_settings import ensure_bridge_token, get_api_key
 from ._schemas import SnifferPayload
 
 router = APIRouter()
@@ -17,10 +20,31 @@ class BridgeSessionRequest(BaseModel):
     reason: Optional[str] = None
 
 
+def _authorize_bridge_request(request: Request) -> None:
+    expected = ensure_bridge_token()
+    provided = (
+        request.headers.get("x-vds-bridge-token", "")
+        or request.query_params.get("bridge_token", "")
+    ).strip()
+    if provided and hmac.compare_digest(provided, expected):
+        return
+
+    api_key = get_api_key()
+    provided_api_key = request.headers.get("x-api-key", "").strip()
+    if api_key and provided_api_key and hmac.compare_digest(provided_api_key, api_key):
+        return
+
+    raise HTTPException(
+        status_code=401,
+        detail="Neautorizovan bridge zahtev. Instalirajte svež userscript iz podešavanja.",
+    )
+
+
 @router.post("/session")
-async def bridge_session(req: BridgeSessionRequest):
+async def bridge_session(req: BridgeSessionRequest, request: Request):
     from backend.bridge import import_session_payload, imported_service_names
 
+    _authorize_bridge_request(request)
     try:
         result = import_session_payload(
             service=req.service,
@@ -42,9 +66,10 @@ async def bridge_session(req: BridgeSessionRequest):
 
 
 @router.post("/sniffer")
-async def bridge_sniffer(data: SnifferPayload):
+async def bridge_sniffer(data: SnifferPayload, request: Request):
     from backend.sniffer_service import process_sniffer_event
 
+    _authorize_bridge_request(request)
     return await process_sniffer_event(
         queue_manager,
         service=data.service,

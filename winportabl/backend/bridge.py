@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.config import PROJECT_ROOT
+from backend.server_settings import ensure_bridge_token
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,11 @@ def load_userscript() -> str:
     if not USERSCRIPT_PATH.exists():
         raise FileNotFoundError(f"Userscript not found: {USERSCRIPT_PATH}")
     text = USERSCRIPT_PATH.read_text(encoding="utf-8")
-    return text.replace("__BACKEND_URL__", get_backend_url())
+    return (
+        text
+        .replace("__BACKEND_URL__", get_backend_url())
+        .replace("__BRIDGE_TOKEN__", ensure_bridge_token())
+    )
 
 
 def import_session_payload(

@@ -74,6 +74,7 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
           const data = await res.json();
           showToast(`${data.queued || ids.length} epizoda dodato u red!`);
           setVoyoTarget("");
+          setVoyoEpisodesRange("");
           setVoyoSeriesData(null);
         } else {
           const msg = await parseApiError(res, "Greška pri slanju zahteva");
@@ -86,12 +87,14 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
           body: JSON.stringify({
             target: voyoTarget.trim(),
             mode: voyoMode,
+            episodes: voyoMode === "series" ? voyoEpisodesRange.trim() : "",
             resolution: voyoRes,
           }),
         });
         if (res.ok) {
           showToast("Preuzimanje dodato u red!");
           setVoyoTarget("");
+          setVoyoEpisodesRange("");
           setVoyoSeriesData(null);
         } else {
           const msg = await parseApiError(res, "Greška pri slanju zahteva");
@@ -110,6 +113,7 @@ export function useVoyo({ showToast }: UseVoyoOptions) {
     voyoSeriesData,
     voyoSubmitting,
     voyoTarget,
+    voyoEpisodesRange,
     selectedVoyoEpisodes,
   ]);
 

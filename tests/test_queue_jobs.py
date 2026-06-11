@@ -66,7 +66,6 @@ def test_cancelled_download_does_not_retry():
 
 
 def test_voyo_authenticate_uses_stored_token():
-    from unittest.mock import MagicMock
     from backend.core.services.voyo.auth import VoyoAuth
 
     auth = VoyoAuth()
@@ -74,8 +73,96 @@ def test_voyo_authenticate_uses_stored_token():
         VoyoAuth, "restore_session_token", return_value=True
     ) as restore_mock:
         result = auth.authenticate("user@example.com", "secret")
-        restore_mock.assert_called_once_with("jwt-token")
+        restore_mock.assert_called_once_with("jwt-token", validate=False)
         assert result["token"] == auth.state.token
+
+
+def test_voyo_login_persists_device_scoped_token():
+    from backend.core.services.voyo.auth import VoyoAuth
+
+    auth = VoyoAuth()
+    with patch.object(
+        VoyoAuth,
+        "_gql",
+        side_effect=[
+            {
+                "login": {
+                    "token": "master-token",
+                    "id": 1,
+                    "profileId": 2,
+                    "nickname": "Tester",
+                    "isSubscribed": True,
+                }
+            },
+            {"linkDeviceToUser": {"token": "device-token"}},
+        ],
+    ), patch("backend.credentials_store.set_secret") as set_secret:
+        auth.login("user@example.com", "secret")
+
+    set_secret.assert_called_once_with("voyo", "token", "device-token")
+    assert auth.state.token == "device-token"
+    assert auth.state.device_linked is True
+
+
+def test_voyo_batch_job_reuses_one_downloader():
+    from backend.jobs.voyo_job import run_voyo_job
+
+    class FakeDownloader:
+        def __init__(self):
+            self.calls = []
+
+        def download_video(self, video_id):
+            self.calls.append(video_id)
+            return True
+
+    fake = FakeDownloader()
+    logs: list[str] = []
+    with patch("backend.jobs.voyo_job._authenticated_downloader", return_value=fake) as build_mock:
+        ok = run_voyo_job("videos", {"video_ids": [11, 12, 13]}, logs.append)
+
+    assert ok is True
+    build_mock.assert_called_once()
+    assert fake.calls == [11, 12, 13]
+    assert any("3/3" in line for line in logs)
+
+
+def test_hrti_batch_job_reuses_one_downloader():
+    from backend.jobs.hrti_job import run_hrti_job
+
+    class FakeDownloader:
+        def __init__(self, *args, **kwargs):
+            self.login_calls = 0
+            self.calls = []
+
+        def login(self):
+            self.login_calls += 1
+
+        def download(self, ref_id, title=None):
+            self.calls.append((ref_id, title))
+            return True
+
+    fake = FakeDownloader()
+    logs: list[str] = []
+    with patch("backend.jobs.hrti_job._device_path", return_value=""), patch(
+        "backend.jobs.hrti_job.HRTIDownloader",
+        return_value=fake,
+    ) as build_mock:
+        ok = run_hrti_job(
+            "downloads",
+            {
+                "items": [
+                    {"ref_id": "ep-1", "title": "Ep 1"},
+                    {"ref_id": "ep-2", "title": "Ep 2"},
+                ]
+            },
+            logs.append,
+        )
+
+    assert ok is True
+    build_mock.assert_called_once()
+    assert fake.login_calls == 1
+    assert fake.calls == [("ep-1", "Ep 1"), ("ep-2", "Ep 2")]
+    assert any("2/2" in line for line in logs)
 
 
 @pytest.mark.integration

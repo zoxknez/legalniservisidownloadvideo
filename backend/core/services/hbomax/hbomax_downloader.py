@@ -47,6 +47,12 @@ from urllib.parse import urlparse
 import requests
 import xmltodict
 
+from backend.utils.cancellable_subprocess import (
+    current_cancel_event,
+    raise_if_cancelled,
+    run as run_subprocess,
+)
+
 from .hbomax_auth import HBOMaxAuth, load_token, save_token
 
 try:
@@ -510,9 +516,11 @@ def _download_segments(
     total = len(urls)
     data_map: Dict[int, bytes] = {}
     sess = _get_seg_session()
+    cancel_event = current_cancel_event()
 
     def _fetch(idx: int, url: str) -> Tuple[int, bytes]:
         for attempt in range(3):
+            raise_if_cancelled(cancel_event)
             try:
                 r = sess.get(url, timeout=30)
                 r.raise_for_status()
@@ -521,11 +529,13 @@ def _download_segments(
                 if attempt == 2:
                     raise
                 time.sleep(1.5 ** attempt)
+        raise_if_cancelled(cancel_event)
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {ex.submit(_fetch, i, url): i for i, url in enumerate(urls)}
         done = 0
         for fut in as_completed(futures):
+            raise_if_cancelled(cancel_event)
             idx, data = fut.result()
             data_map[idx] = data
             done += 1
@@ -534,17 +544,22 @@ def _download_segments(
 
     with out_path.open("wb") as f:
         for i in sorted(data_map):
+            raise_if_cancelled(cancel_event)
             f.write(data_map[i])
 
 
 def _download_with_ytdlp(url: str, out_path: Path, headers: Dict[str, str]) -> None:
     """Download a single stream using yt-dlp (for BaseURL style streams)."""
     from yt_dlp import YoutubeDL
+    def _progress(_data):
+        raise_if_cancelled()
+
     ydl_opts = {
         "outtmpl":  str(out_path),
         "http_headers": headers,
         "quiet":    True,
         "noprogress": False,
+        "progress_hooks": [_progress],
     }
     with YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
@@ -623,7 +638,7 @@ def _decrypt_file(
     for k in keys:
         cmd += ["--key", f"{k['kid']}:{k['key']}"]
     cmd += [str(enc_path), str(dec_path)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_subprocess(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"mp4decrypt greška:\n{result.stderr}")
 
@@ -659,7 +674,7 @@ def _mux_mkv(
 
     cmd.append("--no-global-tags")
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_subprocess(cmd, capture_output=True, text=True)
     if result.returncode not in (0, 1):  # mkvmerge returns 1 for warnings
         raise RuntimeError(f"mkvmerge greška:\n{result.stderr}")
 

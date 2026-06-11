@@ -1,8 +1,13 @@
 """Tests for HRTi adapter auth status."""
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
+import pytest
+
+from backend.core.services.hrti.hrti_auth import HRTIAuth
+from backend.core.services.hrti.hrti_downloader import HRTIDownloader
 from backend.services.hrti_adapter import HrtiAdapter
 
 
@@ -39,7 +44,6 @@ def test_hrti_auth_true_when_keyring_has_password():
 
 
 def test_hrti_register_device_retry_on_already_used(tmp_path):
-    from backend.core.services.hrti.hrti_auth import HRTIAuth
     from unittest.mock import MagicMock
 
     auth = HRTIAuth(config_path=str(tmp_path / "config.json"))
@@ -67,4 +71,55 @@ def test_hrti_register_device_retry_on_already_used(tmp_path):
         # Verify the device ID was changed (since it was initial-device-id before)
         assert auth.state.device_id != "initial-device-id"
         assert auth.state.aviion_ref_id == "mock-ref-id"
+
+
+def test_hrti_config_does_not_persist_session_secrets(tmp_path):
+    config_path = tmp_path / "config.json"
+    auth = HRTIAuth(config_path=str(config_path))
+    auth.state.device_id = "device-123"
+    auth.state.aviion_ref_id = "aviion-ref-123"
+    auth.state.token = "session-token"
+    auth.state.customer_id = "customer-123"
+
+    auth._save_config()
+
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    assert data == {
+        "device_id": "device-123",
+        "aviion_ref_id": "aviion-ref-123",
+    }
+
+
+def test_hrti_loads_saved_aviion_reference(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"device_id": "device-123", "aviion_ref_id": "aviion-ref-123"}),
+        encoding="utf-8",
+    )
+
+    auth = HRTIAuth(config_path=str(config_path))
+
+    assert auth.state.device_id == "device-123"
+    assert auth.state.aviion_ref_id == "aviion-ref-123"
+
+
+def test_hrti_sanitize_filename_is_ascii_tool_safe():
+    assert HRTIDownloader.sanitize_filename("Život čudnovat: Šuma? 01") == "Zivot.cudnovat.Suma.01"
+    assert HRTIDownloader.sanitize_filename(":/?") == "hrti_video"
+
+
+def test_hrti_resolve_reference_id_accepts_direct_ids_and_urls():
+    downloader = object.__new__(HRTIDownloader)
+    ref_id = "A44A55BA-4E7D-4"
+    uuid_ref = "9a7bb881-0b1b-bc57-ab38-07b93d293a56"
+
+    assert downloader.resolve_reference_id(f" {ref_id} ") == ref_id
+    assert downloader.resolve_reference_id(f"https://hrti.hrt.hr/video/vod/{uuid_ref}/slatka-simona") == uuid_ref
+
+
+def test_hrti_resolve_reference_id_rejects_empty_input():
+    downloader = object.__new__(HRTIDownloader)
+
+    with pytest.raises(ValueError, match="Reference ID"):
+        downloader.resolve_reference_id(" ")
 
