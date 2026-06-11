@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -233,15 +234,23 @@ def resolve_variant_url(
 def parse_m3u8(playlist_content: str, playlist_url: str) -> Tuple[List[str], Optional[Dict[str, Any]]]:
     """Parse HLS m3u8 playlist and extract segment URLs and decryption key info."""
     lines = playlist_content.splitlines()
-    segment_urls = []
-    key_info = None
+    segment_urls: List[str] = []
+    segment_keys: List[Optional[Dict[str, Any]]] = []
+    current_key: Optional[Dict[str, Any]] = None
+    media_sequence = 0
+    segment_index = 0
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
-        if line.startswith("#EXT-X-KEY"):
+
+        if line.startswith("#EXT-X-MEDIA-SEQUENCE"):
+            try:
+                media_sequence = int(line.split(":", 1)[1].strip())
+            except (IndexError, ValueError):
+                media_sequence = 0
+        elif line.startswith("#EXT-X-KEY"):
             parts = line.split(":", 1)[1]
             key_attrs = {}
             for part in re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', parts):
@@ -249,14 +258,36 @@ def parse_m3u8(playlist_content: str, playlist_url: str) -> Tuple[List[str], Opt
                     k, v = part.split("=", 1)
                     key_attrs[k.strip()] = v.strip().replace('"', '')
             
-            if key_attrs.get("METHOD") == "AES-128":
-                key_info = {
+            method = key_attrs.get("METHOD")
+            if method == "AES-128" and key_attrs.get("URI"):
+                current_key = {
                     "uri": urllib.parse.urljoin(playlist_url, key_attrs["URI"]),
                     "iv": key_attrs.get("IV")
                 }
+            elif method == "NONE":
+                current_key = None
         elif not line.startswith("#"):
             segment_urls.append(urllib.parse.urljoin(playlist_url, line))
-            
+            if current_key:
+                segment_keys.append({
+                    **current_key,
+                    "sequence": media_sequence + segment_index,
+                })
+            else:
+                segment_keys.append(None)
+            segment_index += 1
+
+    keyed_segments = [k for k in segment_keys if k]
+    key_info: Optional[Dict[str, Any]] = None
+    if keyed_segments:
+        first_key = keyed_segments[0]
+        key_info = {
+            "uri": first_key["uri"],
+            "iv": first_key.get("iv"),
+            "media_sequence": media_sequence,
+            "segment_keys": segment_keys,
+        }
+
     return segment_urls, key_info
 
 def decrypt_segment(encrypted_data: bytes, key: bytes, sequence_number: int, key_iv: str = None) -> bytes:
@@ -316,19 +347,22 @@ async def download_native_async(
             
         logger.info(f"HLS Variant parsed: {len(segments)} segments detected.")
         
-        # 4. Fetch AES key
-        key_bytes = None
+        # 4. Fetch AES keys
+        key_cache: Dict[str, bytes] = {}
         if key_info:
-            logger.info(f"Stream is AES-128 encrypted. Fetching key from: {key_info['uri']}")
-            async with session.get(key_info["uri"], headers=headers) as resp:
-                if resp.status == 200:
-                    key_bytes = await resp.read()
-                else:
-                    logger.error(f"Failed to fetch AES-128 decryption key: HTTP {resp.status}")
-                    return None
+            segment_keys = key_info.get("segment_keys") or []
+            key_uris = sorted({k["uri"] for k in segment_keys if k and k.get("uri")})
+            logger.info(f"Stream is AES-128 encrypted. Fetching {len(key_uris)} key(s).")
+            for key_uri in key_uris:
+                async with session.get(key_uri, headers=headers) as resp:
+                    if resp.status == 200:
+                        key_cache[key_uri] = await resp.read()
+                    else:
+                        logger.error(f"Failed to fetch AES-128 decryption key: HTTP {resp.status}")
+                        return None
                     
         # 5. Prepare temp segments folder
-        temp_dir = Path(temp_stem).parent / f"hls_temp_{int(time.time())}"
+        temp_dir = Path(temp_stem).parent / f"hls_temp_{uuid.uuid4().hex}"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
         dest_paths = [temp_dir / f"seg_{i:05d}.ts" for i in range(len(segments))]
@@ -379,8 +413,24 @@ async def download_native_async(
                 with open(path, "rb") as seg_f:
                     data = seg_f.read()
                     
-                if key_bytes:
-                    decrypted_data = decrypt_segment(data, key_bytes, i, key_info.get("iv"))
+                segment_key = None
+                if key_info:
+                    segment_keys = key_info.get("segment_keys") or []
+                    if i < len(segment_keys):
+                        segment_key = segment_keys[i]
+
+                if segment_key:
+                    key_bytes = key_cache.get(segment_key["uri"])
+                    if not key_bytes:
+                        logger.error(f"Missing AES-128 decryption key for segment {i}")
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        return None
+                    decrypted_data = decrypt_segment(
+                        data,
+                        key_bytes,
+                        int(segment_key.get("sequence", i)),
+                        segment_key.get("iv"),
+                    )
                     out_f.write(decrypted_data)
                 else:
                     out_f.write(data)
@@ -401,9 +451,12 @@ def download_with_ytdlp(
     """
     import asyncio
     try:
-        return asyncio.run(
+        native_result = asyncio.run(
             download_native_async(m3u8_url, temp_stem, auth, title, max_height=max_height)
         )
+        if native_result:
+            return native_result
+        logger.warning("Native async engine did not produce output. Falling back to standard yt-dlp...")
     except Exception as e:
         logger.error(f"Native async engine failed: {e}. Falling back to standard yt-dlp...")
 
@@ -531,6 +584,25 @@ def _parse_episode_range(spec: str, total: int) -> Tuple[int, int]:
     return max(0, start), min(total, end)
 
 
+def _parse_episode_selection(spec: str, total: int) -> List[int]:
+    """Return 0-based episode indices from specs like '1-3,5'."""
+    spec = spec.strip()
+    if not spec:
+        return list(range(total))
+
+    selected: List[int] = []
+    seen = set()
+    for part in (p.strip() for p in spec.split(',')):
+        if not part:
+            continue
+        start, end = _parse_episode_range(part, total)
+        for idx in range(start, end):
+            if 0 <= idx < total and idx not in seen:
+                seen.add(idx)
+                selected.append(idx)
+    return selected
+
+
 # ── Main downloader ───────────────────────────────────────────────────────────
 
 class VoyoDownloader:
@@ -656,11 +728,13 @@ class VoyoDownloader:
         if not items:
             return 0, 0
 
-        start, end = 0, len(items)
-        if episode_range:
-            start, end = _parse_episode_range(episode_range, len(items))
+        try:
+            selected_indices = _parse_episode_selection(episode_range, len(items))
+        except ValueError as e:
+            logger.error(f'Invalid episode range "{episode_range}": {e}')
+            return 0, len(items)
 
-        selected = items[start:end]
+        selected = [items[i] for i in selected_indices]
         total    = len(selected)
         logger.info(f'Downloading {total} episode(s) from "{series_title}"')
 

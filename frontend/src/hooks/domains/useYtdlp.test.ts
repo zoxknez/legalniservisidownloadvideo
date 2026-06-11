@@ -90,5 +90,11 @@ describe("useYtdlp", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
+
+    const downloadCall = vi.mocked(apiFetch).mock.calls.find(
+      ([url]) => url === "/api/ytdlp/download",
+    );
+    const body = JSON.parse(String(downloadCall?.[1]?.body ?? "{}"));
+    expect(body.sponsorblock_mode).toBe("disabled");
   });
 });

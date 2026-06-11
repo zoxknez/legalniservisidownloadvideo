@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -129,9 +128,9 @@ async def voyo_download(req: VoyoDownloadRequest):
 
     try:
         if req.mode == "video":
-            m = re.search(r"(\d+)", req.target.strip())
-            if m:
-                VoyoAdapter.assert_video_streamable(int(m.group(1)))
+            video_id = VoyoAdapter.parse_target_id(req.target.strip())
+            if video_id:
+                VoyoAdapter.assert_video_streamable(video_id)
         if req.video_ids:
             VoyoAdapter.assert_videos_streamable(req.video_ids)
     except ValueError as e:
@@ -154,9 +153,9 @@ async def voyo_download(req: VoyoDownloadRequest):
     )
     if req.mode == "video":
         vid_title = None
-        m = re.search(r"(\d+)", req.target.strip())
-        if m:
-            info = VoyoAdapter.get_video_info(int(m.group(1)))
+        video_id = VoyoAdapter.parse_target_id(req.target.strip())
+        if video_id:
+            info = VoyoAdapter.get_video_info(video_id)
             if info.get("success"):
                 vid_title = info.get("title")
         title = f"Voyo: {vid_title or req.target.strip()}"

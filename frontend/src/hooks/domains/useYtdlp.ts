@@ -27,7 +27,7 @@ export function useYtdlp({ showToast, activeTab }: UseYtdlpOptions) {
   const [ytdlpEmbedMetadata, setYtdlpEmbedMetadata] = useState(false);
   const [ytdlpLimitRate, setYtdlpLimitRate] = useState("");
   const [ytdlpHardsub, setYtdlpHardsub] = useState(false);
-  const [ytdlpSponsorblockMode, setYtdlpSponsorblockMode] = useState("remove");
+  const [ytdlpSponsorblockMode, setYtdlpSponsorblockMode] = useState("disabled");
   const [ytdlpSplitChapters, setYtdlpSplitChapters] = useState(false);
   const [ytdlpDownloadPlaylist, setYtdlpDownloadPlaylist] = useState(false);
   const [ytdlpPlaylistItems, setYtdlpPlaylistItems] = useState("");
@@ -104,7 +104,7 @@ export function useYtdlp({ showToast, activeTab }: UseYtdlpOptions) {
     setYtdlpEmbedThumbnail(false);
     setYtdlpEmbedMetadata(false);
     setYtdlpLimitRate("");
-    setYtdlpSponsorblockMode("remove");
+    setYtdlpSponsorblockMode("disabled");
     setYtdlpSplitChapters(false);
     setYtdlpDownloadPlaylist(false);
     setYtdlpPlaylistItems("");

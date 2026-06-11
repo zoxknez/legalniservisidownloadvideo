@@ -52,7 +52,7 @@ def run_voyo_job(
                 ok_count, total = downloader.download_series(int(target), episodes)
             _check_cancelled(cancel_event)
             log_fn(f"INFO Voyo serija završena: {ok_count}/{total} epizoda")
-            return ok_count > 0
+            return total > 0 and ok_count == total
 
         if action == "videos":
             raw_ids = params.get("video_ids") or []
@@ -73,7 +73,7 @@ def run_voyo_job(
                     log_fn(f"ERROR Voyo epizoda nije uspela: video {video_id}")
             _check_cancelled(cancel_event)
             log_fn(f"INFO Voyo batch zavrsen: {success}/{total} epizoda")
-            return success > 0
+            return total > 0 and success == total
 
         if action == "url":
             _check_cancelled(cancel_event)

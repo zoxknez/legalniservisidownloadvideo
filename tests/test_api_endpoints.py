@@ -108,6 +108,34 @@ def test_voyo_download_rejects_unstreamable_video(client):
     assert "Widevine" in r.json()["detail"]
 
 
+def test_voyo_download_precheck_uses_real_url_video_id(client):
+    with patch(
+        "backend.routes.voyo.VoyoAdapter.get_auth_status",
+        return_value={"authenticated": True},
+    ), patch(
+        "backend.routes.voyo.VoyoAdapter.assert_video_streamable",
+    ) as assert_streamable, patch(
+        "backend.routes.voyo.VoyoAdapter.get_video_info",
+        return_value={"success": True, "title": "Naslov"},
+    ), patch(
+        "backend.routes.voyo.queue_manager.add_download",
+        new_callable=AsyncMock,
+        return_value="task-url",
+    ):
+        r = client.post(
+            "/api/voyo/download",
+            headers={"X-API-Key": "test-secret-key"},
+            json={
+                "target": "https://voyo.rs/naslov-2024_50584.html",
+                "mode": "video",
+                "resolution": "1080p",
+            },
+        )
+
+    assert r.status_code == 200
+    assert_streamable.assert_called_once_with(50584)
+
+
 def test_hrti_selected_episodes_queue_as_single_batch(client):
     with patch(
         "backend.routes.hrti.HrtiAdapter.get_auth_status",

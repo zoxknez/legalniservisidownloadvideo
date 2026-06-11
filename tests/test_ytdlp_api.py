@@ -91,6 +91,8 @@ def test_ytdlp_download_default_options(client):
         assert "--embed-thumbnail" not in cmd
         assert "--embed-metadata" not in cmd
         assert "--limit-rate" not in cmd
+        assert "--sponsorblock-remove" not in cmd
+        assert "--sponsorblock-mark" not in cmd
 
 
 def test_ytdlp_download_hardsub_and_template(client):
@@ -221,4 +223,3 @@ def test_ytdlp_new_features(client):
         # Verify SponsorBlock flags are completely absent
         assert "--sponsorblock-remove" not in cmd
         assert "--sponsorblock-mark" not in cmd
-
