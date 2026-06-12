@@ -151,9 +151,15 @@ class HRTIBrowser:
         if not u or not p:
             u, p = self.auth.get_stored_credentials()
         if not u or not p:
-            raise RuntimeError(
-                "Niste prijavljeni na HRTi. Unesite kredencijale u Postavkama."
-            )
+            try:
+                self.auth.login()
+                self._logged_in = True
+                return
+            except Exception as exc:
+                raise RuntimeError(
+                    "Niste prijavljeni na HRTi. Unesite kredencijale u Postavkama "
+                    "ili uvezite sesiju sa token/customer_id podacima."
+                ) from exc
         self.auth.login(u, p)
         self._logged_in = True
 

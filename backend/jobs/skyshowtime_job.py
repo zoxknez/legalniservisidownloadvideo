@@ -1,6 +1,7 @@
 """In-process SkyShowtime download/login jobs."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import threading
@@ -29,14 +30,15 @@ def _build_downloader(params: Dict[str, Any]) -> SkyShowtimeDownloader:
     bins = config.check_binaries_status()
     vcodec = str(params.get("vcodec") or "H264").upper()
     quality = str(params.get("quality") or "SDR").upper()
+    output_dir = str(params.get("output_dir") or config.get_output_dir())
 
     audio_lang = params.get("audio_lang")
     if audio_lang is not None:
         audio_lang = str(audio_lang).strip() or None
 
     dl = SkyShowtimeDownloader(
-        output_dir=config.get_output_dir(),
-        temp_dir=str(Path(config.get_output_dir()) / "temp"),
+        output_dir=output_dir,
+        temp_dir=str(Path(output_dir) / "temp"),
         vcodec=vcodec,
         quality=quality,
         audio_lang=audio_lang,
@@ -62,10 +64,17 @@ def run_skyshowtime_job(
     with capture_job_output(log_fn, ["SkyShowtimeDownloader", "backend.core.services.skyshowtime", ""]):
         if action == "login":
             cookie_file = params.get("cookie_file")
+            cookies_json_file = params.get("cookies_json_file")
             cookies = params.get("cookies")
 
             auth = SkyShowtimeAuth()
             try:
+                if cookies_json_file and Path(cookies_json_file).exists():
+                    with open(cookies_json_file, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                    if not isinstance(loaded, dict):
+                        raise RuntimeError("Neispravan format pretrazivac kolacica.")
+                    cookies = loaded
                 if cookies and isinstance(cookies, dict):
                     log_fn("INFO Prijava započeta koristeći pretraživač kolačiće...")
                     auth.login_with_cookie_dict(cookies)
@@ -78,9 +87,11 @@ def run_skyshowtime_job(
                 log_fn("INFO SkyShowtime prijava završena — token je uspešno keširan.")
                 return True
             finally:
-                if cookie_file:
+                for secret_file in (cookie_file, cookies_json_file):
+                    if not secret_file:
+                        continue
                     try:
-                        Path(cookie_file).unlink(missing_ok=True)
+                        Path(secret_file).unlink(missing_ok=True)
                     except OSError:
                         pass
 
@@ -95,11 +106,21 @@ def run_skyshowtime_job(
             license_url = str(params.get("license_url", "")).strip()
             title = str(params.get("title") or "").strip()
             license_token = str(params.get("license_token") or "").strip()
+            license_token_file = str(params.get("license_token_file") or "").strip()
+            if not license_token and license_token_file and Path(license_token_file).exists():
+                license_token = Path(license_token_file).read_text(encoding="utf-8").strip()
             if not manifest or not license_url:
                 raise RuntimeError("manifest_url i license_url su obavezni.")
 
             _check_cancelled(cancel_event)
-            dl.download_direct(manifest, license_url, title, license_token=license_token)
+            try:
+                dl.download_direct(manifest, license_url, title, license_token=license_token)
+            finally:
+                if license_token_file:
+                    try:
+                        Path(license_token_file).unlink(missing_ok=True)
+                    except OSError:
+                        pass
             _check_cancelled(cancel_event)
             return True
 

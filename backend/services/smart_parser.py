@@ -149,7 +149,7 @@ class SmartParser:
             import yt_dlp
             from urllib.parse import urlparse
 
-            from backend.services.ytdlp_common import ytdlp_metadata_opts
+            from backend.services.ytdlp_common import auto_browser_cookie_probe_enabled, ytdlp_metadata_opts
 
             # Try 1: standard metadata options (uses ytdlp_cookies.txt if uploaded)
             opts = ytdlp_metadata_opts()
@@ -163,8 +163,8 @@ class SmartParser:
                 last_err = e
                 logger.warning("Standard yt-dlp metadata extraction failed, trying fallback options: %s", e)
 
-            # Try 2: If standard fails, try using browser cookies (chrome, edge, brave, firefox)
-            if not info:
+            # Try 2: Optional privacy-sensitive browser cookie probe.
+            if not info and auto_browser_cookie_probe_enabled():
                 for browser in ["chrome", "edge", "brave", "firefox"]:
                     try:
                         logger.info("Retrying metadata extraction with cookies from browser: %s", browser)

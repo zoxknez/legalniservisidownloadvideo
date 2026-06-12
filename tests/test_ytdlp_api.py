@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 def test_ytdlp_cookies_status(client):
     r = client.get("/api/ytdlp/cookies/status", headers={"X-API-Key": "test-secret-key"})
     assert r.status_code == 200
@@ -16,7 +18,7 @@ def test_ytdlp_download_with_valid_api_key_and_advanced_options(client):
     payload = {
         "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         "resolution": "720p",
-        "subs": "en,sr",
+        "subs": "en, sr",
         "audio_only": False,
         "use_aria2": True,
         "cookies_browser": "chrome",
@@ -163,6 +165,58 @@ def test_ytdlp_download_hardsub_requires_subs(client):
         json=payload,
     )
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("sponsorblock_mode", "wipe"),
+        ("cookies_browser", "chrome;bad"),
+        ("proxy", "file:///tmp/socket"),
+        ("limit_rate", "fast"),
+        ("playlist_items", "1; rm"),
+        ("subs", "en\nsr"),
+        ("extractor_args", "youtube:player_client=tv\nbad"),
+    ],
+)
+def test_ytdlp_download_rejects_invalid_advanced_options(client, field, value):
+    payload = {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", field: value}
+    r = client.post(
+        "/api/ytdlp/download",
+        headers={"X-API-Key": "test-secret-key"},
+        json=payload,
+    )
+    assert r.status_code == 400
+
+
+def test_ytdlp_upload_cookies_requires_netscape_format(client, tmp_path, monkeypatch):
+    cookie_path = tmp_path / "ytdlp_cookies.txt"
+    monkeypatch.setattr("backend.routes.ytdlp.get_ytdlp_cookies_path", lambda: cookie_path)
+
+    r = client.post(
+        "/api/ytdlp/cookies",
+        headers={"X-API-Key": "test-secret-key"},
+        files={"file": ("cookies.txt", b"not a netscape cookies file", "text/plain")},
+    )
+    assert r.status_code == 400
+    assert not cookie_path.exists()
+
+
+def test_ytdlp_upload_cookies_accepts_valid_netscape_file(client, tmp_path, monkeypatch):
+    cookie_path = tmp_path / "ytdlp_cookies.txt"
+    monkeypatch.setattr("backend.routes.ytdlp.get_ytdlp_cookies_path", lambda: cookie_path)
+    data = (
+        "# Netscape HTTP Cookie File\n"
+        ".youtube.com\tTRUE\t/\tFALSE\t2147483647\tSID\tsecret-token\n"
+    ).encode("utf-8")
+
+    r = client.post(
+        "/api/ytdlp/cookies",
+        headers={"X-API-Key": "test-secret-key"},
+        files={"file": ("cookies.txt", data, "text/plain")},
+    )
+    assert r.status_code == 200
+    assert cookie_path.read_bytes() == data
 
 
 def test_ytdlp_new_features(client):

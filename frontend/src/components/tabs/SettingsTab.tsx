@@ -383,6 +383,7 @@ export function SettingsTab() {
               value={ytdlpNameTemplate}
               onChange={(e) => setYtdlpNameTemplate(e.target.value)}
               placeholder="%(title)s.%(ext)s"
+              maxLength={240}
               className="input-premium font-mono text-xs w-full"
               style={cssVars({"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"})}
             />

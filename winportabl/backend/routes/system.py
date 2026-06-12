@@ -1,13 +1,13 @@
 import os
 import asyncio
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Optional, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.config import config
+from backend.config import MAX_CONCURRENT_DOWNLOADS, MIN_CONCURRENT_DOWNLOADS, config
 from backend.queue_manager import queue_manager
 from backend.server_settings import get_api_key
 from backend.services.voyo_adapter import VoyoAdapter
@@ -147,6 +147,50 @@ class ConfigUpdate(BaseModel):
 
 
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
+_VALID_OUTPUT_FORMATS = frozenset({"mp4", "mkv"})
+_MAX_YTDLP_TEMPLATE_LEN = 240
+
+
+def _validate_ytdlp_name_template(template: str) -> str:
+    tmpl = (template or "").strip()
+    if not tmpl:
+        raise HTTPException(status_code=400, detail="yt-dlp šablon imena fajla ne sme biti prazan.")
+    if len(tmpl) > _MAX_YTDLP_TEMPLATE_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"yt-dlp šablon imena fajla je predugačak (maksimum {_MAX_YTDLP_TEMPLATE_LEN} karaktera).",
+        )
+    if any(ord(ch) < 32 for ch in tmpl):
+        raise HTTPException(status_code=400, detail="yt-dlp šablon ne sme sadržati kontrolne karaktere.")
+    if "%(ext)s" not in tmpl:
+        raise HTTPException(status_code=400, detail="yt-dlp šablon mora sadržati %(ext)s ekstenziju.")
+    if PurePosixPath(tmpl).is_absolute() or PureWindowsPath(tmpl).is_absolute() or PureWindowsPath(tmpl).drive:
+        raise HTTPException(status_code=400, detail="yt-dlp šablon mora biti relativan prema output folderu.")
+    if tmpl.startswith(("~", "\\\\")):
+        raise HTTPException(status_code=400, detail="yt-dlp šablon ne sme počinjati sa ~ ili UNC putanjom.")
+
+    for part in tmpl.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise HTTPException(status_code=400, detail="yt-dlp šablon ne sme sadržati '..' segmente.")
+    return tmpl
+
+
+def _validate_max_concurrent_downloads(value: int) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Maksimalan broj preuzimanja mora biti ceo broj.") from exc
+    if limit < MIN_CONCURRENT_DOWNLOADS or limit > MAX_CONCURRENT_DOWNLOADS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Maksimalan broj istovremenih preuzimanja mora biti između "
+                f"{MIN_CONCURRENT_DOWNLOADS} i {MAX_CONCURRENT_DOWNLOADS}."
+            ),
+        )
+    return limit
 
 
 @router.post("/api/config")
@@ -169,13 +213,15 @@ def update_config(data: ConfigUpdate):
             )
         config.set_transcode_mode(mode)
     if data.ytdlp_name_template is not None:
-        config.set_ytdlp_name_template(data.ytdlp_name_template)
+        config.set_ytdlp_name_template(_validate_ytdlp_name_template(data.ytdlp_name_template))
     if data.max_concurrent_downloads is not None:
-        config.set_max_concurrent_downloads(data.max_concurrent_downloads)
+        config.set_max_concurrent_downloads(_validate_max_concurrent_downloads(data.max_concurrent_downloads))
     wvd_updated = False
     if data.binaries:
         for name, path in data.binaries.items():
-            config.update_binary_path(name, path)
+            if name not in config.data.get("binaries", {}):
+                raise HTTPException(status_code=400, detail=f"Nepoznat binary ključ: {name}")
+            config.update_binary_path(name, (path or "").strip())
             if name == "device_wvd":
                 wvd_updated = True
         if wvd_updated:
@@ -191,7 +237,10 @@ def update_config(data: ConfigUpdate):
     if data.voyo_ignore_catalog_drm_hint is not None:
         config.set_voyo_ignore_catalog_drm_hint(data.voyo_ignore_catalog_drm_hint)
     if data.output_format is not None:
-        config.set_output_format(data.output_format)
+        fmt = (data.output_format or "").strip().lower()
+        if fmt not in _VALID_OUTPUT_FORMATS:
+            raise HTTPException(status_code=400, detail="Format spremanja mora biti mp4 ili mkv.")
+        config.set_output_format(fmt)
     return {
         "success": True,
         "output_dir": config.get_output_dir(),
@@ -396,7 +445,12 @@ async def update_ytdlp():
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=300)
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            await proc.communicate()
+            raise HTTPException(status_code=504, detail="Ažuriranje yt-dlp-a je isteklo (timeout 300s).") from exc
         output = stdout.decode("utf-8", errors="ignore")
         success = (proc.returncode == 0)
 
@@ -412,6 +466,8 @@ async def update_ytdlp():
             "message": message,
             "output": output
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error during yt-dlp update: {e}")
         raise HTTPException(status_code=500, detail=f"Greška tokom ažuriranja: {str(e)}")

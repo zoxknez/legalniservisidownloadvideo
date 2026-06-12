@@ -14,6 +14,8 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 FALLBACK_CONFIG_DIR = PROJECT_ROOT / ".videodownload"
 FALLBACK_CONFIG_FILE = FALLBACK_CONFIG_DIR / "config.json"
 DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / "output")
+MIN_CONCURRENT_DOWNLOADS = 1
+MAX_CONCURRENT_DOWNLOADS = 5
 
 DEFAULT_CONFIG = {
     "output_dir": DEFAULT_OUTPUT_DIR,
@@ -171,12 +173,19 @@ class AppConfig:
 
     def get_max_concurrent_downloads(self) -> int:
         try:
-            return int(self.data.get("max_concurrent_downloads", 2))
+            limit = int(self.data.get("max_concurrent_downloads", 2))
         except (ValueError, TypeError):
             return 2
+        return max(MIN_CONCURRENT_DOWNLOADS, min(MAX_CONCURRENT_DOWNLOADS, limit))
 
     def set_max_concurrent_downloads(self, limit: int):
-        self.data["max_concurrent_downloads"] = int(limit)
+        limit = int(limit)
+        if limit < MIN_CONCURRENT_DOWNLOADS or limit > MAX_CONCURRENT_DOWNLOADS:
+            raise ValueError(
+                f"max_concurrent_downloads mora biti između "
+                f"{MIN_CONCURRENT_DOWNLOADS} i {MAX_CONCURRENT_DOWNLOADS}."
+            )
+        self.data["max_concurrent_downloads"] = limit
         self.save()
 
     def get_voyo_ignore_catalog_drm_hint(self) -> bool:

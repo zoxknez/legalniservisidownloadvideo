@@ -170,3 +170,19 @@ def test_hrti_selected_episodes_queue_as_single_batch(client):
         {"ref_id": "ep-1", "title": "Ep 1"},
         {"ref_id": "ep-2", "title": "Ep 2"},
     ]
+
+
+def test_hrti_preview_failure_returns_http_error(client):
+    with patch(
+        "backend.routes.hrti.HrtiAdapter.get_auth_status",
+        return_value={"authenticated": True},
+    ), patch(
+        "backend.routes.hrti.HrtiAdapter.preview_ref",
+        return_value={"success": False, "error": "Nije pronadjeno"},
+    ):
+        r = client.get(
+            "/api/hrti/preview?ref_id=missing-ref",
+            headers={"X-API-Key": "test-secret-key"},
+        )
+
+    assert r.status_code == 404

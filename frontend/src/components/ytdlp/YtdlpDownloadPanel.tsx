@@ -185,6 +185,7 @@ export function YtdlpDownloadPanel({
                           value={ytdlpLimitRate}
                           onChange={e => setYtdlpLimitRate(e.target.value)}
                           placeholder="npr. 50K ili 5M"
+                          maxLength={20}
                           className="ytdlp-advanced-input"
                         />
                         <span className="ytdlp-option-help">Ograničava protok mreže (ostavi prazno za max brzinu).</span>
@@ -198,6 +199,7 @@ export function YtdlpDownloadPanel({
                           value={ytdlpProxy}
                           onChange={e => setYtdlpProxy(e.target.value)}
                           placeholder="npr. http://127.0.0.1:8080"
+                          maxLength={300}
                           className="ytdlp-advanced-input"
                         />
                         <span className="ytdlp-option-help">Rutira saobraćaj kroz proksi server (http/socks5).</span>
@@ -213,6 +215,7 @@ export function YtdlpDownloadPanel({
                             onChange={e => setYtdlpPlaylistItems(e.target.value)}
                             placeholder={ytdlpDownloadPlaylist ? "npr. 1-5, 10" : "Prvo uključi plejliste"}
                             disabled={!ytdlpDownloadPlaylist}
+                            maxLength={100}
                             className="ytdlp-advanced-input"
                             style={{ cursor: ytdlpDownloadPlaylist ? "text" : "not-allowed" }}
                           />
@@ -226,6 +229,7 @@ export function YtdlpDownloadPanel({
                           type="text"
                           value={ytdlpFormatSpec}
                           onChange={e => setYtdlpFormatSpec(e.target.value)}
+                          maxLength={512}
                           placeholder="npr. bestvideo+bestaudio/best — prazno = automatski"
                           className="ytdlp-advanced-input"
                         />
@@ -238,6 +242,7 @@ export function YtdlpDownloadPanel({
                           type="text"
                           value={ytdlpExtractorArgs}
                           onChange={e => setYtdlpExtractorArgs(e.target.value)}
+                          maxLength={512}
                           placeholder="npr. youtube:player_client=tv"
                           className="ytdlp-advanced-input"
                         />
@@ -436,6 +441,7 @@ export function YtdlpDownloadPanel({
                               type="text"
                               value={subs}
                               onChange={e => setSubs(e.target.value)}
+                              maxLength={120}
                               placeholder="npr. en,sr,hr ili all"
                               className="ytdlp-advanced-input w-full"
                             />

@@ -1,6 +1,6 @@
 [project]
 name = "videodownloadservisi"
-version = "2.7.1"
+version = "2.7.2"
 description = "Multi-service video downloader with FastAPI backend and React UI"
 readme = "README.md"
 requires-python = ">=3.11"

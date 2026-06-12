@@ -55,6 +55,32 @@ def test_list_series_episodes_fills_missing_numbers():
     assert data["items"][1]["episode"] == 7
 
 
+def test_ensure_login_restores_session_token_without_password():
+    class FakeAuth:
+        def __init__(self):
+            self.login_calls = 0
+            self.authenticated = False
+
+        def is_authenticated(self):
+            return self.authenticated
+
+        def get_stored_credentials(self):
+            return None, None
+
+        def login(self, *args):
+            assert args == ()
+            self.login_calls += 1
+            self.authenticated = True
+
+    auth = FakeAuth()
+    browser = HRTIBrowser(auth=auth)
+
+    browser.ensure_login()
+
+    assert browser._logged_in is True
+    assert auth.login_calls == 1
+
+
 def test_catalogue_scan_search_reads_multiple_pages():
     class FakeAuth:
         def get_catalogue(self, category_id: str, page: int, page_size: int):

@@ -17,12 +17,21 @@ class HrtiAdapter:
     _items_cached_dict: Dict[tuple, tuple] = {}
     _search_cached_dict: Dict[str, tuple] = {}
     _series_cached_dict: Dict[str, tuple] = {}
+    _MAX_CACHE_ENTRIES = 256
 
     @classmethod
     def _browser_client(cls) -> HRTIBrowser:
         if cls._browser is None:
             cls._browser = HRTIBrowser()
         return cls._browser
+
+    @classmethod
+    def _remember(cls, cache: Dict[Any, tuple], key: Any, value: Any, timestamp: float) -> None:
+        cache[key] = (timestamp, value)
+        if len(cache) <= cls._MAX_CACHE_ENTRIES:
+            return
+        oldest = min(cache, key=lambda k: cache[k][0])
+        cache.pop(oldest, None)
 
     @staticmethod
     def get_auth_status() -> Dict[str, Any]:
@@ -96,7 +105,7 @@ class HrtiAdapter:
             return categories
         except Exception as exc:
             logger.error("HRTi list_categories failed: %s", exc)
-            return []
+            raise
 
     @classmethod
     def preview_ref(cls, ref_id: str) -> Dict[str, Any]:
@@ -108,7 +117,7 @@ class HrtiAdapter:
                 return cached
         try:
             result = cls._browser_client().preview_ref(ref_id.strip())
-            cls._series_cached_dict[cache_key] = (now, result)
+            cls._remember(cls._series_cached_dict, cache_key, result, now)
             return result
         except Exception as exc:
             logger.error("HRTi preview_ref failed: %s", exc)
@@ -124,7 +133,7 @@ class HrtiAdapter:
                 return cached
         try:
             result = cls._browser_client().list_category_items(category, page=page)
-            cls._items_cached_dict[cache_key] = (now, result)
+            cls._remember(cls._items_cached_dict, cache_key, result, now)
             return result
         except Exception as exc:
             logger.error("HRTi get_category_items failed: %s", exc)
@@ -144,7 +153,7 @@ class HrtiAdapter:
                 return cached
         try:
             result = cls._browser_client().search_items(query)
-            cls._search_cached_dict[query] = (now, result)
+            cls._remember(cls._search_cached_dict, query, result, now)
             return result
         except Exception as exc:
             logger.error("HRTi search_items failed: %s", exc)
@@ -164,7 +173,7 @@ class HrtiAdapter:
                 return cached
         try:
             result = cls._browser_client().list_series_episodes(series_uuid)
-            cls._series_cached_dict[series_uuid] = (now, result)
+            cls._remember(cls._series_cached_dict, series_uuid, result, now)
             return result
         except Exception as exc:
             logger.error("HRTi get_series_episodes failed: %s", exc)
@@ -193,6 +202,8 @@ class HrtiAdapter:
 
     @staticmethod
     def make_download_batch_cmd(items: List[Dict[str, Any]], workers: int = 16) -> List[str]:
+        if len(items) > 500:
+            raise ValueError("Maksimalno 500 HRTi epizoda po batch poslu.")
         clean_items = []
         for item in items:
             ref_id = str(item.get("ref_id") or item.get("id") or "").strip()

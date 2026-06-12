@@ -302,6 +302,7 @@ class SkyShowtimeDownloader:
         if not results:
             raise RuntimeError("; ".join(errors) if errors else "Batch preuzimanje nije uspelo.")
         if errors:
+            raise RuntimeError("Batch preuzimanje delimicno neuspesno: " + "; ".join(errors))
             logger.warning("Delimično batch preuzimanje: %s", "; ".join(errors))
         return results
 
@@ -360,6 +361,7 @@ class SkyShowtimeDownloader:
             detail = "; ".join(errors) if errors else "nepoznata greška"
             raise RuntimeError(f"Nijedna epizoda nije preuzeta. {detail}")
         if errors:
+            raise RuntimeError("Serija delimicno neuspesno preuzeta: " + "; ".join(errors))
             logger.warning("Serija delimično preuzeta (%d/%d). Greške: %s",
                            len(results), len(episodes), "; ".join(errors))
         return results
@@ -562,7 +564,7 @@ class SkyShowtimeDownloader:
         keys = self._get_keys(pssh_list)
         if not keys:
             raise RuntimeError("Nema ključeva od servera licenci.")
-        logger.info(f"Widevine ključevi: {keys}")
+        logger.info("Dobijeno %d Widevine kljuca.", len(keys))
 
         # 4. Download fragments using yt-dlp native
         raise_if_cancelled()

@@ -18,6 +18,21 @@ from backend.config import config, PROJECT_ROOT
 logger = logging.getLogger(__name__)
 
 SENSITIVE_CLI_FLAGS = {"-p", "--password", "--pass", "--token", "--access-token", "--refresh-token"}
+SENSITIVE_INPROCESS_KEYS = {
+    "access_token",
+    "authorization",
+    "cookie",
+    "cookie_file",
+    "cookies",
+    "cookies_file",
+    "cookies_json_file",
+    "license_token",
+    "license_token_file",
+    "password",
+    "refresh_token",
+    "secret",
+    "token",
+}
 
 
 class DownloadStatus(str, Enum):
@@ -53,10 +68,7 @@ def redact_command(cmd: List[str]) -> str:
             import json
             payload = json.loads(cmd[1])
             params = payload.get("params") or {}
-            safe = dict(params)
-            for key in ("password", "token", "access_token"):
-                if key in safe:
-                    safe[key] = "***"
+            safe = _redact_inprocess_value(params)
             return f"@inprocess {payload.get('service')}:{payload.get('action')} {safe}"
         except Exception:
             return "@inprocess [job]"
@@ -84,10 +96,24 @@ def redact_command(cmd: List[str]) -> str:
     return " ".join(redacted)
 
 
+def _redact_inprocess_value(value: Any, key_name: str = "") -> Any:
+    key = key_name.lower()
+    if key in SENSITIVE_INPROCESS_KEYS or any(part in key for part in ("password", "token", "secret", "cookie")):
+        return "***"
+    if isinstance(value, dict):
+        return {k: _redact_inprocess_value(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_inprocess_value(v, key_name) for v in value]
+    return value
+
+
 def redact_log_line(line: str) -> str:
     """Scrub sensitive information such as JWTs, emails, and query-string tokens from logs."""
     if not line:
         return line
+
+    # 0. Redact Widevine content keys (KID:KEY, usually 32 hex chars each).
+    line = re.sub(r'\b[0-9a-fA-F]{32}:[0-9a-fA-F]{32}\b', '[CONTENT_KEY_REDACTED]', line)
 
     # 1. Redact JWT tokens (e.g. eyJhbGciOi...)
     line = re.sub(r'\bey[a-zA-Z0-9_-]+\.ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b', '[JWT_TOKEN_REDACTED]', line)
@@ -96,7 +122,15 @@ def redact_log_line(line: str) -> str:
     line = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', line)
 
     # 3. Redact query parameters or config assignments (e.g., token=xxx, pass=xxx)
-    line = re.sub(r'(?i)(token|password|pass|access_token|secure_streaming_token|s)=[^&\s\)]+', r'\1=***', line)
+    line = re.sub(
+        r'(?i)(token|password|pass|access_token|refresh_token|license_token|x-license-token|secure_streaming_token|s)=[^&\s\)]+',
+        r'\1=***',
+        line,
+    )
+
+    # 4. Redact auth headers if a provider logs request metadata.
+    line = re.sub(r'(?i)(authorization:\s*(?:bearer|client)?\s*)[^\s,;]+', r'\1***', line)
+    line = re.sub(r'(?i)(x-license-token:\s*)[^\s,;]+', r'\1***', line)
 
     return line
 

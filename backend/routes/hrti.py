@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path as ApiPath, Query
 from pydantic import BaseModel, Field
 
 from backend.queue_manager import queue_manager
@@ -10,6 +10,18 @@ from ._schemas import LoginRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+MAX_HRTI_REF_LEN = 512
+MAX_HRTI_TITLE_LEN = 240
+MAX_HRTI_BATCH_ITEMS = 500
+MAX_HRTI_QUERY_LEN = 120
+MAX_HRTI_CATEGORY_LEN = 128
+
+
+def _raise_if_failed(result, status_code: int = 503):
+    if isinstance(result, dict) and result.get("success") is False:
+        raise HTTPException(status_code=status_code, detail=result.get("error") or "HRTi zahtev nije uspeo.")
+    return result
 
 
 def _require_hrti_auth() -> None:
@@ -45,63 +57,76 @@ def hrti_categories():
 
 
 @router.get("/category-items")
-def hrti_category_items(category: str, page: int = 1):
+def hrti_category_items(
+    category: str = Query(..., min_length=1, max_length=MAX_HRTI_CATEGORY_LEN),
+    page: int = Query(1, ge=1, le=1000),
+):
     _require_hrti_auth()
     if not category.strip():
         raise HTTPException(status_code=400, detail="Kategorija je obavezna.")
     try:
-        return HrtiAdapter.get_category_items(category.strip(), page)
+        return _raise_if_failed(HrtiAdapter.get_category_items(category.strip(), page))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to fetch HRTi category items")
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/search")
-def hrti_search(query: str):
+def hrti_search(query: str = Query(..., min_length=1, max_length=MAX_HRTI_QUERY_LEN)):
     _require_hrti_auth()
     if not query.strip():
         raise HTTPException(status_code=400, detail="Upit za pretragu je obavezan.")
     try:
-        return HrtiAdapter.search_items(query.strip())
+        return _raise_if_failed(HrtiAdapter.search_items(query.strip()))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to search HRTi")
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/preview")
-def hrti_preview(ref_id: str):
+def hrti_preview(ref_id: str = Query(..., min_length=1, max_length=MAX_HRTI_REF_LEN)):
     _require_hrti_auth()
     if not ref_id.strip():
         raise HTTPException(status_code=400, detail="Reference ID je obavezan.")
     try:
-        return HrtiAdapter.preview_ref(ref_id.strip())
+        return _raise_if_failed(HrtiAdapter.preview_ref(ref_id.strip()), status_code=404)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to preview HRTi ref")
         raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/series/{series_uuid}")
-def hrti_series_episodes(series_uuid: str):
+def hrti_series_episodes(
+    series_uuid: str = ApiPath(..., min_length=1, max_length=MAX_HRTI_REF_LEN),
+):
     _require_hrti_auth()
     if not series_uuid.strip():
         raise HTTPException(status_code=400, detail="Series UUID je obavezan.")
     try:
-        return HrtiAdapter.get_series_episodes(series_uuid.strip())
+        return _raise_if_failed(HrtiAdapter.get_series_episodes(series_uuid.strip()), status_code=404)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to fetch HRTi series episodes")
         raise HTTPException(status_code=503, detail=str(e))
 
 
 class HrtiDownloadItem(BaseModel):
-    ref_id: str = Field(min_length=1)
-    title: str = ""
+    ref_id: str = Field(min_length=1, max_length=MAX_HRTI_REF_LEN)
+    title: str = Field(default="", max_length=MAX_HRTI_TITLE_LEN)
 
 
 class HrtiDownloadRequest(BaseModel):
-    ref_id: str = ""
-    title: str = ""
+    ref_id: str = Field(default="", max_length=MAX_HRTI_REF_LEN)
+    title: str = Field(default="", max_length=MAX_HRTI_TITLE_LEN)
     workers: int = Field(default=16, ge=1, le=64)
-    items: Optional[List[HrtiDownloadItem]] = None
+    items: Optional[List[HrtiDownloadItem]] = Field(default=None, max_length=MAX_HRTI_BATCH_ITEMS)
 
 
 @router.post("/download")

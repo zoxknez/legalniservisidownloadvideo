@@ -127,6 +127,62 @@ def test_adapter_episode_entry_id_format():
     assert ep["variant_id"] == "var1"
 
 
+def test_adapter_episode_entry_accepts_string_duration():
+    from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
+
+    ep = SkyShowtimeAdapter._episode_entry({
+        "attributes": {
+            "title": "Pilot",
+            "seasonNumber": 1,
+            "episodeNumber": 1,
+            "duration": "3600",
+            "formats": {"HD": {"contentId": "abc"}},
+        },
+    })
+
+    assert ep["length_mins"] == 60
+
+
+def test_login_cmd_stores_cookie_dict_in_temp_file():
+    from backend.jobs.inprocess import parse_job
+    from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
+
+    cmd = SkyShowtimeAdapter.make_login_cmd(cookies={"session": "secret-cookie"})
+    payload = parse_job(cmd)
+    params = payload["params"]
+    temp_path = params["cookies_json_file"]
+    try:
+        assert "cookies" not in params
+        assert "secret-cookie" not in cmd[1]
+        assert json.loads(open(temp_path, encoding="utf-8").read()) == {"session": "secret-cookie"}
+    finally:
+        import os
+
+        os.unlink(temp_path)
+
+
+def test_direct_cmd_stores_license_token_in_temp_file():
+    from backend.jobs.inprocess import parse_job
+    from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
+
+    cmd = SkyShowtimeAdapter.make_download_direct_cmd(
+        "https://cdn.example.test/manifest.mpd",
+        "https://lic.example.test/widevine",
+        license_token="secret-license-token",
+    )
+    payload = parse_job(cmd)
+    params = payload["params"]
+    temp_path = params["license_token_file"]
+    try:
+        assert "license_token" not in params
+        assert "secret-license-token" not in cmd[1]
+        assert open(temp_path, encoding="utf-8").read() == "secret-license-token"
+    finally:
+        import os
+
+        os.unlink(temp_path)
+
+
 def test_resolution_from_format_id():
     assert _resolution_from_format_id("hbo_video_2160") == "2160p"
     assert _resolution_from_format_id("video_4k") == "2160p"
@@ -163,6 +219,12 @@ def test_auth_state_territory_roundtrip():
     state = AuthState(user_token="tok", token_expiry="2099-01-01T00:00:00Z", territory="HR")
     restored = AuthState.from_dict(state.to_dict())
     assert restored.territory == "HR"
+
+
+def test_auth_state_rejects_invalid_expiry():
+    state = AuthState(user_token="tok", token_expiry="not-a-date")
+
+    assert state.is_valid() is False
 
 
 def test_auth_loads_territory_from_cache(tmp_path, monkeypatch):

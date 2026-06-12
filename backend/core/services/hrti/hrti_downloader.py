@@ -397,8 +397,7 @@ class HRTIDownloader:
 
         if not keys:
             raise Exception("No CONTENT keys returned from license server")
-        for k in keys:
-            logger.info(f"  Key: {k}")
+        logger.info("Received %d CONTENT key(s).", len(keys))
         return keys
 
     def download_fragments(self, mpd_url: str, output_name: str,

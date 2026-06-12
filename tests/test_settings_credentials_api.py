@@ -1,4 +1,5 @@
 """API tests for settings credential management endpoints."""
+import pytest
 
 
 def test_clear_credentials(client):
@@ -42,3 +43,49 @@ def test_save_api_key_to_config(client, monkeypatch):
     )
     assert r.status_code == 200
     assert r.json().get("api_key_configured") is True
+
+
+@pytest.mark.parametrize("limit", [0, -1, 6])
+def test_config_rejects_invalid_concurrency_limit(client, limit):
+    r = client.post(
+        "/api/config",
+        json={"max_concurrent_downloads": limit},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "../escape/%(title)s.%(ext)s",
+        "C:/escape/%(title)s.%(ext)s",
+        "%(title)s",
+        "",
+    ],
+)
+def test_config_rejects_unsafe_ytdlp_name_template(client, template):
+    r = client.post(
+        "/api/config",
+        json={"ytdlp_name_template": template},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+    assert r.status_code == 400
+
+
+def test_config_rejects_invalid_output_format(client):
+    r = client.post(
+        "/api/config",
+        json={"output_format": "avi"},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+    assert r.status_code == 400
+
+
+def test_config_rejects_unknown_binary_key(client):
+    r = client.post(
+        "/api/config",
+        json={"binaries": {"totally_unknown": "tool"}},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+    assert r.status_code == 400

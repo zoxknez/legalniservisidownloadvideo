@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import re
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import config
@@ -11,6 +13,18 @@ from backend.jobs.inprocess import build_job
 logger = logging.getLogger(__name__)
 
 _SERIES_BASE_RE = re.compile(r"(/(?:tv|kids)/[^/]+/[^/]+)")
+_MAX_BATCH_EPISODES = 500
+
+
+def _write_secret_temp_file(content: str, suffix: str) -> str:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False, encoding="utf-8") as f:
+        f.write(content)
+        path = f.name
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
 
 
 class SkyShowtimeAdapter:
@@ -94,12 +108,17 @@ class SkyShowtimeAdapter:
         episode = int(attrs.get("episodeNumber") or attrs.get("episode") or 0)
         formats = attrs.get("formats", {})
         fmt = formats.get("HD") or formats.get("SD") or {}
+        duration = attrs.get("duration") or attrs.get("runtime") or 0
+        try:
+            duration_seconds = int(float(duration))
+        except (TypeError, ValueError):
+            duration_seconds = 0
         return {
             "id": f"{season}:{episode}",
             "title": attrs.get("title", ""),
             "season": season,
             "episode": episode,
-            "length_mins": int((attrs.get("duration") or attrs.get("runtime") or 0) // 60),
+            "length_mins": duration_seconds // 60,
             "drm": True,
             "has_subs": True,
             "content_id": fmt.get("contentId", ""),
@@ -166,7 +185,13 @@ class SkyShowtimeAdapter:
 
     @staticmethod
     def make_login_cmd(cookie_file: Optional[str] = None, cookies: Optional[Dict[str, str]] = None) -> List[str]:
-        return build_job("skyshowtime", "login", {"cookie_file": cookie_file, "cookies": cookies})
+        params: Dict[str, Any] = {"cookie_file": cookie_file}
+        if cookies:
+            params["cookies_json_file"] = _write_secret_temp_file(
+                json.dumps(cookies, ensure_ascii=False),
+                ".json",
+            )
+        return build_job("skyshowtime", "login", params)
 
     @staticmethod
     def make_download_cmd(
@@ -205,6 +230,8 @@ class SkyShowtimeAdapter:
         refs = [r.strip() for r in episode_refs if r and str(r).strip()]
         if not refs:
             raise ValueError("Lista SkyShowtime epizoda je prazna.")
+        if len(refs) > _MAX_BATCH_EPISODES:
+            raise ValueError("Maksimalno 500 SkyShowtime epizoda po batch poslu.")
         return SkyShowtimeAdapter.make_download_cmd(
             url=url,
             vcodec=vcodec,
@@ -223,13 +250,16 @@ class SkyShowtimeAdapter:
         quality: str = "SDR",
         audio_lang: Optional[str] = None,
     ) -> List[str]:
+        license_token_file = ""
+        if license_token.strip():
+            license_token_file = _write_secret_temp_file(license_token.strip(), ".txt")
         return build_job(
             "skyshowtime",
             "direct",
             {
                 "manifest_url": manifest_url,
                 "license_url": license_url,
-                "license_token": license_token,
+                "license_token_file": license_token_file,
                 "title": title,
                 "vcodec": vcodec,
                 "quality": quality,

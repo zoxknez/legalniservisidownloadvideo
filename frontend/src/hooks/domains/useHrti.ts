@@ -205,6 +205,12 @@ export function useHrti({ showToast, activeTab }: UseHrtiOptions) {
         return;
       }
       const data = await res.json();
+      if (data.success === false) {
+        const msg = String(data.error || "Link nije prepoznat");
+        setHrtiLoadError(msg);
+        showToast(msg, "error");
+        return;
+      }
       if (data.mode === "series" && data.items?.length) {
         setViewMode("series");
         setCatItems(data.items);

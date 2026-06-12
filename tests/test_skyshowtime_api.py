@@ -57,3 +57,32 @@ def test_skyshowtime_download_queues_job(mock_queue, mock_cmd, mock_status, clie
     assert kwargs["vcodec"] == "H265"
     assert kwargs["quality"] == "HDR10"
     assert kwargs["audio_lang"] == "sr"
+
+
+@patch("backend.routes.skyshowtime.SkyShowtimeAdapter.get_auth_status")
+def test_skyshowtime_download_rejects_wrong_domain(mock_status, client):
+    mock_status.return_value = {"authenticated": True}
+
+    r = client.post(
+        "/api/skyshowtime/download",
+        headers=API_HEADERS,
+        json={"url": "https://evil.example/watch/asset/movies/x/1"},
+    )
+
+    assert r.status_code == 400
+
+
+@patch("backend.routes.skyshowtime.SkyShowtimeAdapter.get_auth_status")
+def test_skyshowtime_direct_rejects_local_license_url(mock_status, client):
+    mock_status.return_value = {"authenticated": True}
+
+    r = client.post(
+        "/api/skyshowtime/download-direct",
+        headers=API_HEADERS,
+        json={
+            "manifest_url": "https://cdn.example.test/manifest.mpd",
+            "license_url": "https://127.0.0.1/license",
+        },
+    )
+
+    assert r.status_code == 400

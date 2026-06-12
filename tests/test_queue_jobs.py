@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from backend.jobs.inprocess import build_job, execute_job, is_inprocess_job, parse_job
-from backend.queue_manager import DownloadItem, DownloadQueueManager
+from backend.queue_manager import DownloadItem, DownloadQueueManager, redact_command, redact_log_line
 
 
 def test_build_job_hrti_eon_rts():
@@ -22,6 +22,30 @@ def test_build_job_hrti_eon_rts():
 
     rts = build_job("rtsplaneta", "download", {"target_url": "https://rtsplaneta.rs/x"})
     assert parse_job(rts)["service"] == "rtsplaneta"
+
+
+def test_queue_redacts_inprocess_secrets_and_content_keys():
+    cmd = build_job(
+        "skyshowtime",
+        "direct",
+        {
+            "manifest_url": "https://cdn.example.test/manifest.mpd",
+            "license_token": "secret-token",
+            "cookies": {"session": "secret-cookie"},
+            "nested": {"access_token": "secret-access"},
+        },
+    )
+
+    rendered = redact_command(cmd)
+
+    assert "secret-token" not in rendered
+    assert "secret-cookie" not in rendered
+    assert "secret-access" not in rendered
+    assert "***" in rendered
+    assert (
+        redact_log_line("Key: 00112233445566778899aabbccddeeff:ffeeddccbbaa99887766554433221100")
+        == "Key: [CONTENT_KEY_REDACTED]"
+    )
 
 
 def test_execute_job_unknown_service():

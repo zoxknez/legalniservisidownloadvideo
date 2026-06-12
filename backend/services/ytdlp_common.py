@@ -1,6 +1,7 @@
 """Shared yt-dlp configuration for metadata extraction and CLI downloads."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -22,6 +23,15 @@ def get_ytdlp_cookies_path() -> Path:
 def cookies_file_configured() -> bool:
     path = get_ytdlp_cookies_path()
     return path.is_file() and path.stat().st_size > 0
+
+
+def auto_browser_cookie_probe_enabled() -> bool:
+    return os.environ.get("VIDEODOWNLOAD_YTDLP_AUTO_BROWSER_COOKIES", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def ytdlp_metadata_opts() -> Dict[str, Any]:

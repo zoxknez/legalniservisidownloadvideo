@@ -153,7 +153,7 @@ class AuthState:
                     self.token_expiry.replace("Z", "+00:00"))
                 return exp > datetime.now(timezone.utc)
             except ValueError:
-                pass
+                return False
         return True
 
     def to_dict(self) -> Dict[str, Any]:
@@ -209,6 +209,10 @@ class SkyShowtimeAuth:
         if str(Path(cookie_file).resolve()) != str(Path(dest).resolve()):
             import shutil
             shutil.copy2(cookie_file, dest)
+            try:
+                Path(dest).chmod(0o600)
+            except OSError:
+                pass
             logger.info(f"Cookies saved to {dest}")
         self.state.persona_id = self._get_persona_id()
         self._get_ovp_token()
