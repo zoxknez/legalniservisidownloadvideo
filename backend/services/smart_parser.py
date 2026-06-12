@@ -151,10 +151,47 @@ class SmartParser:
 
             from backend.services.ytdlp_common import ytdlp_metadata_opts
 
-            with yt_dlp.YoutubeDL(ytdlp_metadata_opts()) as ydl:
-                info = ydl.extract_info(target_id, download=False)
+            # Try 1: standard metadata options (uses ytdlp_cookies.txt if uploaded)
+            opts = ytdlp_metadata_opts()
+            info = None
+            last_err = None
+            
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(target_id, download=False)
+            except Exception as e:
+                last_err = e
+                logger.warning("Standard yt-dlp metadata extraction failed, trying fallback options: %s", e)
+
+            # Try 2: If standard fails, try using browser cookies (chrome, edge, brave, firefox)
+            if not info:
+                for browser in ["chrome", "edge", "brave", "firefox"]:
+                    try:
+                        logger.info("Retrying metadata extraction with cookies from browser: %s", browser)
+                        browser_opts = {**opts, "cookiesfrombrowser": (browser, None, None, None)}
+                        with yt_dlp.YoutubeDL(browser_opts) as ydl:
+                            info = ydl.extract_info(target_id, download=False)
+                        if info:
+                            logger.info("Metadata extraction succeeded with cookies from browser: %s", browser)
+                            break
+                    except Exception as retry_err:
+                        logger.warning("Retry with cookies from %s failed: %s", browser, retry_err)
+
+            # Try 3: If still fails, try using impersonate chrome (without cookies)
+            if not info:
+                try:
+                    logger.info("Retrying metadata extraction with impersonate chrome")
+                    from yt_dlp.networking.impersonate import ImpersonateTarget
+                    target = ImpersonateTarget.from_str("chrome")
+                    imp_opts = {**opts, "impersonate": target}
+                    with yt_dlp.YoutubeDL(imp_opts) as ydl:
+                        info = ydl.extract_info(target_id, download=False)
+                except Exception as imp_err:
+                    logger.warning("Retry with impersonate failed: %s", imp_err)
 
             if not info:
+                if last_err:
+                    raise last_err
                 raise ValueError("yt-dlp returned no info")
 
             title = info.get("title") or ""

@@ -26,7 +26,7 @@ def cookies_file_configured() -> bool:
 
 def ytdlp_metadata_opts() -> Dict[str, Any]:
     """Python API options for yt_dlp.YoutubeDL (skip_download metadata)."""
-    return {
+    opts = {
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
@@ -38,3 +38,6 @@ def ytdlp_metadata_opts() -> Dict[str, Any]:
         "youtube_include_dash_manifest": True,
         "youtube_include_hls_manifest": True,
     }
+    if cookies_file_configured():
+        opts["cookiefile"] = str(get_ytdlp_cookies_path())
+    return opts
