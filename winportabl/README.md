@@ -1,6 +1,6 @@
 # Video Download Servisi
 
-[![Preuzmi Prenosivu Verziju (ZIP)](https://img.shields.io/badge/Preuzmi_Portable-v2.2.0--Windows-orange?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zoxknez/legalniservisidownloadvideo/releases/latest/download/VideoDownloadServisi-Portable.zip)
+[![Preuzmi Prenosivu Verziju (ZIP)](https://img.shields.io/badge/Preuzmi_Portable-v2.6.0--Windows-orange?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zoxknez/legalniservisidownloadvideo/releases/latest/download/VideoDownloadServisi-Portable.zip)
 
 Lokalna aplikacija za preuzimanje video sadržaja s podržanih streaming servisa (Voyo, HRTi, EON, RTS Planeta, HBO Max) i univerzalni `yt-dlp` mod — **samo za sadržaj za koji imate pretplatu i pravo pristupa**.
 

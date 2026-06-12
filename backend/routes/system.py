@@ -111,6 +111,7 @@ async def get_system_status():
         "transcode_mode": config.get_transcode_mode(),
         "ytdlp_name_template": config.get_ytdlp_name_template(),
         "max_concurrent_downloads": config.get_max_concurrent_downloads(),
+        "output_format": config.get_output_format(),
         "browser_sync_supported": browser_sync_supported(),
         "server": {
             "api_key_configured": bool(get_api_key()),
@@ -142,6 +143,7 @@ class ConfigUpdate(BaseModel):
     ytdlp_name_template: Optional[str] = None
     max_concurrent_downloads: Optional[int] = None
     voyo_ignore_catalog_drm_hint: Optional[bool] = None
+    output_format: Optional[str] = None
 
 
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
@@ -188,12 +190,15 @@ def update_config(data: ConfigUpdate):
         config.save()
     if data.voyo_ignore_catalog_drm_hint is not None:
         config.set_voyo_ignore_catalog_drm_hint(data.voyo_ignore_catalog_drm_hint)
+    if data.output_format is not None:
+        config.set_output_format(data.output_format)
     return {
         "success": True,
         "output_dir": config.get_output_dir(),
         "transcode_mode": config.get_transcode_mode(),
         "ytdlp_name_template": config.get_ytdlp_name_template(),
         "max_concurrent_downloads": config.get_max_concurrent_downloads(),
+        "output_format": config.get_output_format(),
         "binaries": config.data["binaries"],
         "sniffer": config.data.get("sniffer", {}),
         "voyo_ignore_catalog_drm_hint": config.get_voyo_ignore_catalog_drm_hint(),

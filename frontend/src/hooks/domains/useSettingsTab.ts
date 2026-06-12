@@ -109,6 +109,8 @@ export function useSettingsTab() {
     setMaxConcurrentDownloads: config.setMaxConcurrentDownloads,
     voyoIgnoreCatalogDrmHint: config.voyoIgnoreCatalogDrmHint,
     setVoyoIgnoreCatalogDrmHint: config.setVoyoIgnoreCatalogDrmHint,
+    outputFormat: config.outputFormat,
+    setOutputFormat: config.setOutputFormat,
     snifferAutoDownload: sniffer.snifferAutoDownload,
     saveSnifferAutoDownload: sniffer.saveSnifferAutoDownload,
     userscriptPreview: sniffer.userscriptPreview,

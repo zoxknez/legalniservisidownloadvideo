@@ -32,6 +32,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
   const [ytdlpNameTemplate, setYtdlpNameTemplate] = useState("%(title)s.%(ext)s");
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
   const [voyoIgnoreCatalogDrmHint, setVoyoIgnoreCatalogDrmHint] = useState(false);
+  const [outputFormat, setOutputFormat] = useState("mp4");
 
   const deviceWvdInfo = status?.binaries?.device_wvd;
 
@@ -57,6 +58,9 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         }
         if (data.max_concurrent_downloads) {
           setMaxConcurrentDownloads(data.max_concurrent_downloads);
+        }
+        if (data.output_format) {
+          setOutputFormat(data.output_format);
         }
         setVoyoIgnoreCatalogDrmHint(data.voyo_ignore_catalog_drm_hint === true);
         const paths: Record<string, string> = {};
@@ -161,6 +165,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
           ytdlp_name_template: ytdlpNameTemplate,
           max_concurrent_downloads: maxConcurrentDownloads,
           voyo_ignore_catalog_drm_hint: voyoIgnoreCatalogDrmHint,
+          output_format: outputFormat,
         }),
       });
       if (res.ok) {
@@ -175,7 +180,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     } catch (e: unknown) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
-  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, maxConcurrentDownloads, outputDir, showToast, transcodeMode, voyoIgnoreCatalogDrmHint, ytdlpNameTemplate]);
+  }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, maxConcurrentDownloads, outputDir, showToast, transcodeMode, voyoIgnoreCatalogDrmHint, ytdlpNameTemplate, outputFormat]);
 
   const handleSaveDeviceWvdPath = useCallback(async () => {
     try {
@@ -375,6 +380,8 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     setMaxConcurrentDownloads,
     voyoIgnoreCatalogDrmHint,
     setVoyoIgnoreCatalogDrmHint,
+    outputFormat,
+    setOutputFormat,
     deviceWvdInfo,
     fetchStatus,
     subscribeStatusLoaded,

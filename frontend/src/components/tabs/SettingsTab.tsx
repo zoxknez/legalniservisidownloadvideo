@@ -147,6 +147,8 @@ export function SettingsTab() {
     setMaxConcurrentDownloads,
     voyoIgnoreCatalogDrmHint,
     setVoyoIgnoreCatalogDrmHint,
+    outputFormat,
+    setOutputFormat,
   } = useSettingsTab();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState(
@@ -373,7 +375,7 @@ export function SettingsTab() {
           <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2 border-t border-white/[0.04] pt-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2 border-t border-white/[0.04] pt-4">
           <div>
             <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">Šablon Imena Fajla (yt-dlp)</label>
             <input
@@ -387,7 +389,7 @@ export function SettingsTab() {
             <p className="text-[10px] text-text-muted mt-1.5 leading-relaxed">
               * Određuje format imena fajla za yt-dlp. Podržani placeholderi: 
               <br />
-              <code className="font-mono bg-white/5 px-1 rounded">%(title)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(uploader)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(id)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(ext)s</code>
+              <code className="font-mono bg-white/5 px-1 rounded">%(title)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(id)s</code>, <code className="font-mono bg-white/5 px-1 rounded">%(ext)s</code>
             </p>
           </div>
 
@@ -406,6 +408,21 @@ export function SettingsTab() {
             </select>
             <p className="text-[10px] text-text-muted mt-1.5">
               * Globalni limit aktivnih preuzimanja u redu. Ostala preuzimanja će čekati slobodan slot.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-indigo-300 tracking-wider uppercase mb-2">Format spremanja videa</label>
+            <select
+              value={outputFormat}
+              onChange={(e) => setOutputFormat(e.target.value)}
+              className="input-premium font-semibold text-xs py-2 px-3 rounded-lg bg-black/45 text-white border border-white/10 outline-none w-full focus:border-indigo-500 focus:shadow-[0_0_10px_rgba(99,102,241,0.25)] transition-all"
+            >
+              <option value="mp4">MP4 (.mp4)</option>
+              <option value="mkv">MKV (.mkv)</option>
+            </select>
+            <p className="text-[10px] text-text-muted mt-1.5">
+              * Podrazumevani video kontejner format. MKV podržava više audio zapisa i titlova, dok je MP4 kompatibilniji sa starijim uređajima.
             </p>
           </div>
         </div>

@@ -59,7 +59,7 @@ def build_ytdlp_cmd(params: Dict[str, Any]) -> List[str]:
         cmd.extend([
             "-f", format_spec,
             "-o", output_tmpl,
-            "--merge-output-format", "mp4",
+            "--merge-output-format", config.get_output_format(),
         ])
 
     subs = (params.get("subs") or "").strip()

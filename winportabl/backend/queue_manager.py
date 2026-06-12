@@ -790,12 +790,24 @@ class DownloadQueueManager:
         await self.broadcast_state()
 
     def _run_post_download_steps(self, item: DownloadItem):
-        """Runs post-download processing: first hardsub (if requested), then transcode (if enabled)."""
+        """Runs post-download processing: first format remux, then hardsub (if requested), then transcode (if enabled)."""
         from backend.jobs.inprocess import get_output_dir_from_cmd
+        from backend.services.output_files import remux_to_target_format
 
         output_dir_val = get_output_dir_from_cmd(item.cmd, item.metadata) or config.get_output_dir()
         min_mtime = _job_min_mtime(item)
         loop = asyncio.get_running_loop()
+
+        # Step 1: Ensure output format matches target_format (remux if needed)
+        try:
+            remux_to_target_format(
+                item.title,
+                output_dir_val,
+                item.metadata,
+                min_mtime,
+            )
+        except Exception as remux_err:
+            logger.error(f"Failed to ensure target format: {remux_err}")
 
         def start_transcoding():
             try:

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from backend.jobs.inprocess import is_inprocess_job, parse_job
+
+logger = logging.getLogger(__name__)
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".ts", ".mov", ".avi", ".webm", ".m4v"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".opus", ".wav", ".flac"}
@@ -214,3 +217,79 @@ def clean_temp_files_for_job(
             f.unlink()
         except OSError:
             pass
+
+
+def remux_to_target_format(
+    title: str,
+    output_dir: str,
+    metadata: Optional[Dict[str, Any]],
+    min_mtime: float,
+) -> None:
+    """Remux completed video files to the target format (mkv or mp4) if they don't match."""
+    from backend.config import config
+    from backend.utils.cancellable_subprocess import run as run_subprocess
+
+    target_format = config.get_output_format()
+    if not target_format:
+        return
+
+    hints = file_match_hints(metadata, title)
+    multi_file = bool((metadata or {}).get("multi_file"))
+    match_prefix = (metadata or {}).get("file_match_prefix")
+
+    targets = find_all_media_files(
+        output_dir,
+        hints,
+        min_mtime=min_mtime,
+        multi_file=multi_file,
+        match_prefix=str(match_prefix) if match_prefix else None,
+    )
+
+    if not targets:
+        return
+
+    ffmpeg_path = config.get_binary_path("ffmpeg") or "ffmpeg"
+
+    for target in targets:
+        current_ext = target.suffix.lower()
+        expected_ext = f".{target_format}"
+        if current_ext == expected_ext:
+            continue
+
+        if current_ext not in (".mp4", ".mkv"):
+            continue
+
+        output_file = target.with_suffix(expected_ext)
+        if output_file.exists():
+            output_file = target.with_name(f"{target.stem}_remux{expected_ext}")
+
+        logger.info(f"Remuxing {target.name} to {output_file.name} (target format: {target_format})")
+
+        cmd = [ffmpeg_path, "-y", "-i", str(target)]
+        if target_format == "mp4":
+            cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"]
+        else:
+            cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
+        cmd.append(str(output_file))
+
+        try:
+            res = run_subprocess(cmd, capture_output=True, text=True, timeout=120)
+            if res.returncode != 0 and target_format == "mp4":
+                cmd_no_sub = [ffmpeg_path, "-y", "-i", str(target), "-c:v", "copy", "-c:a", "copy", "-sn", str(output_file)]
+                res = run_subprocess(cmd_no_sub, capture_output=True, text=True, timeout=120)
+
+            if res.returncode == 0 and output_file.exists() and output_file.stat().st_size > 100000:
+                logger.info(f"Remux to {target_format} successful: {output_file.name}")
+                try:
+                    os.remove(target)
+                except OSError as e:
+                    logger.warning(f"Could not remove original file {target}: {e}")
+            else:
+                logger.error(f"Remux to {target_format} failed for {target.name}: {res.stderr}")
+                if output_file.exists():
+                    try:
+                        os.remove(output_file)
+                    except OSError:
+                        pass
+        except Exception as e:
+            logger.error(f"Error remuxing {target.name} to {target_format}: {e}")

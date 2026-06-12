@@ -20,6 +20,7 @@ DEFAULT_CONFIG = {
     "transcode_mode": "off",
     "ytdlp_name_template": "%(title)s.%(ext)s",
     "max_concurrent_downloads": 2,
+    "output_format": "mp4",
     "server": {
         "api_key": ""
     },
@@ -184,6 +185,14 @@ class AppConfig:
     def set_voyo_ignore_catalog_drm_hint(self, value: bool) -> None:
         self.data.setdefault("voyo", {})["ignore_catalog_drm_hint"] = bool(value)
         self.save()
+
+    def get_output_format(self) -> str:
+        return self.data.get("output_format", "mp4")
+
+    def set_output_format(self, fmt: str):
+        if fmt in ("mp4", "mkv"):
+            self.data["output_format"] = fmt
+            self.save()
 
     def set_credential(self, service: str, key: str, value: str):
         """Store a single credential field (secrets go to OS keyring)."""

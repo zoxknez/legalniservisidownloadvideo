@@ -62,6 +62,7 @@ export interface AppStatus {
   transcode_mode?: string;
   ytdlp_name_template?: string;
   max_concurrent_downloads?: number;
+  output_format?: string;
   browser_sync_supported?: boolean;
   server?: {
     api_key_configured?: boolean;

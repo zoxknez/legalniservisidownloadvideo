@@ -82,6 +82,8 @@ function configSlice(overrides: Partial<AppConfigSlice> = {}): AppConfigSlice {
     setMaxConcurrentDownloads: noop,
     voyoIgnoreCatalogDrmHint: false,
     setVoyoIgnoreCatalogDrmHint: noop,
+    outputFormat: "mp4",
+    setOutputFormat: noop,
     deviceWvdInfo: mockAppStatus.binaries.device_wvd,
     fetchStatus: noopAsync,
     subscribeStatusLoaded: () => noop,

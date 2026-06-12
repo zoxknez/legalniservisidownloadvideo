@@ -107,7 +107,7 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
     encoder = select_best_encoder(codec)
     
     # Generate temporary output path
-    output_path = input_path.with_name(f"{input_path.stem}_tmp_transcoded.mkv")
+    output_path = input_path.with_name(f"{input_path.stem}_tmp_transcoded{input_path.suffix}")
     
     # Configure command
     # Copy audio streams directly to avoid quality loss, transcode video stream only.
@@ -129,9 +129,14 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
         else: # Software x265
             cmd += ["-preset", "medium", "-crf", "22"]
             
+    # For mp4 output, use mov_text for subtitles, otherwise copy
+    sub_mode = "copy"
+    if input_path.suffix.lower() == ".mp4":
+        sub_mode = "mov_text"
+
     cmd += [
         "-c:a", "copy",
-        "-c:s", "copy",
+        "-c:s", sub_mode,
         str(output_path)
     ]
     
@@ -144,6 +149,37 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
             encoding="utf-8",
             errors="ignore"
         )
+        # Fallback if subtitle conversion failed for MP4
+        if res.returncode != 0 and sub_mode == "mov_text":
+            logger.info("Transcode with mov_text failed, trying without subtitles...")
+            cmd_no_sub = [
+                ffmpeg_path, "-hwaccel", "auto", "-y",
+                "-i", str(input_path),
+                "-c:v", encoder
+            ]
+            if codec.lower() == "av1":
+                if "nvenc" in encoder or "qsv" in encoder:
+                    cmd_no_sub += ["-preset", "slow", "-cq", "26"]
+                else:
+                    cmd_no_sub += ["-preset", "6", "-crf", "26"]
+            else:
+                if "nvenc" in encoder or "qsv" in encoder or "amf" in encoder:
+                    cmd_no_sub += ["-preset", "slow", "-cq", "24"]
+                else:
+                    cmd_no_sub += ["-preset", "medium", "-crf", "22"]
+            cmd_no_sub += [
+                "-c:a", "copy",
+                "-sn",
+                str(output_path)
+            ]
+            res = run_subprocess(
+                cmd_no_sub,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore"
+            )
+
         if res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 100000:
             # Transcode succeeded! Replace original with transcoded file
             original_size = input_path.stat().st_size
