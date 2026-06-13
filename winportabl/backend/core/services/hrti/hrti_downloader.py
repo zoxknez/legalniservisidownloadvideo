@@ -36,6 +36,7 @@ import xmltodict
 from yt_dlp import YoutubeDL
 
 from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+from backend.utils.media_validation import promote_validated_media, temporary_media_path
 
 from .hrti_auth import HRTIAuth
 
@@ -409,6 +410,8 @@ class HRTIDownloader:
         """
         video_out = self.temp_dir / f"{output_name}_enc_video.mp4"
         audio_out = self.temp_dir / f"{output_name}_enc_audio.mp4"
+        video_out.unlink(missing_ok=True)
+        audio_out.unlink(missing_ok=True)
 
         aria2c = self.bins.get("aria2c")
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
@@ -452,6 +455,7 @@ class HRTIDownloader:
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
+            "updatetime": False,
             "continuedl": False,
             "fixup": "never",
             "merge_output_format": None,
@@ -475,23 +479,30 @@ class HRTIDownloader:
             logger.info(f"Using yt-dlp with {workers} concurrent fragments")
 
         logger.info(f"Downloading fragments from: {mpd_url}")
+        download_started = time.time()
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(mpd_url, download=True)
+            ydl.extract_info(mpd_url, download=True)
+
+        def _fresh(paths: List[Path]) -> List[Path]:
+            return [p for p in paths if p.stat().st_mtime >= download_started - 1]
 
         # yt-dlp writes separate files for video and audio when format = bestvideo+bestaudio
-        base = self.temp_dir / f"{output_name}_enc"
-        v_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.mp4"))
-        a_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.m4a")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.m4a")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4"))
+        v_candidates = _fresh(
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.mp4"))
+        )
+        a_candidates = _fresh(
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.m4a")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.m4a")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4"))
+        )
 
         # Filter out duplicates
         v_candidates = [p for p in v_candidates if p != video_out]
         a_candidates = [p for p in a_candidates if p != audio_out and p != video_out]
 
         if not v_candidates and not a_candidates:
-            merged = list(self.temp_dir.glob(f"{output_name}_enc.*"))
+            merged = _fresh(list(self.temp_dir.glob(f"{output_name}_enc.*")))
             if merged:
                 logger.warning("yt-dlp produced a single merged file (unexpected for DRM). "
                                "Will attempt decryption of combined file.")
@@ -551,16 +562,19 @@ class HRTIDownloader:
 
     def mux_output(self, video_path: Path, audio_path: Path, output_path: Path) -> Path:
         """Mux video and audio with mkvmerge."""
+        temp_output = temporary_media_path(output_path)
         cmd = [
             self.bins["mkvmerge"],
-            "-o", str(output_path),
+            "-o", str(temp_output),
             str(video_path),
             str(audio_path),
         ]
         logger.info(f"Muxing to: {output_path}")
         result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode not in (0, 1):
+            temp_output.unlink(missing_ok=True)
             raise Exception(f"mkvmerge failed: {result.stderr}")
+        promote_validated_media(temp_output, output_path, mkvmerge_path=self.bins["mkvmerge"])
         logger.info(f"Output: {output_path}")
         return output_path
 

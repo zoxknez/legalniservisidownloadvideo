@@ -227,6 +227,7 @@ def remux_to_target_format(
 ) -> None:
     """Remux completed video files to the target format (mkv or mp4) if they don't match."""
     from backend.config import config
+    from backend.utils.media_validation import promote_validated_media, temporary_media_path
     from backend.utils.cancellable_subprocess import run as run_subprocess
 
     target_format = config.get_output_format()
@@ -263,6 +264,8 @@ def remux_to_target_format(
         if output_file.exists():
             output_file = target.with_name(f"{target.stem}_remux{expected_ext}")
 
+        temp_output = temporary_media_path(output_file)
+
         logger.info(f"Remuxing {target.name} to {output_file.name} (target format: {target_format})")
 
         cmd = [ffmpeg_path, "-y", "-i", str(target)]
@@ -270,15 +273,16 @@ def remux_to_target_format(
             cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"]
         else:
             cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy"]
-        cmd.append(str(output_file))
+        cmd.append(str(temp_output))
 
         try:
             res = run_subprocess(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode != 0 and target_format == "mp4":
-                cmd_no_sub = [ffmpeg_path, "-y", "-i", str(target), "-c:v", "copy", "-c:a", "copy", "-sn", str(output_file)]
+                cmd_no_sub = [ffmpeg_path, "-y", "-i", str(target), "-c:v", "copy", "-c:a", "copy", "-sn", str(temp_output)]
                 res = run_subprocess(cmd_no_sub, capture_output=True, text=True, timeout=120)
 
-            if res.returncode == 0 and output_file.exists() and output_file.stat().st_size > 100000:
+            if res.returncode == 0:
+                promote_validated_media(temp_output, output_file)
                 logger.info(f"Remux to {target_format} successful: {output_file.name}")
                 try:
                     os.remove(target)
@@ -286,10 +290,15 @@ def remux_to_target_format(
                     logger.warning(f"Could not remove original file {target}: {e}")
             else:
                 logger.error(f"Remux to {target_format} failed for {target.name}: {res.stderr}")
-                if output_file.exists():
+                if temp_output.exists():
                     try:
-                        os.remove(output_file)
+                        os.remove(temp_output)
                     except OSError:
                         pass
         except Exception as e:
             logger.error(f"Error remuxing {target.name} to {target_format}: {e}")
+            if temp_output.exists():
+                try:
+                    os.remove(temp_output)
+                except OSError:
+                    pass

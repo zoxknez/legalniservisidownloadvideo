@@ -1,11 +1,10 @@
 import os
-import shutil
-import subprocess
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.utils.cancellable_subprocess import run as run_subprocess
+from backend.utils.media_validation import promote_validated_media
 
 logger = logging.getLogger("Hardsub")
 
@@ -51,10 +50,9 @@ def run_hardsub(video_file: str, subtitle_file: str, ffmpeg_path: str = "ffmpeg"
             encoding="utf-8",
             errors="ignore"
         )
-        if res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 100000:
+        if res.returncode == 0:
             # Replace original video with hardsubbed version
-            os.remove(video_path)
-            shutil.move(output_path, video_path)
+            promote_validated_media(output_path, video_path)
             logger.info("✓ Subtitles successfully burned into video.")
             return str(video_path)
         else:

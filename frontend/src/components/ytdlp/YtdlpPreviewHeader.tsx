@@ -35,7 +35,6 @@ export function YtdlpPreviewExtras({
   data,
   subs = "",
   setSubs,
-  theme = YTDLP_THEME,
   showGenericBanner = true,
 }: YtdlpPreviewExtrasProps) {
   const manual = data.available_subtitles || [];
@@ -187,7 +186,7 @@ export function YtdlpPreviewHeader({
 
         {data.description && <p className="smart-preview-desc">{data.description}</p>}
 
-        <YtdlpPreviewExtras data={data} subs={subs} setSubs={setSubs} theme={theme} />
+        <YtdlpPreviewExtras data={data} subs={subs} setSubs={setSubs} />
       </div>
     </div>
   );

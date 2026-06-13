@@ -54,6 +54,7 @@ from backend.utils.cancellable_subprocess import (
     raise_if_cancelled,
     run as run_subprocess,
 )
+from backend.utils.media_validation import promote_validated_media, temporary_media_path
 
 from .hbomax_auth import HBOMaxAuth, load_token, save_token
 
@@ -919,9 +920,10 @@ def _mux_mkv(
     mkvmerge_bin: str,
 ) -> None:
     """Mux video, multiple audio tracks and optional subtitles into MKV."""
+    temp_out = temporary_media_path(out)
     cmd = [
         mkvmerge_bin, "--ui-language", "en",
-        "--output", str(out),
+        "--output", str(temp_out),
         "--language", "0:und", "--default-track", "0:yes", str(video),
     ]
 
@@ -952,7 +954,9 @@ def _mux_mkv(
 
     result = run_subprocess(cmd, capture_output=True, text=True)
     if result.returncode not in (0, 1):
+        temp_out.unlink(missing_ok=True)
         raise RuntimeError(f"mkvmerge greška:\n{result.stderr}")
+    promote_validated_media(temp_out, out, mkvmerge_path=mkvmerge_bin)
 
 
 # ── Main Downloader ────────────────────────────────────────────────────────────

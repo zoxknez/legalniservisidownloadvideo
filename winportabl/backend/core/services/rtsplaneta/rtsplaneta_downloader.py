@@ -29,6 +29,7 @@ import xmltodict
 from yt_dlp import YoutubeDL
 
 from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+from backend.utils.media_validation import promote_validated_media, temporary_media_path
 
 # Import our auth module
 from .rtsplaneta_auth import RTSPlanetaAuth, RTSPlanetaConfig
@@ -725,6 +726,7 @@ class RTSPlanetaDownloader:
     def _mux_with_ffmpeg(self, video_file: Path, audio_file: Path, output_file: Path):
         """Mux video and audio into MKV using ffmpeg."""
         output_file.parent.mkdir(parents=True, exist_ok=True)
+        temp_output = temporary_media_path(output_file)
         cmd = [
             self.binaries['ffmpeg'],
             '-y',
@@ -732,17 +734,23 @@ class RTSPlanetaDownloader:
             '-i', str(audio_file),
             '-c', 'copy',
             '-movflags', '+faststart',
-            str(output_file),
+            str(temp_output),
         ]
         logger.info(f"Muxing to: {output_file.name}")
-        run_subprocess(cmd, check=True, capture_output=True)
+        try:
+            run_subprocess(cmd, check=True, capture_output=True)
+            promote_validated_media(temp_output, output_file)
+        except Exception:
+            temp_output.unlink(missing_ok=True)
+            raise
 
     def mux_to_mkv(self, video_file: Path, audio_file: Path, output_file: Path):
         """Mux video and audio into MKV container using mkvmerge"""
+        temp_output = temporary_media_path(output_file)
         cmd = [
             self.binaries['mkvmerge'],
             '--ui-language', 'en',
-            '--output', str(output_file),
+            '--output', str(temp_output),
             '--language', '0:und',
             '--default-track', '0:yes',
             str(video_file),
@@ -752,7 +760,16 @@ class RTSPlanetaDownloader:
         ]
         
         logger.info(f"Muxing to: {output_file.name}")
-        run_subprocess(cmd, check=True)
+        try:
+            run_subprocess(cmd, check=True)
+            promote_validated_media(
+                temp_output,
+                output_file,
+                mkvmerge_path=self.binaries['mkvmerge'],
+            )
+        except Exception:
+            temp_output.unlink(missing_ok=True)
+            raise
     
     def sanitize_filename(self, name: str) -> str:
         """Create safe filename"""
@@ -779,6 +796,8 @@ class RTSPlanetaDownloader:
         """Download encrypted video/audio streams via yt-dlp (handles CDN redirects)."""
         enc_video = self.temp_dir / 'encrypted_video.mp4'
         enc_audio = self.temp_dir / 'encrypted_audio.m4a'
+        enc_video.unlink(missing_ok=True)
+        enc_audio.unlink(missing_ok=True)
 
         def _progress(_data):
             raise_if_cancelled()
@@ -789,7 +808,9 @@ class RTSPlanetaDownloader:
             'allow_unplayable_formats': True,
             'format': 'bestvideo',
             'outtmpl': str(enc_video),
+            'continuedl': False,
             'fixup': 'never',
+            'updatetime': False,
             'progress_hooks': [_progress],
         }
         opts_audio = {
@@ -798,10 +819,13 @@ class RTSPlanetaDownloader:
             'allow_unplayable_formats': True,
             'format': 'bestaudio',
             'outtmpl': str(enc_audio),
+            'continuedl': False,
             'fixup': 'never',
+            'updatetime': False,
             'progress_hooks': [_progress],
         }
 
+        download_started = time.time()
         logger.info("Downloading encrypted video stream...")
         with YoutubeDL(opts_video) as ydl:
             ydl.download([mpd_url])
@@ -811,14 +835,19 @@ class RTSPlanetaDownloader:
             ydl.download([mpd_url])
 
         # yt-dlp may append format id to filename
+        def _fresh(paths: List[Path]) -> List[Path]:
+            return [p for p in paths if p.stat().st_mtime >= download_started - 1]
+
         if not enc_video.exists():
-            for p in self.temp_dir.glob('encrypted_video*'):
-                enc_video = p
-                break
+            candidates = _fresh(list(self.temp_dir.glob('encrypted_video*')))
+            candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            if candidates:
+                enc_video = candidates[0]
         if not enc_audio.exists():
-            for p in self.temp_dir.glob('encrypted_audio*'):
-                enc_audio = p
-                break
+            candidates = _fresh(list(self.temp_dir.glob('encrypted_audio*')))
+            candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            if candidates:
+                enc_audio = candidates[0]
 
         if not enc_video.exists() or not enc_audio.exists():
             raise ValueError("yt-dlp failed to download streams")

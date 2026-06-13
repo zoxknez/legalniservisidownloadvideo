@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -42,6 +43,7 @@ import requests
 import xmltodict
 
 from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+from backend.utils.media_validation import promote_validated_media, temporary_media_path
 
 from .eon_auth import (
     CONFIG_DIR,
@@ -851,6 +853,8 @@ class EONDownloader:
 
         video_out = self.temp_dir / f"{output_name}_enc_video.mp4"
         audio_out = self.temp_dir / f"{output_name}_enc_audio.mp4"
+        video_out.unlink(missing_ok=True)
+        audio_out.unlink(missing_ok=True)
 
         aria2c = self.bins.get("aria2c")
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
@@ -893,6 +897,7 @@ class EONDownloader:
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
+            "updatetime": False,
             "continuedl": False,
             "fixup": "never",
             "merge_output_format": None,
@@ -916,22 +921,30 @@ class EONDownloader:
             logger.info(f"Using yt-dlp with {workers} concurrent fragments")
 
         logger.info(f"Downloading encrypted fragments from: {mpd_url}")
+        download_started = time.time()
         with YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(mpd_url, download=True)
 
+        def _fresh(paths: Iterable[Path]) -> List[Path]:
+            return [p for p in paths if p.stat().st_mtime >= download_started - 1]
+
         # yt-dlp writes separate files for video and audio
-        v_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.mp4"))
-        a_candidates = list(self.temp_dir.glob(f"{output_name}_enc.f*.m4a")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.m4a")) + \
-                       list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4"))
+        v_candidates = _fresh(
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.mp4"))
+        )
+        a_candidates = _fresh(
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.m4a")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.m4a")) +
+            list(self.temp_dir.glob(f"{output_name}_enc.f*.mp4"))
+        )
 
         # Filter duplicates
         v_candidates = [p for p in v_candidates if p != video_out]
         a_candidates = [p for p in a_candidates if p != audio_out and p != video_out]
 
         if not v_candidates and not a_candidates:
-            merged = list(self.temp_dir.glob(f"{output_name}_enc.*"))
+            merged = _fresh(list(self.temp_dir.glob(f"{output_name}_enc.*")))
             if merged:
                 logger.warning("yt-dlp produced a single merged file. Will attempt decryption.")
                 return merged[0], merged[0]
@@ -996,22 +1009,26 @@ class EONDownloader:
 
         # Try mkvmerge first
         if mkvmerge and (shutil.which(mkvmerge) or Path(mkvmerge).exists()):
+            temp_output = temporary_media_path(output_path)
             cmd = [
                 mkvmerge,
-                "-o", str(output_path),
+                "-o", str(temp_output),
                 str(video_path),
                 str(audio_path),
             ]
             logger.info(f"Muxing with mkvmerge to: {output_path}")
             result = run_subprocess(cmd, capture_output=True, text=True)
             if result.returncode in (0, 1):
+                promote_validated_media(temp_output, output_path, mkvmerge_path=mkvmerge)
                 logger.info(f"Output: {output_path} ({output_path.stat().st_size // 1024 // 1024}MB)")
                 return output_path
+            temp_output.unlink(missing_ok=True)
             logger.warning(f"mkvmerge failed (code {result.returncode}), trying ffmpeg...")
 
         # Fallback to ffmpeg
         if ffmpeg and (shutil.which(ffmpeg) or Path(ffmpeg).exists()):
             output_mp4 = output_path.with_suffix(".mp4")
+            temp_output = temporary_media_path(output_mp4)
             cmd = [
                 ffmpeg, "-y",
                 "-i", str(video_path),
@@ -1021,13 +1038,15 @@ class EONDownloader:
                 "-vsync", "-1",
                 "-fflags", "+genpts+igndts",
                 "-movflags", "+faststart",
-                str(output_mp4),
+                str(temp_output),
             ]
             logger.info(f"Muxing with ffmpeg to: {output_mp4}")
             result = run_subprocess(cmd, capture_output=True, text=True)
             if result.returncode == 0:
+                promote_validated_media(temp_output, output_mp4)
                 logger.info(f"Output: {output_mp4} ({output_mp4.stat().st_size // 1024 // 1024}MB)")
                 return output_mp4
+            temp_output.unlink(missing_ok=True)
             raise EonSafeError(f"ffmpeg mux failed: {result.stderr[-500:]}")
 
         raise EonSafeError("Neither mkvmerge nor ffmpeg found for muxing")
@@ -1112,7 +1131,8 @@ class EONDownloader:
         """Download a non-DRM stream directly with yt-dlp."""
         from yt_dlp import YoutubeDL
 
-        output_template = str(self.output_dir / f"{safe_name}.%(ext)s")
+        temp_prefix = f"{safe_name}.{uuid.uuid4().hex}.tmp"
+        output_template = str(self.output_dir / f"{temp_prefix}.%(ext)s")
         def _progress(_data):
             raise_if_cancelled()
 
@@ -1123,17 +1143,21 @@ class EONDownloader:
             "concurrent_fragment_downloads": workers,
             "retries": 10,
             "fragment_retries": 10,
+            "updatetime": False,
             "progress_hooks": [_progress],
         }
+        download_started = time.time()
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
         # Find output file
         for ext in ("mkv", "mp4", "webm", "ts"):
-            out = self.output_dir / f"{safe_name}.{ext}"
-            if out.exists():
+            temp_out = self.output_dir / f"{temp_prefix}.{ext}"
+            if temp_out.exists() and temp_out.stat().st_mtime >= download_started - 1:
+                out = self.output_dir / f"{safe_name}.{ext}"
+                promote_validated_media(temp_out, out, probe=ext != "ts")
                 return out
-        return self.output_dir / f"{safe_name}.mkv"
+        raise FileNotFoundError("yt-dlp produced no direct output file")
 
     def download_live(
         self,
@@ -1166,13 +1190,18 @@ class EONDownloader:
             if not ffmpeg:
                 raise EonSafeError("ffmpeg is required for live capture")
             output_file = self.output_dir / f"{safe_name}.ts"
+            temp_output = temporary_media_path(output_file)
             cmd = [ffmpeg, "-hide_banner", "-loglevel", "info", "-y",
                    "-reconnect", "1", "-reconnect_streamed", "1"]
             if duration > 0:
                 cmd += ["-t", str(duration)]
-            cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(output_file)]
+            cmd += ["-i", mpd_url, "-c", "copy", "-async", "1", "-vsync", "-1", "-fflags", "+genpts+igndts", str(temp_output)]
             print("[EON] Recording non-DRM live stream with ffmpeg...")
-            run_subprocess(cmd)
+            result = run_subprocess(cmd)
+            if result.returncode != 0:
+                temp_output.unlink(missing_ok=True)
+                raise EonSafeError("ffmpeg live capture failed")
+            promote_validated_media(temp_output, output_file, min_bytes=1024, probe=False)
             print(f"[EON] ✓ Live capture saved: {output_file}")
             return output_file
 
@@ -1208,7 +1237,7 @@ class EONDownloader:
         # Fix and rename
         fixed = self.fix_with_ffmpeg(dec_output)
         final = self.output_dir / f"{safe_name}.mp4"
-        shutil.move(str(fixed), str(final))
+        promote_validated_media(fixed, final, min_bytes=1024, probe=False)
 
         self.cleanup(safe_name)
         print(f"[EON] ✓ Live capture complete: {final}")
@@ -1233,7 +1262,6 @@ def run_yt_dlp(
         sys.executable,
         "-m",
         "yt_dlp",
-        "--no-part",
         "--continue",
         "--retries",
         "10",
@@ -1268,17 +1296,25 @@ def run_live_capture(url: str, output_dir: Path, title: str, duration: int, play
         raise EonSafeError("ffmpeg is required for live capture.")
 
     output_file = output_dir / f"{safe_filename(title)}.ts"
+    temp_output = temporary_media_path(output_file)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "info", "-y", "-reconnect", "1", "-reconnect_streamed", "1"]
     if duration > 0:
         cmd += ["-t", str(duration)]
-    cmd += ["-i", url, "-c", "copy", str(output_file)]
+    cmd += ["-i", url, "-c", "copy", str(temp_output)]
     try:
         print("[EON] Capturing live stream with ffmpeg")
-        return run_subprocess(cmd).returncode
+        result = run_subprocess(cmd)
+        if result.returncode == 0:
+            promote_validated_media(temp_output, output_file, min_bytes=1024, probe=False)
+        else:
+            temp_output.unlink(missing_ok=True)
+        return result.returncode
     except KeyboardInterrupt:
         print("\n[EON] Snimanje uživo prekinuto od strane korisnika.")
-        if output_file.exists() and output_file.stat().st_size >= 1024:
+        if temp_output.exists() and temp_output.stat().st_size >= 1024:
+            promote_validated_media(temp_output, output_file, min_bytes=1024, probe=False)
             return 0
+        temp_output.unlink(missing_ok=True)
         return 1
 
 

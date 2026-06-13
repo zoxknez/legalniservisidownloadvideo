@@ -22,6 +22,7 @@ from backend.utils.cancellable_subprocess import (
     raise_if_cancelled,
     run as run_subprocess,
 )
+from backend.utils.media_validation import promote_validated_media, temporary_media_path
 from .skyshowtime_auth import SkyShowtimeAuth, SkyConfig
 
 try:
@@ -568,6 +569,7 @@ class SkyShowtimeDownloader:
 
         # 4. Download fragments using yt-dlp native
         raise_if_cancelled()
+        download_started = time.time()
         video_enc, audio_enc = self._download_fragments(mpd_url, safe_title)
         resolution = _resolution_from_format_id(video_enc.stem)
         raise_if_cancelled()
@@ -577,6 +579,7 @@ class SkyShowtimeDownloader:
         all_subs = (list(self.temp_dir.glob(f"{safe_title}.*.vtt")) +
                     list(self.temp_dir.glob(f"{safe_title}.*.srt")) +
                     list(self.temp_dir.glob(f"{safe_title}.*.ttml")))
+        all_subs = [f for f in all_subs if f.stat().st_mtime >= download_started - 1]
         
         LANG_ORDER = ["sr-rs", "hr-hr", "sl-si", "en-us", "sr", "hr", "sl", "en"]
 
@@ -666,6 +669,7 @@ class SkyShowtimeDownloader:
             "http_headers":             http_headers,
             "external_downloader":      "native",
             "concurrent_fragment_downloads": 5,
+            "updatetime":               False,
             "writesubtitles":           True,
             "writeautomaticsub":        False,
             "subtitleslangs":           ["sr-RS", "hr-HR", "sl-SI", "en-US", "sr", "hr", "sl", "en"],
@@ -674,11 +678,14 @@ class SkyShowtimeDownloader:
         }
 
         logger.info("Preuzimanje fragmenata preko yt-dlp …")
+        download_started = time.time()
         with YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(mpd_url, download=True)
 
         all_files = [f for f in self.temp_dir.iterdir()
-                     if f.stem.startswith(title) and f.suffix in ('.mp4', '.m4a', '.webm', '.mkv')]
+                     if (f.stem.startswith(title) and
+                         f.suffix in ('.mp4', '.m4a', '.webm', '.mkv') and
+                         f.stat().st_mtime >= download_started - 1)]
         all_files.sort(key=lambda f: f.stat().st_size, reverse=True)
 
         video_file = None
@@ -740,12 +747,13 @@ class SkyShowtimeDownloader:
 
     def _mux(self, video_path: Path, audio_path: Path, release_name: str, sub_files: List[Path]) -> Path:
         out_path = self.output_dir / f"{release_name}.mkv"
+        temp_out = temporary_media_path(out_path)
         binary = self.mkvmerge_path or config.get_binary_path("mkvmerge")
 
         cmd = [
             binary,
             "--ui-language", "en",
-            "--output", str(out_path),
+            "--output", str(temp_out),
             "--language", "0:und", "--default-track-flag", "0:yes", str(video_path),
             "--language", "0:und", "--default-track-flag", "0:yes", str(audio_path)
         ]
@@ -770,7 +778,9 @@ class SkyShowtimeDownloader:
         logger.info(f"Remuxing u MKV: {out_path.name}")
         result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode not in (0, 1):
+            temp_out.unlink(missing_ok=True)
             raise RuntimeError(f"mkvmerge greška:\n{result.stderr}")
+        promote_validated_media(temp_out, out_path, mkvmerge_path=binary)
         return out_path
 
     def cleanup(self, safe_title: str) -> None:

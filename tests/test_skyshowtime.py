@@ -1,6 +1,9 @@
 import json
+import os
+import time
 
 import pytest
+from backend.core.services.skyshowtime import skyshowtime_downloader
 from backend.core.services.skyshowtime.skyshowtime_auth import AuthState, SkyConfig, SkyShowtimeAuth
 from backend.core.services.skyshowtime.skyshowtime_downloader import (
     SkyShowtimeDownloader,
@@ -9,6 +12,24 @@ from backend.core.services.skyshowtime.skyshowtime_downloader import (
     _build_filename,
     _resolution_from_format_id,
 )
+
+
+class FakeYoutubeDL:
+    last_opts = None
+
+    def __init__(self, opts):
+        self.opts = opts
+        type(self).last_opts = opts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        return False
+
+    def extract_info(self, _url, download=True):
+        return {"downloaded": download}
+
 
 def test_extract_slug():
     url_movie = "https://www.skyshowtime.com/watch/asset/movies/yellowstone/123456789?some=query"
@@ -75,6 +96,29 @@ def test_ytdlp_format_prefers_audio_lang():
 
     dl_h265 = SkyShowtimeDownloader(vcodec="H265")
     assert "bestvideo[vcodec^=hev1]" in dl_h265._ytdlp_format_string()
+
+
+def test_download_fragments_ignores_stale_larger_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(skyshowtime_downloader, "YoutubeDL", FakeYoutubeDL)
+    dl = object.__new__(SkyShowtimeDownloader)
+    dl.temp_dir = tmp_path
+    dl.audio_lang = "en"
+    dl.vcodec = "H264"
+
+    stale_video = tmp_path / "movie.video.old.mp4"
+    stale_video.write_bytes(b"x" * 512)
+    old_time = time.time() - 3600
+    os.utime(stale_video, (old_time, old_time))
+    fresh_video = tmp_path / "movie.video.new.mp4"
+    fresh_audio = tmp_path / "movie.audio.new.m4a"
+    fresh_video.write_bytes(b"v" * 128)
+    fresh_audio.write_bytes(b"a" * 16)
+
+    video_out, audio_out = dl._download_fragments("https://example.test/manifest.mpd", "movie")
+
+    assert FakeYoutubeDL.last_opts["updatetime"] is False
+    assert video_out == fresh_video
+    assert audio_out == fresh_audio
 
 
 def test_playback_body_uses_json():

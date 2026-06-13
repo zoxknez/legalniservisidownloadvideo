@@ -139,7 +139,6 @@ export function SettingsTab() {
     setVoyoVariant,
     voyoProfiles,
     voyoActiveProfileId,
-    voyoProfilesLoading,
     voyoProfileSwitching,
     selectVoyoProfile,
     hboMarket,

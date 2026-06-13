@@ -1,6 +1,5 @@
 import os
 import re
-import shutil
 import subprocess
 import logging
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Dict, Optional, Tuple, List, Any
 logger = logging.getLogger("Transcoder")
 
 from backend.utils.cancellable_subprocess import run as run_subprocess
+from backend.utils.media_validation import promote_validated_media
 
 # Global hardware encoders cache
 _encoders_cache: Optional[List[str]] = None
@@ -180,15 +180,13 @@ def run_transcode(input_file: str, codec: str = "hevc") -> Optional[str]:
                 errors="ignore"
             )
 
-        if res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 100000:
+        if res.returncode == 0:
             # Transcode succeeded! Replace original with transcoded file
             original_size = input_path.stat().st_size
-            compressed_size = output_path.stat().st_size
+            promote_validated_media(output_path, input_path)
+            compressed_size = input_path.stat().st_size
             saving_pct = round(((original_size - compressed_size) / original_size) * 100, 1)
             
-            # Replace
-            os.remove(input_path)
-            shutil.move(output_path, input_path)
             
             logger.info(f"✓ Transcode successful! Compression saved {saving_pct}% storage space.")
             return str(input_path)
@@ -347,4 +345,3 @@ def get_transcode_diagnostics() -> Dict[str, Any]:
             }
         }
     }
-

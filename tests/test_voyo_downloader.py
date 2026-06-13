@@ -1,5 +1,8 @@
 """Voyo downloader helpers and job wiring."""
+import os
 import sys
+import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -72,6 +75,7 @@ def test_download_with_ytdlp_falls_back_when_native_returns_none(tmp_path, monke
     class FakeYDL:
         def __init__(self, opts):
             self.opts = opts
+            assert opts["updatetime"] is False
 
         def __enter__(self):
             return self
@@ -100,6 +104,91 @@ def test_download_with_ytdlp_falls_back_when_native_returns_none(tmp_path, monke
     )
 
     assert result == str(tmp_path / "voyo_1.mp4")
+
+
+def test_download_with_ytdlp_ignores_stale_native_temp_file(tmp_path, monkeypatch):
+    async def fake_native(*_args, **_kwargs):
+        return None
+
+    stale_ts = tmp_path / "voyo_2.ts"
+    stale_ts.write_bytes(b"stale-partial")
+    old_time = time.time() - 3600
+    os.utime(stale_ts, (old_time, old_time))
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+            assert opts["updatetime"] is False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, *_args, **_kwargs):
+            return {"id": "video", "ext": "mkv"}
+
+        def prepare_filename(self, _info):
+            path = self.opts["outtmpl"].replace("%(ext)s", "mkv")
+            with open(path, "wb") as f:
+                f.write(b"fresh-video")
+            return path
+
+    monkeypatch.setattr(voyo_downloader, "download_native_async", fake_native)
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYDL))
+
+    auth = SimpleNamespace(session=SimpleNamespace(headers={}), state=SimpleNamespace(device_id="dev-1"))
+    result = voyo_downloader.download_with_ytdlp(
+        "https://vod.example/master.m3u8",
+        str(tmp_path / "voyo_2"),
+        auth,
+        "Stale fallback test",
+    )
+
+    assert result == str(tmp_path / "voyo_2.mkv")
+    assert not stale_ts.exists()
+
+
+def test_download_video_redownloads_incomplete_existing_output(tmp_path, monkeypatch):
+    final = tmp_path / "Show.S01E05.1080p.WEB-DL-VOYO.mkv"
+    final.write_bytes(b"partial")
+
+    auth = SimpleNamespace(
+        get_video_url=lambda _video_id: {"url": "https://vod.example/master.m3u8"},
+        get_video_metadata=lambda _video_id: {
+            "title": "Episode 5",
+            "meta": {"season": "1", "episode": 5},
+        },
+    )
+    downloader = voyo_downloader.VoyoDownloader(
+        auth=auth,
+        output_dir=str(tmp_path),
+        resolution="1080p",
+    )
+    downloader.temp_dir = tmp_path / "temp"
+    downloader.temp_dir.mkdir()
+
+    calls = []
+
+    def fake_download(_url, temp_stem, *_args, **_kwargs):
+        calls.append(temp_stem)
+        downloaded = Path(temp_stem).with_suffix(".ts")
+        downloaded.write_bytes(b"downloaded")
+        return str(downloaded)
+
+    def fake_mux(_input_path, output_path, title=""):
+        Path(output_path).write_bytes(b"complete")
+        return True
+
+    monkeypatch.setattr(voyo_downloader, "detect_resolution", lambda *_args: "1080p")
+    monkeypatch.setattr(voyo_downloader, "download_with_ytdlp", fake_download)
+    monkeypatch.setattr(voyo_downloader, "mux_to_mkv", fake_mux)
+
+    assert downloader.download_video(987984, series_title="Show") is True
+    assert len(calls) == 1
+    assert final.read_bytes() == b"complete"
+    assert (tmp_path / "Show.S01E05.1080p.WEB-DL-VOYO.mkv.incomplete").read_bytes() == b"partial"
 
 
 def test_voyo_job_uses_adapter_create_downloader():

@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from backend.utils.cancellable_subprocess import raise_if_cancelled, run as run_subprocess
+from backend.utils.media_validation import temporary_media_path
 
 from .auth import VoyoAuth, VoyoConfig
 from .stream_probe import classify_url_info
@@ -87,6 +88,97 @@ MKVMERGE = _find_tool('mkvmerge', [
 
 
 # ── Filename helpers ──────────────────────────────────────────────────────────
+
+FFPROBE = _find_tool('ffprobe', [
+    r'C:\Program Files\ffmpeg\bin\ffprobe.exe',
+    r'C:\Program Files (x86)\ffmpeg\bin\ffprobe.exe',
+])
+
+MIN_EXISTING_OUTPUT_BYTES = 1024 * 1024
+
+
+def _unique_sidecar_path(path: Path, suffix: str) -> Path:
+    candidate = path.with_name(path.name + suffix)
+    if not candidate.exists():
+        return candidate
+    for idx in range(1, 1000):
+        candidate = path.with_name(f'{path.name}{suffix}.{idx}')
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f'{path.name}{suffix}.{uuid.uuid4().hex}')
+
+
+def _existing_output_is_complete(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        size = path.stat().st_size
+    except OSError as e:
+        logger.warning(f'Cannot inspect existing output {path.name}: {e}')
+        return False
+
+    if size < MIN_EXISTING_OUTPUT_BYTES:
+        logger.warning(
+            f'Existing output looks incomplete ({size} bytes): {path.name}'
+        )
+        return False
+
+    if FFPROBE:
+        cmd = [
+            FFPROBE,
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            str(path),
+        ]
+        try:
+            result = run_subprocess(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception as e:
+            logger.warning(f'ffprobe failed for existing output {path.name}: {e}')
+            return False
+        duration_text = (result.stdout or '').strip().splitlines()
+        try:
+            duration = float(duration_text[0]) if duration_text else 0.0
+        except ValueError:
+            duration = 0.0
+        if result.returncode != 0 or duration <= 1.0:
+            logger.warning(f'Existing output failed media validation: {path.name}')
+            return False
+        return True
+
+    if MKVMERGE:
+        try:
+            result = run_subprocess(
+                [MKVMERGE, '--identify', str(path)],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception as e:
+            logger.warning(f'mkvmerge identify failed for {path.name}: {e}')
+            return False
+        if result.returncode != 0 or 'Track ID' not in (result.stdout or ''):
+            logger.warning(f'Existing output failed MKV validation: {path.name}')
+            return False
+
+    return True
+
+
+def _move_incomplete_output(path: Path) -> bool:
+    target = _unique_sidecar_path(path, '.incomplete')
+    try:
+        path.rename(target)
+    except OSError as e:
+        logger.error(f'Cannot move incomplete output {path.name}: {e}')
+        return False
+    logger.warning(f'Moved incomplete output aside: {target.name}')
+    return True
+
 
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip(' .')
@@ -399,41 +491,48 @@ async def download_native_async(
             return None
             
         # 7. Decrypt & assemble sequential file block
-        output_ts = temp_stem + ".ts"
+        output_path = Path(temp_stem + ".ts")
+        output_ts = str(output_path)
         logger.info("Assembling and decrypting sequential TS file...")
-        
-        with open(output_ts, "wb") as out_f:
-            for i, path in enumerate(dest_paths):
-                raise_if_cancelled()
-                if not path.exists():
-                    logger.error(f"Decryption failed: segment {i} file missing!")
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-                    
-                with open(path, "rb") as seg_f:
-                    data = seg_f.read()
-                    
-                segment_key = None
-                if key_info:
-                    segment_keys = key_info.get("segment_keys") or []
-                    if i < len(segment_keys):
-                        segment_key = segment_keys[i]
 
-                if segment_key:
-                    key_bytes = key_cache.get(segment_key["uri"])
-                    if not key_bytes:
-                        logger.error(f"Missing AES-128 decryption key for segment {i}")
+        assembly_ok = False
+        try:
+            with open(output_ts, "wb") as out_f:
+                for i, path in enumerate(dest_paths):
+                    raise_if_cancelled()
+                    if not path.exists():
+                        logger.error(f"Decryption failed: segment {i} file missing!")
                         shutil.rmtree(temp_dir, ignore_errors=True)
                         return None
-                    decrypted_data = decrypt_segment(
-                        data,
-                        key_bytes,
-                        int(segment_key.get("sequence", i)),
-                        segment_key.get("iv"),
-                    )
-                    out_f.write(decrypted_data)
-                else:
-                    out_f.write(data)
+
+                    with open(path, "rb") as seg_f:
+                        data = seg_f.read()
+
+                    segment_key = None
+                    if key_info:
+                        segment_keys = key_info.get("segment_keys") or []
+                        if i < len(segment_keys):
+                            segment_key = segment_keys[i]
+
+                    if segment_key:
+                        key_bytes = key_cache.get(segment_key["uri"])
+                        if not key_bytes:
+                            logger.error(f"Missing AES-128 decryption key for segment {i}")
+                            shutil.rmtree(temp_dir, ignore_errors=True)
+                            return None
+                        decrypted_data = decrypt_segment(
+                            data,
+                            key_bytes,
+                            int(segment_key.get("sequence", i)),
+                            segment_key.get("iv"),
+                        )
+                        out_f.write(decrypted_data)
+                    else:
+                        out_f.write(data)
+            assembly_ok = True
+        finally:
+            if not assembly_ok:
+                output_path.unlink(missing_ok=True)
                     
         # Cleanup segments
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -483,6 +582,7 @@ def download_with_ytdlp(
         'retries':                       5,
         'fragment_retries':              10,
         'concurrent_fragment_downloads': 5,
+        'updatetime':                    False,
         'quiet':                         False,
         'no_warnings':                   False,
         'progress_hooks':                [_progress_hook],
@@ -492,18 +592,23 @@ def download_with_ytdlp(
     logger.info(f'  URL: {m3u8_url[:100]}...')
 
     try:
+        fallback_started = time.time()
+        Path(temp_stem + '.ts').unlink(missing_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(m3u8_url, download=True)
             if info is None:
                 return None
             filename = ydl.prepare_filename(info)
 
+        prepared = Path(filename)
+        if prepared.exists() and prepared.stat().st_mtime >= fallback_started - 1:
+            return filename
+
         for ext in ['mp4', 'ts', 'mkv', 'm4a', 'webm', '']:
             candidate = temp_stem + (f'.{ext}' if ext else '')
-            if Path(candidate).exists():
+            candidate_path = Path(candidate)
+            if candidate_path.exists() and candidate_path.stat().st_mtime >= fallback_started - 1:
                 return candidate
-        if Path(filename).exists():
-            return filename
         return None
     except Exception as e:
         logger.error(f'yt-dlp error: {e}')
@@ -525,12 +630,25 @@ def _progress_hook(d: dict):
 
 def mux_to_mkv(input_path: str, output_path: str, title: str = '') -> bool:
     """Remux to MKV via mkvmerge. Falls back to rename if mkvmerge missing."""
+    output = Path(output_path)
+    tmp_output = temporary_media_path(output)
+
     if not MKVMERGE:
         logger.warning('mkvmerge not found — renaming to .mkv')
-        shutil.move(input_path, output_path)
-        return True
+        try:
+            shutil.move(input_path, tmp_output)
+            if not _existing_output_is_complete(tmp_output):
+                logger.error(f'Renamed output failed validation: {output.name}')
+                tmp_output.unlink(missing_ok=True)
+                return False
+            tmp_output.replace(output)
+            return True
+        except Exception as e:
+            logger.error(f'rename to mkv error: {e}')
+            tmp_output.unlink(missing_ok=True)
+            return False
 
-    cmd = [MKVMERGE, '-o', output_path]
+    cmd = [MKVMERGE, '-o', str(tmp_output)]
     if title:
         cmd += ['--title', title]
     cmd.append(input_path)
@@ -539,13 +657,20 @@ def mux_to_mkv(input_path: str, output_path: str, title: str = '') -> bool:
     try:
         result = run_subprocess(cmd, capture_output=True, text=True)
         if result.returncode in (0, 1):   # 0 = OK, 1 = warnings
+            if not _existing_output_is_complete(tmp_output):
+                logger.error(f'Muxed output failed validation: {output.name}')
+                tmp_output.unlink(missing_ok=True)
+                return False
+            tmp_output.replace(output)
             Path(input_path).unlink(missing_ok=True)
             logger.info(f'✓ {Path(output_path).name}')
             return True
         logger.error(f'mkvmerge rc={result.returncode}: {result.stderr[:300]}')
+        tmp_output.unlink(missing_ok=True)
         return False
     except Exception as e:
         logger.error(f'mkvmerge error: {e}')
+        tmp_output.unlink(missing_ok=True)
         return False
 
 
@@ -665,10 +790,14 @@ class VoyoDownloader:
             output_stem = build_filename(
                 meta, video_id, series_title, resolution)
 
-        final_path = str(self.output_dir / (output_stem + '.mkv'))
-        if Path(final_path).exists():
-            logger.info(f'Already exists, skipping: {output_stem}.mkv')
-            return True
+        final_path_obj = self.output_dir / (output_stem + '.mkv')
+        final_path = str(final_path_obj)
+        if final_path_obj.exists():
+            if _existing_output_is_complete(final_path_obj):
+                logger.info(f'Already exists, skipping: {output_stem}.mkv')
+                return True
+            if not _move_incomplete_output(final_path_obj):
+                return False
 
         temp_stem = str(self.temp_dir / f'voyo_{video_id}')
         logger.info(f'Output: {output_stem}.mkv')
