@@ -61,13 +61,24 @@ def ensure_frontend_built(project_root: Path) -> None:
 
 
 def main():
-    host = "127.0.0.1"
-    port = 8200
+    host = os.environ.get("VIDEODOWNLOAD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port = int(os.environ.get("VIDEODOWNLOAD_PORT", "8200"))
+    except ValueError:
+        logger.warning("VIDEODOWNLOAD_PORT nije validan broj; koristim 8200.")
+        port = 8200
+    browser_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     project_root = Path(__file__).resolve().parent
 
     ensure_frontend_built(project_root)
 
     logger.info("Starting Multi-Service Video Downloader API Server...")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            "Server sluša na %s:%s. Za udaljeni pristup obavezno koristite API ključ i firewall pravila.",
+            host,
+            port,
+        )
     
     # Run uvicorn as a subprocess in the root directory
     cmd = [
@@ -85,13 +96,13 @@ def main():
         logger.info("Waiting for server to spin up...")
         started = False
         for _ in range(20):
-            if is_port_open(host, port):
+            if is_port_open(browser_host, port):
                 started = True
                 break
             time.sleep(0.5)
             
         if started:
-            url = f"http://{host}:{port}"
+            url = f"http://{browser_host}:{port}"
             logger.info(f"Server is running! Opening browser to: {url}")
             webbrowser.open(url)
             

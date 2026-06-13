@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronRight, FileText, Lock, X } from "lucide-reac
 import type { VoyoEpisode, VoyoSeason } from "../../types/app";
 import {
   defaultVoyoEpisodeIds,
+  selectableVoyoEpisodeIds,
   voyoCatalogDrmHint,
   voyoIsHardBlocked,
   voyoIsSoftHint,
@@ -67,10 +68,7 @@ export function VoyoSeasonList({
     }
   };
 
-  const selectableEps = (eps: VoyoEpisode[]) =>
-    eps.filter(
-      (e) => !isBlocked(e) && (ignoreCatalogDrmHint || !voyoCatalogDrmHint(e)),
-    );
+  const selectableEps = (eps: VoyoEpisode[]) => eps.filter((e) => !isBlocked(e));
 
   const toggleAllSeason = (eps: VoyoEpisode[]) => {
     const selectable = selectableEps(eps);
@@ -84,7 +82,7 @@ export function VoyoSeasonList({
   };
 
   const selectAllDefault = () => {
-    setSelectedVoyoEpisodes(defaultVoyoEpisodeIds(voyoSeriesData.episodes, ignoreCatalogDrmHint));
+    setSelectedVoyoEpisodes(selectableVoyoEpisodeIds(voyoSeriesData.episodes));
   };
 
   const renderEpisode = (ep: VoyoEpisode) => {

@@ -1,6 +1,6 @@
 [project]
 name = "videodownloadservisi"
-version = "2.7.2"
+version = "2.7.3"
 description = "Multi-service video downloader with FastAPI backend and React UI"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,6 +31,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+cache_dir = "scratch/.pytest_cache"
 markers = [
     "integration: tests that require network access",
 ]

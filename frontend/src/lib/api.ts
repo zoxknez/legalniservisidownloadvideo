@@ -1,15 +1,29 @@
 const API_KEY_STORAGE = "videodownload_api_key";
 const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || "8200";
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+export function getApiHostForLocation(hostname: string, port: string): string {
+  if (isLocalHostname(hostname)) {
+    if (port === "5173") return ""; // Vite dev proxy
+    if (port === DEFAULT_BACKEND_PORT) return "";
+    return `http://127.0.0.1:${DEFAULT_BACKEND_PORT}`;
+  }
+  return "";
+}
+
+export function getWebSocketHostForLocation(hostname: string, port: string, host: string): string {
+  if (!isLocalHostname(hostname)) return host;
+  return port === "5173" ? "localhost:5173" : `localhost:${DEFAULT_BACKEND_PORT}`;
+}
 
 export function getApiHost(): string {
   if (typeof window === "undefined") return "";
   const { hostname, port } = window.location;
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    if (port === "5173") return ""; // Vite dev proxy
-    if (port === "8200") return "";
-    return `http://127.0.0.1:${port || "8200"}`;
-  }
-  return "";
+  return getApiHostForLocation(hostname, port);
 }
 
 export function getStoredApiKey(): string {
@@ -50,13 +64,11 @@ export function resolveApiUrl(path: string): string {
 
 export function buildWebSocketUrl(path = "/ws"): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host =
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1"
-      ? window.location.port === "5173"
-        ? "localhost:5173"
-        : `localhost:${window.location.port || "8200"}`
-      : window.location.host;
+  const host = getWebSocketHostForLocation(
+    window.location.hostname,
+    window.location.port,
+    window.location.host,
+  );
   const key = getStoredApiKey();
   const qs = key ? `?api_key=${encodeURIComponent(key)}` : "";
   return `${protocol}//${host}${path}${qs}`;

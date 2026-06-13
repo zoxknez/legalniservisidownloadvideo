@@ -17,7 +17,7 @@ import { YtdlpPreviewExtras } from "../ytdlp/YtdlpPreviewHeader";
 import { buildYtdlpCtaLabel } from "../../hooks/domains/ytdlpShared";
 import { VoyoSeasonList } from "../voyo/VoyoSeasonList";
 import {
-  defaultSmartEpisodeIds,
+  selectableSmartEpisodeIds,
   VOYO_HINT_MSG,
   voyoCatalogDrmHint,
   voyoIsHardBlocked,
@@ -372,7 +372,7 @@ export function DashboardTab() {
                       style={{fontSize:"0.72rem", fontWeight:700, color:previewTheme.color, background:"none", border:"none", cursor:"pointer"}}
                       onClick={() => setSmartSelectedEpisodes(
                         smartData.service === "voyo"
-                          ? defaultSmartEpisodeIds(smartData.episodes!, ignoreCatalogDrmHint)
+                          ? selectableSmartEpisodeIds(smartData.episodes!)
                           : smartData.episodes!.map((e: SmartEpisode) => e.id),
                       )}
                     >Označi sve</button>

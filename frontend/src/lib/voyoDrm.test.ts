@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultVoyoEpisodeIds,
+  selectableVoyoEpisodeIds,
   voyoCatalogDrmHint,
   voyoIsHardBlocked,
   voyoIsSoftHint,
@@ -29,5 +30,15 @@ describe("voyoDrm", () => {
     ];
     expect(defaultVoyoEpisodeIds(eps, false)).toEqual([1]);
     expect(defaultVoyoEpisodeIds(eps, true)).toEqual([1, 2]);
+  });
+
+  it("select all includes soft hints but still skips hard blocked episodes", () => {
+    const eps = [
+      { id: 1, drm: false },
+      { id: 2, drm: true, streamable: true, probe_ok: true },
+      { id: 3, drm_blocking: true },
+    ];
+
+    expect(selectableVoyoEpisodeIds(eps)).toEqual([1, 2]);
   });
 });

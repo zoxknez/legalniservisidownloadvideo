@@ -97,6 +97,8 @@ export function useSettingsTab() {
     openOutputFolder: config.openOutputFolder,
     outputDir: config.outputDir,
     setOutputDir: config.setOutputDir,
+    selectingOutputDir: config.selectingOutputDir,
+    selectOutputFolder: config.selectOutputFolder,
     saveFeedback: config.saveFeedback,
     status: config.status,
     submitLogin: config.submitLogin,

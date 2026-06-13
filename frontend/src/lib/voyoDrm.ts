@@ -34,12 +34,28 @@ export function defaultVoyoEpisodeIds<T extends VoyoDrmFields & { id: number }>(
     .map((ep) => ep.id);
 }
 
+export function selectableVoyoEpisodeIds<T extends VoyoDrmFields & { id: number }>(
+  episodes: T[],
+): number[] {
+  return episodes
+    .filter((ep) => !voyoIsHardBlocked(ep))
+    .map((ep) => ep.id);
+}
+
 export function defaultSmartEpisodeIds(
   episodes: (VoyoDrmFields & { id: number | string })[],
   ignoreCatalogDrmHint: boolean,
 ): (number | string)[] {
   return episodes
     .filter((ep) => !voyoIsHardBlocked(ep) && (ignoreCatalogDrmHint || !voyoCatalogDrmHint(ep)))
+    .map((ep) => ep.id);
+}
+
+export function selectableSmartEpisodeIds(
+  episodes: (VoyoDrmFields & { id: number | string })[],
+): (number | string)[] {
+  return episodes
+    .filter((ep) => !voyoIsHardBlocked(ep))
     .map((ep) => ep.id);
 }
 

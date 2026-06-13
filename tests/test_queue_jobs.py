@@ -46,6 +46,12 @@ def test_queue_redacts_inprocess_secrets_and_content_keys():
         redact_log_line("Key: 00112233445566778899aabbccddeeff:ffeeddccbbaa99887766554433221100")
         == "Key: [CONTENT_KEY_REDACTED]"
     )
+    assert (
+        redact_log_line(
+            "DEBUG   KID=00112233445566778899aabbccddeeff KEY=ffeeddccbbaa99887766554433221100"
+        )
+        == "DEBUG   KID=[REDACTED] KEY=[CONTENT_KEY_REDACTED]"
+    )
 
 
 def test_execute_job_unknown_service():

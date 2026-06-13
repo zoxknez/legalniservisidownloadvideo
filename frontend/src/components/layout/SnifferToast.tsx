@@ -19,7 +19,7 @@ export function SnifferToast() {
   } = useSnifferTab();
   if (!showSnifferToast || !latestSniffed) return null;
   return (
-  <div className={`fixed bottom-6 right-6 z-50 flex flex-col gap-3.5 p-5 rounded-xl glass-panel animate-slide max-w-sm w-96 border border-glass shadow-2xl ${
+  <div className={`sniffer-toast fixed bottom-6 right-6 z-50 flex flex-col gap-3.5 p-5 rounded-xl glass-panel animate-slide max-w-sm w-96 border border-glass shadow-2xl ${
     latestSniffed.service === "hbomax" || latestSniffed.service === "hbo" ? "glow-purple-card border-purple-500/30" :
     latestSniffed.service === "skyshowtime" ? "glow-cyan-card border-teal-500/30" :
     latestSniffed.service === "voyo" ? "glow-orange-card border-orange-500/30" :

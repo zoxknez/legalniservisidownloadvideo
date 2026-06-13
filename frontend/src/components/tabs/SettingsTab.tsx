@@ -8,6 +8,7 @@ import {
   Database,
   Download,
   Film,
+  FolderOpen,
   Info,
   Loader2,
   Play,
@@ -52,6 +53,14 @@ const SETTINGS_SECTIONS = [
   { id: "settings-credentials", label: "Kredencijali" },
 ] as const;
 
+function formatStorageBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** exponent;
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
 export function SettingsTab() {
   const {
     apiKeyInput,
@@ -83,6 +92,8 @@ export function SettingsTab() {
     importSessionData,
     openOutputFolder,
     outputDir,
+    selectOutputFolder,
+    selectingOutputDir,
     rtsEmail,
     rtsPassword,
     saveFeedback,
@@ -157,6 +168,8 @@ export function SettingsTab() {
   const [notificationPermission, setNotificationPermission] = useState(
     () => typeof window !== "undefined" && "Notification" in window ? Notification.permission : "default"
   );
+
+  const outputDisk = status?.system_metrics?.disk;
 
   const handleToggleNotifications = async () => {
     if (!("Notification" in window)) {
@@ -273,7 +286,7 @@ export function SettingsTab() {
             <h4 className="font-bold text-xs text-purple-300 tracking-wider uppercase">1-Klik Bookmarkleti (direktno u app)</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
               Prevucite link u Bookmark bar. Klik na sajtu servisa (Voyo, HRTi, RTS, Max, EON) šalje sesiju na{" "}
-              <code className="font-mono bg-white/10 px-1 rounded">127.0.0.1:8000</code> — bez copy-paste.
+              <code className="font-mono bg-white/10 px-1 rounded">127.0.0.1:8200</code> — bez copy-paste.
               Aplikacija mora biti pokrenuta (<code className="font-mono">python run.py</code>).
             </p>
             
@@ -358,21 +371,52 @@ export function SettingsTab() {
 
         <div>
           <label>Izlazni folder za preuzete filmove/serije (Output Directory)</label>
-          <input
-            type="text"
-            value={outputDir}
-            onChange={(e) => setOutputDir(e.target.value)}
-            className="input-premium font-mono text-xs truncate"
-            style={cssVars({"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"})}
-          />
-          <button
-            type="button"
-            onClick={openOutputFolder}
-            className="mt-2 text-xs font-bold text-indigo-400 hover:text-indigo-300"
-          >
-            Otvori output folder u Explorer-u
-          </button>
-          <p className="text-[10px] text-text-muted mt-1.5">* Svi preuzeti MKV video fajlovi biće sačuvani na ovoj lokaciji.</p>
+          <div className="flex flex-col md:flex-row gap-2">
+            <input
+              type="text"
+              value={outputDir}
+              onChange={(e) => setOutputDir(e.target.value)}
+              className="input-premium font-mono text-xs truncate flex-1"
+              style={cssVars({"--focused-border": "#6366f1", "--focused-glow": "rgba(99,102,241,0.25)"})}
+            />
+            <button
+              type="button"
+              onClick={() => void selectOutputFolder()}
+              disabled={selectingOutputDir || savingConfig}
+              className="py-2.5 px-4 rounded-lg text-xs font-black tracking-wider uppercase bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            >
+              {selectingOutputDir ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
+              {selectingOutputDir ? "Biranje..." : "Izaberi folder"}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              onClick={() => void handleSaveConfig()}
+              disabled={savingConfig || !outputDir.trim()}
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded border border-emerald-500/20 disabled:opacity-50"
+            >
+              Sačuvaj unetu putanju
+            </button>
+            <button
+              type="button"
+              onClick={openOutputFolder}
+              className="text-xs font-bold text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded border border-indigo-500/20"
+            >
+              Otvori folder
+            </button>
+          </div>
+          <p className="text-[10px] text-text-muted mt-1.5">
+            * Svi preuzeti video fajlovi biće sačuvani na ovoj lokaciji.
+            {outputDisk && (
+              <span className="block mt-1 text-indigo-300/90">
+                Slobodno na izabranom disku: {formatStorageBytes(outputDisk.free)} od {formatStorageBytes(outputDisk.total)} ({outputDisk.percent}% zauzeto).
+              </span>
+            )}
+            <span className="block mt-1 text-amber-300/90">
+              Na RDP/LAN instalaciji folder se bira na računaru gde je aplikacija pokrenuta.
+            </span>
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-2 border-t border-white/[0.04] pt-4">
@@ -500,6 +544,22 @@ export function SettingsTab() {
               </span>
             )}
           </p>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+            <div className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+              <span className="text-text-muted">Javni URL za bridge:</span>{" "}
+              <span className="font-mono text-indigo-200 break-all">
+                {status?.network?.public_backend_url || "nije podešen"}
+              </span>
+            </div>
+            <div className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+              <span className="text-text-muted">Regionalni proxy:</span>{" "}
+              <span className={status?.network?.outbound_proxy_configured ? "font-mono text-emerald-300 break-all" : "text-amber-300"}>
+                {status?.network?.outbound_proxy_configured
+                  ? status?.network?.outbound_proxy || "aktivan"
+                  : "nije podešen"}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="mt-2 border-t border-white/[0.04] pt-4">
@@ -679,6 +739,12 @@ export function SettingsTab() {
           Ukoliko neki od servisa (RTS, Voyo, HRTi, HBO, EON) zahteva CAPTCHA zaštitu ili verifikaciju na formi za logovanje,
           možete se ulogovati normalno u vašem brauzeru, kopirati token ili sesiju (npr. preko EditThisCookie ekstenzije) i uvesti ga ovde.
         </p>
+        <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-100 leading-relaxed">
+          <span className="font-extrabold text-amber-300">RDP / udaljeni server:</span>{" "}
+          auto-sinhronizacija čita samo browser profil istog Windows korisnika na tom serveru. Ako je server u Kanadi,
+          regionalni servisi mogu odbiti prijavu, manifest ili licencu zbog IP lokacije; koristite ručni uvoz sesije,
+          sniffer/bookmarklet ili pokrenite pristup iz regiona gde nalog ima pravo gledanja.
+        </div>
 
         <SessionConsoleScriptHint service={importService} />
 

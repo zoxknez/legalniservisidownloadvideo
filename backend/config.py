@@ -150,8 +150,17 @@ class AppConfig:
         d = self.data.get("output_dir")
         if not d:
             d = DEFAULT_OUTPUT_DIR
-        Path(d).mkdir(parents=True, exist_ok=True)
-        return d
+        try:
+            Path(d).expanduser().mkdir(parents=True, exist_ok=True)
+            return d
+        except OSError as exc:
+            logger.error("Configured output_dir is not available (%s): %s", d, exc)
+            fallback = DEFAULT_OUTPUT_DIR
+            try:
+                Path(fallback).mkdir(parents=True, exist_ok=True)
+            except OSError as fallback_exc:
+                logger.error("Fallback output_dir is not available (%s): %s", fallback, fallback_exc)
+            return fallback
 
     def set_output_dir(self, path: str):
         self.data["output_dir"] = path

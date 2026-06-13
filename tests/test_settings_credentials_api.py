@@ -1,6 +1,8 @@
 """API tests for settings credential management endpoints."""
 import pytest
 
+from backend.config import config
+
 
 def test_clear_credentials(client):
     r = client.post(
@@ -89,3 +91,39 @@ def test_config_rejects_unknown_binary_key(client):
         headers={"X-API-Key": "test-secret-key"},
     )
     assert r.status_code == 400
+
+
+def test_select_output_folder_saves_dialog_choice(client, tmp_path, monkeypatch):
+    old_output_dir = config.data.get("output_dir")
+    monkeypatch.setitem(config.data, "output_dir", old_output_dir)
+    selected = tmp_path / "downloads"
+    monkeypatch.setattr(
+        "backend.routes.system._select_output_folder_with_dialog",
+        lambda _initial_dir: str(selected),
+    )
+
+    r = client.post(
+        "/api/config/select-output-folder",
+        json={"initial_dir": str(tmp_path)},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["cancelled"] is False
+    assert body["output_dir"] == str(selected.resolve())
+    assert selected.is_dir()
+
+
+def test_status_reports_network_settings(client, monkeypatch):
+    monkeypatch.setenv("VIDEODOWNLOAD_PUBLIC_URL", "http://203.0.113.20:8200")
+    monkeypatch.setenv("VIDEODOWNLOAD_PROXY_URL", "http://user:pass@proxy.example:8080")
+
+    r = client.get("/api/status", headers={"X-API-Key": "test-secret-key"})
+
+    assert r.status_code == 200
+    network = r.json()["network"]
+    assert network["public_backend_url"] == "http://203.0.113.20:8200"
+    assert network["outbound_proxy_configured"] is True
+    assert network["outbound_proxy"] == "http://proxy.example:8080"

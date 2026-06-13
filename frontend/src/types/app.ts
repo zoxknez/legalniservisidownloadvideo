@@ -68,6 +68,11 @@ export interface AppStatus {
     api_key_configured?: boolean;
     localhost_bypass?: boolean;
   };
+  network?: {
+    outbound_proxy_configured?: boolean;
+    outbound_proxy?: string;
+    public_backend_url?: string | null;
+  };
   sniffer?: { auto_download?: boolean };
   voyo_ignore_catalog_drm_hint?: boolean;
   credentials_security?: CredentialsSecurityMap;

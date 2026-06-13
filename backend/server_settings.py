@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import os
 import secrets
-from typing import List
+from typing import List, Optional
+from urllib.parse import urlsplit
 
 from backend.config import config
 
@@ -98,3 +99,63 @@ def cors_origins() -> List[str]:
 
 def allow_drm_key_export() -> bool:
     return _env_bool("VIDEODOWNLOAD_ALLOW_DRM_KEY_EXPORT", False)
+
+
+def bind_host() -> str:
+    return os.environ.get("VIDEODOWNLOAD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+
+def bind_port() -> int:
+    try:
+        return int(os.environ.get("VIDEODOWNLOAD_PORT", "8200"))
+    except ValueError:
+        return 8200
+
+
+def public_backend_url() -> Optional[str]:
+    explicit = os.environ.get("VIDEODOWNLOAD_PUBLIC_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+
+    host = bind_host()
+    if host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::"):
+        return f"http://{host}:{bind_port()}"
+    return None
+
+
+def outbound_proxy_url() -> str:
+    return (
+        os.environ.get("VIDEODOWNLOAD_PROXY_URL")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("ALL_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("http_proxy")
+        or os.environ.get("all_proxy")
+        or ""
+    ).strip()
+
+
+def apply_outbound_proxy_env() -> str:
+    """Expose VIDEODOWNLOAD_PROXY_URL to libraries that honor standard proxy env vars."""
+    proxy = os.environ.get("VIDEODOWNLOAD_PROXY_URL", "").strip()
+    if not proxy:
+        return outbound_proxy_url()
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        os.environ.setdefault(key, proxy)
+    return proxy
+
+
+def outbound_proxy_configured() -> bool:
+    return bool(outbound_proxy_url())
+
+
+def outbound_proxy_summary() -> str:
+    proxy = outbound_proxy_url()
+    if not proxy:
+        return ""
+    parsed = urlsplit(proxy)
+    if not parsed.scheme or not parsed.hostname:
+        return "configured"
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.hostname}{port}"

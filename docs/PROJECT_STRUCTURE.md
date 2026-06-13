@@ -4,7 +4,7 @@
 
 | Putanja | Uloga |
 |---------|--------|
-| `run.py` | Pokreće Uvicorn (`backend.main:app`) na `127.0.0.1:8000`, po potrebi gradi frontend |
+| `run.py` | Pokreće Uvicorn (`backend.main:app`) na `127.0.0.1:8200` po defaultu, po potrebi gradi frontend |
 | `backend/main.py` | FastAPI aplikacija, statički UI iz `backend/static/` |
 | `frontend/` | React + Vite izvor; `npm run build` → `backend/static/` |
 

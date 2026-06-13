@@ -11,7 +11,12 @@ from fastapi.responses import FileResponse
 from backend.config import config, PROJECT_ROOT
 from backend.queue_manager import queue_manager
 from backend.middleware.api_key import ApiKeyMiddleware
-from backend.server_settings import ensure_api_key, cors_origins
+from backend.server_settings import (
+    apply_outbound_proxy_env,
+    cors_origins,
+    ensure_api_key,
+    outbound_proxy_summary,
+)
 from backend.services.drm_manager import drm_manager
 from backend.routes import register_routes
 
@@ -24,6 +29,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from backend.credentials_store import migrate_plaintext_config, migrate_legacy_keyring
+
+    proxy = apply_outbound_proxy_env()
+    if proxy:
+        logger.info("Outbound proxy aktivan za servisne zahteve: %s", outbound_proxy_summary())
 
     api_key = ensure_api_key()
     if api_key and not os.environ.get("VIDEODOWNLOAD_API_KEY"):

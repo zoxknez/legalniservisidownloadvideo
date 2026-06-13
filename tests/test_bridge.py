@@ -37,6 +37,17 @@ def test_bridge_userscript_served():
     assert "__BRIDGE_TOKEN__" not in r.text
 
 
+def test_bridge_userscript_uses_public_backend_url(monkeypatch):
+    monkeypatch.setenv("VIDEODOWNLOAD_PUBLIC_URL", "http://203.0.113.10:8200/")
+    client = TestClient(app)
+
+    r = client.get("/api/bridge/userscript.js")
+
+    assert r.status_code == 200
+    assert "http://203.0.113.10:8200" in r.text
+    assert "127.0.0.1:8200" not in r.text
+
+
 def test_bridge_session_requires_bridge_token():
     client = TestClient(app)
     r = client.post(

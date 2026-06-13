@@ -9,7 +9,13 @@ from pydantic import BaseModel
 
 from backend.config import MAX_CONCURRENT_DOWNLOADS, MIN_CONCURRENT_DOWNLOADS, config
 from backend.queue_manager import queue_manager
-from backend.server_settings import get_api_key
+from backend.server_settings import (
+    get_api_key,
+    localhost_bypass_enabled,
+    outbound_proxy_configured,
+    outbound_proxy_summary,
+    public_backend_url,
+)
 from backend.services.voyo_adapter import VoyoAdapter
 from backend.services.hrti_adapter import HrtiAdapter
 from backend.services.eon_adapter import EonAdapter
@@ -115,8 +121,12 @@ async def get_system_status():
         "browser_sync_supported": browser_sync_supported(),
         "server": {
             "api_key_configured": bool(get_api_key()),
-            "localhost_bypass": os.environ.get("VIDEODOWNLOAD_LOCALHOST_BYPASS", "true").lower()
-            in ("1", "true", "yes", "on"),
+            "localhost_bypass": localhost_bypass_enabled(),
+        },
+        "network": {
+            "outbound_proxy_configured": outbound_proxy_configured(),
+            "outbound_proxy": outbound_proxy_summary(),
+            "public_backend_url": public_backend_url(),
         },
         "credentials_security": all_credential_security_status(config),
         "sniffer": config.data.get("sniffer", {"auto_download": True}),
@@ -146,9 +156,117 @@ class ConfigUpdate(BaseModel):
     output_format: Optional[str] = None
 
 
+class OutputFolderSelectRequest(BaseModel):
+    initial_dir: Optional[str] = None
+
+
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
 _VALID_OUTPUT_FORMATS = frozenset({"mp4", "mkv"})
 _MAX_YTDLP_TEMPLATE_LEN = 240
+
+
+def _validate_output_dir(out: str) -> str:
+    target = (out or "").strip()
+    if not target:
+        raise HTTPException(status_code=400, detail="Izlazni folder ne sme biti prazan.")
+    try:
+        path = Path(target).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        import tempfile
+
+        probe_name = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                prefix=".videodownload_write_test_",
+                suffix=".tmp",
+                dir=str(path),
+                delete=False,
+                encoding="utf-8",
+            ) as probe:
+                probe.write("ok")
+                probe_name = probe.name
+        finally:
+            if probe_name:
+                Path(probe_name).unlink(missing_ok=True)
+        return str(path.resolve())
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Output folder nije dostupan ili nije upisiv: {exc}",
+        ) from exc
+
+
+def _select_output_folder_with_dialog(initial_dir: str) -> Optional[str]:
+    if os.name == "nt":
+        import shutil
+        import subprocess
+
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise RuntimeError("PowerShell nije pronađen za sistemski izbor foldera.")
+
+        script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = "Izaberite folder za preuzimanja"
+$dialog.ShowNewFolderButton = $true
+if ($args.Count -gt 0 -and (Test-Path -LiteralPath $args[0])) {
+  $dialog.SelectedPath = (Resolve-Path -LiteralPath $args[0]).Path
+}
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  Write-Output $dialog.SelectedPath
+  exit 0
+}
+exit 2
+"""
+        try:
+            proc = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-STA",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    script,
+                    initial_dir,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("Folder dialog timeout") from exc
+        if proc.returncode == 2:
+            return None
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or proc.stdout or "Folder dialog nije uspeo.").strip())
+        lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        return lines[-1] if lines else None
+
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    try:
+        selected = filedialog.askdirectory(
+            initialdir=initial_dir if Path(initial_dir).exists() else str(Path.home()),
+            title="Izaberite folder za preuzimanja",
+            mustexist=False,
+        )
+        return selected or None
+    finally:
+        root.destroy()
 
 
 def _validate_ytdlp_name_template(template: str) -> str:
@@ -196,14 +314,7 @@ def _validate_max_concurrent_downloads(value: int) -> int:
 @router.post("/api/config")
 def update_config(data: ConfigUpdate):
     if data.output_dir is not None:
-        out = (data.output_dir or "").strip()
-        if not out:
-            raise HTTPException(status_code=400, detail="Izlazni folder ne sme biti prazan.")
-        try:
-            Path(out).mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise HTTPException(status_code=400, detail=f"Ne mogu kreirati output folder: {exc}") from exc
-        config.set_output_dir(out)
+        config.set_output_dir(_validate_output_dir(data.output_dir))
     if data.transcode_mode is not None:
         mode = (data.transcode_mode or "off").strip().lower()
         if mode not in _VALID_TRANSCODE:
@@ -252,6 +363,30 @@ def update_config(data: ConfigUpdate):
         "sniffer": config.data.get("sniffer", {}),
         "voyo_ignore_catalog_drm_hint": config.get_voyo_ignore_catalog_drm_hint(),
     }
+
+
+@router.post("/api/config/select-output-folder")
+def select_output_folder(req: OutputFolderSelectRequest):
+    initial_dir = (req.initial_dir or config.get_output_dir()).strip()
+    try:
+        selected = _select_output_folder_with_dialog(initial_dir)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Izbor foldera je istekao.") from exc
+    except Exception as exc:
+        logger.warning("Output folder dialog failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Ne mogu otvoriti sistemski izbor foldera. "
+                "Unesite putanju ručno ili pokrenite aplikaciju u interaktivnoj Windows/RDP sesiji."
+            ),
+        ) from exc
+    if not selected:
+        return {"success": False, "cancelled": True, "output_dir": config.get_output_dir()}
+
+    output_dir = _validate_output_dir(selected)
+    config.set_output_dir(output_dir)
+    return {"success": True, "cancelled": False, "output_dir": output_dir}
 
 
 @router.get("/api/smart-detect")

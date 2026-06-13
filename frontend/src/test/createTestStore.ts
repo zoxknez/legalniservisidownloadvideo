@@ -76,6 +76,8 @@ function configSlice(overrides: Partial<AppConfigSlice> = {}): AppConfigSlice {
     setAutoSyncLoading: noop,
     ytdlpUpdating: false,
     handleUpdateYtdlp: noopAsync,
+    selectingOutputDir: false,
+    selectOutputFolder: noopAsync,
     ytdlpNameTemplate: "%(title)s.%(ext)s",
     setYtdlpNameTemplate: noop,
     maxConcurrentDownloads: 2,

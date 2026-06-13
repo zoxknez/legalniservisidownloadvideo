@@ -29,6 +29,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
   const [importLoading, setImportLoading] = useState(false);
   const [autoSyncLoading, setAutoSyncLoading] = useState(false);
   const [ytdlpUpdating, setYtdlpUpdating] = useState(false);
+  const [selectingOutputDir, setSelectingOutputDir] = useState(false);
   const [ytdlpNameTemplate, setYtdlpNameTemplate] = useState("%(title)s.%(ext)s");
   const [maxConcurrentDownloads, setMaxConcurrentDownloads] = useState(2);
   const [voyoIgnoreCatalogDrmHint, setVoyoIgnoreCatalogDrmHint] = useState(false);
@@ -181,6 +182,35 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
       showToast(errorMessage(e, "Greška na serveru"), "error");
     }
   }, [binariesPaths, fetchStatus, fetchTranscodeDiagnostics, maxConcurrentDownloads, outputDir, showToast, transcodeMode, voyoIgnoreCatalogDrmHint, ytdlpNameTemplate, outputFormat]);
+
+  const selectOutputFolder = useCallback(async () => {
+    setSelectingOutputDir(true);
+    try {
+      const res = await apiFetch(`/api/config/select-output-folder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: outputDir }),
+        timeoutMs: 610_000,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.cancelled) {
+          showToast("Izbor foldera je otkazan.", "info");
+          return;
+        }
+        const selected = data.output_dir || outputDir;
+        setOutputDir(selected);
+        showToast("Output folder je izabran i sačuvan.", "success");
+        await fetchStatus();
+      } else {
+        showToast(await parseApiError(res, "Ne mogu otvoriti izbor foldera."), "error");
+      }
+    } catch (e: unknown) {
+      showToast(errorMessage(e, "Greška pri izboru foldera"), "error");
+    } finally {
+      setSelectingOutputDir(false);
+    }
+  }, [fetchStatus, outputDir, showToast]);
 
   const handleSaveDeviceWvdPath = useCallback(async () => {
     try {
@@ -374,6 +404,8 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
     setAutoSyncLoading,
     ytdlpUpdating,
     handleUpdateYtdlp,
+    selectingOutputDir,
+    selectOutputFolder,
     ytdlpNameTemplate,
     setYtdlpNameTemplate,
     maxConcurrentDownloads,

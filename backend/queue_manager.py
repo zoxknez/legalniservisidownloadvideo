@@ -114,6 +114,12 @@ def redact_log_line(line: str) -> str:
 
     # 0. Redact Widevine content keys (KID:KEY, usually 32 hex chars each).
     line = re.sub(r'\b[0-9a-fA-F]{32}:[0-9a-fA-F]{32}\b', '[CONTENT_KEY_REDACTED]', line)
+    line = re.sub(
+        r'(?i)\b(KID=)[0-9a-f]{32}(\s+KEY=)[0-9a-f]{32}\b',
+        r'\1[REDACTED]\2[CONTENT_KEY_REDACTED]',
+        line,
+    )
+    line = re.sub(r'(?i)\b(KEY=)[0-9a-f]{32}\b', r'\1[CONTENT_KEY_REDACTED]', line)
 
     # 1. Redact JWT tokens (e.g. eyJhbGciOi...)
     line = re.sub(r'\bey[a-zA-Z0-9_-]+\.ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b', '[JWT_TOKEN_REDACTED]', line)

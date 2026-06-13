@@ -2703,6 +2703,46 @@ button.ytdlp-checkbox-card {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Final viewport safety overrides for narrow RDP/browser windows */
+.app-toast {
+  max-width: calc(100vw - 2rem);
+}
+
+.sniffer-toast {
+  max-width: calc(100vw - 2rem) !important;
+}
+
+.log-modal-window {
+  max-height: calc(100vh - 4rem);
+}
+
+@media (max-width: 640px) {
+  .app-toast {
+    left: 1rem !important;
+    right: 1rem !important;
+    top: 1rem !important;
+    width: auto !important;
+    align-items: flex-start !important;
+  }
+
+  .sniffer-toast {
+    left: 1rem !important;
+    right: 1rem !important;
+    bottom: 1rem !important;
+    width: auto !important;
+    padding: var(--space-4) !important;
+  }
+
+  .log-modal-overlay {
+    padding: var(--space-4) !important;
+  }
+
+  .log-modal-window {
+    height: calc(100vh - 2rem) !important;
+    max-height: calc(100vh - 2rem) !important;
+    max-width: calc(100vw - 2rem) !important;
+  }
+}
 
 
 

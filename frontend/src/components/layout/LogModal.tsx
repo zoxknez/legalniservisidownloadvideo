@@ -25,11 +25,11 @@ export function LogModal() {
   } = useDownloadQueuePanel();
   if (!showLogModal || !selectedTask) return null;
   return (
-  <div className={`fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center ${logFullscreen ? "p-0" : "p-8"}`}
+  <div className={`log-modal-overlay fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center ${logFullscreen ? "p-0" : "p-8"}`}
     onKeyDown={(e) => e.key === "Escape" && (setShowLogModal(false), setSelectedTask(null), setLogFullscreen(false))}
     tabIndex={-1}
   >
-    <div className={`glass-panel border border-glass flex flex-col justify-between overflow-hidden shadow-2xl animate-slide ${logFullscreen ? "log-modal-fullscreen" : "w-full max-w-4xl h-[600px] rounded-xl"}`}>
+    <div className={`glass-panel border border-glass flex flex-col justify-between overflow-hidden shadow-2xl animate-slide ${logFullscreen ? "log-modal-fullscreen" : "log-modal-window w-full max-w-4xl h-[600px] rounded-xl"}`}>
       
       {/* Modal Header */}
       <div className="p-5 border-b border-glass flex justify-between items-center bg-black/20">

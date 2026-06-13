@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.config import PROJECT_ROOT
-from backend.server_settings import ensure_bridge_token
+from backend.server_settings import ensure_bridge_token, public_backend_url
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,10 @@ DEFAULT_BACKEND = "http://127.0.0.1:8200"
 def get_backend_url() -> str:
     import os
 
-    return os.environ.get("VIDEODOWNLOAD_BACKEND_URL", DEFAULT_BACKEND).rstrip("/")
+    explicit = os.environ.get("VIDEODOWNLOAD_BACKEND_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    return (public_backend_url() or DEFAULT_BACKEND).rstrip("/")
 
 
 def load_userscript() -> str:
