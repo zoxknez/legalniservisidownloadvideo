@@ -7,6 +7,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
+import time
+import secrets
+from typing import Dict
 
 from backend.server_settings import get_api_key, localhost_bypass_enabled
 
@@ -21,42 +24,53 @@ PUBLIC_PREFIXES = (
 PUBLIC_EXACT = frozenset({"/", "/api/health", "/api/sniffer/detect"})
 
 
-def _client_is_localhost(request: Request) -> bool:
-    if request.client and request.client.host in ("127.0.0.1", "::1", "localhost"):
+_ws_tickets: Dict[str, float] = {}
+TICKET_TTL = 15.0  # seconds
+
+
+def create_ws_ticket() -> str:
+    token = secrets.token_urlsafe(32)
+    _ws_tickets[token] = time.time() + TICKET_TTL
+    return token
+
+
+def verify_ws_ticket(token: str) -> bool:
+    now = time.time()
+    # Cleanup expired tickets
+    expired = [t for t, exp in list(_ws_tickets.items()) if exp < now]
+    for t in expired:
+        _ws_tickets.pop(t, None)
+
+    if token in _ws_tickets:
+        _ws_tickets.pop(token)  # single use
         return True
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        return first in ("127.0.0.1", "::1")
     return False
 
 
-def extract_api_key_from_headers(headers, query_params=None) -> str:
+def _client_is_localhost(request: Request) -> bool:
+    if request.client and request.client.host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    return False
+
+
+def extract_api_key_from_headers(headers) -> str:
     header = headers.get("x-api-key", "").strip()
     if header:
         return header
     auth = headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-    if query_params is not None:
-        return query_params.get("api_key", "").strip()
     return ""
 
 
 def extract_api_key(request: Request) -> str:
-    return extract_api_key_from_headers(request.headers, request.query_params)
+    return extract_api_key_from_headers(request.headers)
 
 
 def _connection_is_localhost(connection) -> bool:
     client = getattr(connection, "client", None)
     if client and client.host in ("127.0.0.1", "::1", "localhost"):
         return True
-    headers = getattr(connection, "headers", None)
-    if headers:
-        forwarded = headers.get("x-forwarded-for", "")
-        if forwarded:
-            first = forwarded.split(",")[0].strip()
-            return first in ("127.0.0.1", "::1")
     return False
 
 
@@ -66,9 +80,16 @@ def is_authorized(connection) -> bool:
         return True
     if localhost_bypass_enabled() and _connection_is_localhost(connection):
         return True
-    headers = connection.headers
+
+    # Check WebSocket ticket in query string
     query = getattr(connection, "query_params", None)
-    provided = extract_api_key_from_headers(headers, query)
+    if query:
+        ticket = query.get("ticket", "").strip()
+        if ticket and verify_ws_ticket(ticket):
+            return True
+
+    headers = connection.headers
+    provided = extract_api_key_from_headers(headers)
     return secrets_compare(provided, expected)
 
 

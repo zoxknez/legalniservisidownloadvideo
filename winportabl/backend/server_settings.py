@@ -82,7 +82,7 @@ def api_key_from_env() -> bool:
 
 
 def localhost_bypass_enabled() -> bool:
-    return _env_bool("VIDEODOWNLOAD_LOCALHOST_BYPASS", True)
+    return _env_bool("VIDEODOWNLOAD_LOCALHOST_BYPASS", False)
 
 
 def cors_origins() -> List[str]:

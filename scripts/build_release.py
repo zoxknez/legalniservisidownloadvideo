@@ -59,7 +59,8 @@ def main():
         "pyproject.toml",
         ".env.example",
         "ytdlp_downloader.py",
-        "PokreniAplikaciju.bat"
+        "PokreniAplikaciju.bat",
+        "README.md"
     ]
     for filename in root_files:
         src_file = root / filename

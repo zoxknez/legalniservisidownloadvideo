@@ -6,6 +6,11 @@ import { installMockWebSocket, MockWebSocket, restoreMockWebSocket } from "../te
 
 vi.mock("../lib/api", () => ({
   buildWebSocketUrl: () => "ws://localhost/ws",
+  apiFetch: vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ ticket: "mock-ticket-123" }),
+  })),
+  getStoredApiKey: () => "",
 }));
 
 function useQueueSocketHarness() {

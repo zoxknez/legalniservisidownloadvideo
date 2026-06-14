@@ -62,15 +62,14 @@ export function resolveApiUrl(path: string): string {
   return host ? `${host}${normalized}` : normalized;
 }
 
-export function buildWebSocketUrl(path = "/ws"): string {
+export function buildWebSocketUrl(ticket?: string, path = "/ws"): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = getWebSocketHostForLocation(
     window.location.hostname,
     window.location.port,
     window.location.host,
   );
-  const key = getStoredApiKey();
-  const qs = key ? `?api_key=${encodeURIComponent(key)}` : "";
+  const qs = ticket ? `?ticket=${encodeURIComponent(ticket)}` : "";
   return `${protocol}//${host}${path}${qs}`;
 }
 

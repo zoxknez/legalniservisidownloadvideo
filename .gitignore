@@ -54,6 +54,7 @@ eon_vod.json
 venv/
 node_modules/
 frontend/dist/
+frontend/coverage/
 frontend/lint-out.txt
 lint-out.txt
 

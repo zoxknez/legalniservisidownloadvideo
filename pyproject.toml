@@ -1,6 +1,6 @@
 [project]
 name = "videodownloadservisi"
-version = "2.7.4"
+version = "2.7.5"
 description = "Multi-service video downloader with FastAPI backend and React UI"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,9 @@ dependencies = [
     "keyring>=25.0.0",
 ]
 
+[project.scripts]
+videodownloadservisi = "run:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
@@ -40,5 +43,11 @@ markers = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+py-modules = ["run"]
+
 [tool.setuptools.packages.find]
 include = ["backend*"]
+
+[tool.setuptools.package-data]
+backend = ["static/**/*"]

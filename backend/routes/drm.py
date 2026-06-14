@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from ._schemas import StrictUrlStr
 
 from backend.server_settings import allow_drm_key_export
 from backend.services.drm_manager import drm_manager
@@ -49,7 +50,7 @@ async def wvd_auto_install():
 
 
 class WvdBase64InstallRequest(BaseModel):
-    base64: str
+    base64: str = Field(..., min_length=32, max_length=5000000)
 
 
 @router.post("/wvd/install-base64")
@@ -89,8 +90,8 @@ def drm_cache_stats():
 
 
 class DrmPrefetchCertRequest(BaseModel):
-    service: str
-    license_url: str
+    service: Literal["voyo", "hrti", "eon", "rts", "rtsplaneta", "hbo", "hbomax", "skyshowtime", "manual"]
+    license_url: StrictUrlStr
     headers: Optional[Dict[str, str]] = None
 
 
@@ -107,10 +108,10 @@ async def drm_prefetch_cert(req: DrmPrefetchCertRequest):
 
 
 class DrmTestKeysRequest(BaseModel):
-    mpd_url: str
-    license_url: str
+    mpd_url: StrictUrlStr
+    license_url: StrictUrlStr
     headers: Optional[Dict[str, str]] = None
-    service: str = "manual"
+    service: Literal["voyo", "hrti", "eon", "rts", "rtsplaneta", "hbo", "hbomax", "skyshowtime", "manual"] = "manual"
 
 
 @router.post("/test-keys")

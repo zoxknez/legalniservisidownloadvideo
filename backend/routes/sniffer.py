@@ -1,12 +1,12 @@
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import config
 from backend.queue_manager import queue_manager
-from ._schemas import SnifferPayload
+from ._schemas import SnifferPayload, StrictUrlStr
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -27,11 +27,11 @@ async def sniffer_detect(data: SnifferPayload):
 
 
 class SnifferImportRequest(BaseModel):
-    service: str
-    type: str
-    url: str
+    service: Literal["voyo", "hrti", "eon", "rts", "rtsplaneta", "hbo", "hbomax", "skyshowtime", "manual"]
+    type: Literal["mpd", "license", "manifest"]
+    url: StrictUrlStr
     headers: Optional[Dict[str, str]] = None
-    title: Optional[str] = ""
+    title: Optional[str] = Field(default="", max_length=512)
 
 
 @router.post("/import")

@@ -22,10 +22,7 @@ class BridgeSessionRequest(BaseModel):
 
 def _authorize_bridge_request(request: Request) -> None:
     expected = ensure_bridge_token()
-    provided = (
-        request.headers.get("x-vds-bridge-token", "")
-        or request.query_params.get("bridge_token", "")
-    ).strip()
+    provided = request.headers.get("x-vds-bridge-token", "").strip()
     if provided and hmac.compare_digest(provided, expected):
         return
 

@@ -1,6 +1,6 @@
 # Video Download Servisi
 
-[![Preuzmi Prenosivu Verziju (ZIP)](https://img.shields.io/badge/Preuzmi_Portable-v2.7.4--Windows-orange?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zoxknez/legalniservisidownloadvideo/releases/latest/download/VideoDownloadServisi-Portable.zip)
+[![Preuzmi Prenosivu Verziju (ZIP)](https://img.shields.io/badge/Preuzmi_Portable-v2.7.5--Windows-orange?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zoxknez/legalniservisidownloadvideo/releases/latest/download/VideoDownloadServisi-Portable.zip)
 
 Lokalna aplikacija za preuzimanje video sadržaja s podržanih streaming servisa (Voyo, HRTi, EON, RTS Planeta, HBO Max) i univerzalni `yt-dlp` mod — **samo za sadržaj za koji imate pretplatu i pravo pristupa**.
 
@@ -60,7 +60,7 @@ Build upisuje fajlove u `backend/static/` (nije u Git-u). `run.py` pokušava bui
 python run.py
 ```
 
-Otvara se `http://127.0.0.1:8000` (samo lokalno).
+Otvara se `http://127.0.0.1:8200` (samo lokalno).
 
 ### 5. Frontend (razvoj sa hot-reload)
 
@@ -69,13 +69,16 @@ cd frontend
 npm run dev
 ```
 
-Vite proxy prosljeđuje `/api` i `/ws` na port **8000** (backend mora biti pokrenut).
+Vite proxy prosljeđuje `/api` i `/ws` na port **8200** (backend mora biti pokrenut).
 
 ## Sigurnost
 
 - Server po defaultu sluša **127.0.0.1** — nije izložen internetu.
 - Na prvom pokretanju generiše se **API ključ** u `~/.videodownload/config.json` (`server.api_key`).
 - Za LAN pristup postavite `VIDEODOWNLOAD_API_KEY` ili unesite ključ u **Podešavanja → API ključ** u UI.
+- Za RDP/LAN pristup možete u `.env` postaviti `VIDEODOWNLOAD_HOST=0.0.0.0` i `VIDEODOWNLOAD_PORT=8200`, uz API ključ i firewall pravila.
+- Ako browser/Tampermonkey nije na istoj mašini kao backend, postavite `VIDEODOWNLOAD_PUBLIC_URL=http://IP-ILI-HOST:8200` da userscript šalje podatke na pravi server.
+- Ako je server u drugoj državi i servisi odbijaju login/manifest/licencu zbog regiona, postavite regionalni `VIDEODOWNLOAD_PROXY_URL` u `.env`.
 - `VIDEODOWNLOAD_LOCALHOST_BYPASS=true` (default) — localhost zahtjevi ne traže ključ.
 - Izvoz DRM ključeva preko API-ja je **isključen** dok ne postavite `VIDEODOWNLOAD_ALLOW_DRM_KEY_EXPORT=true`.
 
@@ -97,7 +100,7 @@ U **Podešavanjima**:
 ### Tampermonkey Bridge v2
 
 1. Instalirajte Tampermonkey
-2. Otvorite `http://127.0.0.1:8000/api/bridge/userscript.js`
+2. Otvorite `http://127.0.0.1:8200/api/bridge/userscript.js`
 3. Skripta automatski šalje sesije u app i snifuje `.mpd` / license URL-ove
 
 API: `POST /api/bridge/session`, `POST /api/bridge/sniffer`, `GET /api/bridge/userscript.js`

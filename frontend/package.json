@@ -1,9 +1,12 @@
 {
-  "name": "o0o0o0o-downloader",
+  "name": "videodownloadservisi-frontend",
   "private": true,
-  "version": "1.1.0",
+  "version": "2.7.5",
   "author": "o0o0o0o",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

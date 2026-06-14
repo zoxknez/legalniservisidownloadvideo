@@ -30,7 +30,9 @@ def test_ytdlp_download_with_valid_api_key_and_advanced_options(client):
         "limit_rate": "5M"
     }
     
-    with patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download:
+    with patch("backend.routes.ytdlp.queue_manager.add_download", new_callable=AsyncMock) as mock_add_download, \
+         patch("backend.routes.ytdlp.cookies_file_configured", return_value=False), \
+         patch("backend.services.ytdlp_command_builder.cookies_file_configured", return_value=False):
         mock_add_download.return_value = "ytdlp-task-123"
         
         r = client.post(

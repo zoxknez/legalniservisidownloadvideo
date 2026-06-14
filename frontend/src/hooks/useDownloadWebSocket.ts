@@ -1,5 +1,5 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { apiFetch, buildWebSocketUrl } from "../lib/api";
+import { apiFetch, buildWebSocketUrl, getStoredApiKey } from "../lib/api";
 import type {
   DownloadTask,
   ScheduledTask,
@@ -78,9 +78,9 @@ export function useDownloadWebSocket({
       }
     };
 
-    const connect = () => {
+    const setupSocket = (ticket: string) => {
       if (disposed) return;
-      ws = new WebSocket(buildWebSocketUrl());
+      ws = new WebSocket(buildWebSocketUrl(ticket));
 
       ws.onopen = () => {
         const wasReconnect = attempt > 0;
@@ -240,6 +240,29 @@ export function useDownloadWebSocket({
         attempt++;
         reconnectTimer = setTimeout(connect, delay);
       };
+    };
+
+    const connect = () => {
+      if (disposed) return;
+      const key = getStoredApiKey();
+      if (key) {
+        apiFetch("/api/ws-ticket", { method: "POST", timeoutMs: 5000 })
+          .then((res) => {
+            if (res.ok) return res.json();
+            throw new Error("Failed to fetch WS ticket");
+          })
+          .then((data: any) => {
+            if (disposed) return;
+            const ticket = data.ticket || "";
+            setupSocket(ticket);
+          })
+          .catch((err) => {
+            console.warn("WebSocket ticket fetch failed:", err);
+            if (!disposed) setupSocket("");
+          });
+      } else {
+        setupSocket("");
+      }
     };
 
     connect();
