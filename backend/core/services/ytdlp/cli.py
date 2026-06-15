@@ -35,8 +35,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Greška: {exc}", file=sys.stderr)
         return 1
 
-    if cmd and cmd[0] == "python":
-        cmd[0] = sys.executable
     try:
         return subprocess.call(cmd)
     except KeyboardInterrupt:

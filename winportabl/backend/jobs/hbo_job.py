@@ -39,11 +39,15 @@ def _device_path() -> str:
     return ""
 
 
-def _build_downloader(market: str, workers: int = 16) -> HBOMaxDownloader:
+def _build_downloader(
+    market: str,
+    workers: int = 16,
+    output_dir: Optional[str] = None,
+) -> HBOMaxDownloader:
     bins = config.check_binaries_status()
     dl = HBOMaxDownloader(
         market=market,
-        output_dir=config.get_output_dir(),
+        output_dir=output_dir or config.get_output_dir(),
         device_path=_device_path(),
         workers=workers,
     )
@@ -64,6 +68,7 @@ def run_hbo_job(
 ) -> bool:
     market = (params.get("market") or config.get_credentials("hbomax").get("market") or "emea").strip()
     workers = int(params.get("workers") or 16)
+    output_dir = params.get("output_dir")
 
     _check_cancelled(cancel_event)
 
@@ -76,7 +81,7 @@ def run_hbo_job(
             return True
 
         if action == "direct":
-            dl = _build_downloader(market, workers)
+            dl = _build_downloader(market, workers, output_dir)
             wanted_subs = _parse_subs(params.get("subs", "all"))
             audio_mode = _parse_audio_mode(params.get("audio", "all"))
             manifest = str(params.get("manifest_url", "")).strip()
@@ -93,7 +98,7 @@ def run_hbo_job(
                 "Niste prijavljeni na HBO Max. Pokrenite login iz UI-a prije preuzimanja."
             )
 
-        dl = _build_downloader(market, workers)
+        dl = _build_downloader(market, workers, output_dir)
         wanted_subs = _parse_subs(params.get("subs", "all"))
         audio_mode = _parse_audio_mode(params.get("audio", "all"))
 

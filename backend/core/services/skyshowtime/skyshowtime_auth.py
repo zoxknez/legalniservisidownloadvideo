@@ -28,6 +28,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = 20
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +289,7 @@ class SkyShowtimeAuth:
                 "X-SkyOTT-Language":        SkyConfig.LANGUAGE,
                 "X-SkyOTT-Territory":       self.territory,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -353,6 +355,7 @@ class SkyShowtimeAuth:
                 "Content-Type":    "application/vnd.tokens.v1+json",
                 "X-Sky-Signature": sig,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         tokens = resp.json()

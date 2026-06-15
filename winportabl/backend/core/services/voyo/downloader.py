@@ -412,7 +412,8 @@ async def download_native_async(
     headers['device-id'] = auth.state.device_id
     
     connector = aiohttp.TCPConnector(limit=16, force_close=False, enable_cleanup_closed=True)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    timeout = aiohttp.ClientTimeout(total=60, sock_connect=20, sock_read=30)
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         # 1. Fetch playlist content
         async with session.get(m3u8_url, headers=headers) as resp:
             if resp.status != 200:

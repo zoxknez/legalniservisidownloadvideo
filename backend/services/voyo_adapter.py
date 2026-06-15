@@ -209,9 +209,9 @@ class VoyoAdapter:
         return _parse_id(target)
 
     @staticmethod
-    def create_downloader(resolution: str = "1080p") -> VoyoDownloader:
+    def create_downloader(resolution: str = "1080p", output_dir: str | None = None) -> VoyoDownloader:
         auth = VoyoAdapter._make_auth()
-        return VoyoDownloader(auth, config.get_output_dir(), resolution)
+        return VoyoDownloader(auth, output_dir or config.get_output_dir(), resolution)
 
     @staticmethod
     def get_video_info(video_id: int, *, probe: bool = True) -> Dict[str, Any]:
@@ -381,9 +381,7 @@ class VoyoAdapter:
     def download_video(video_id: int, output_dir: str = None, resolution: str = "1080p") -> bool:
         """Download a single Voyo video."""
         try:
-            downloader = VoyoAdapter.create_downloader(resolution)
-            if output_dir:
-                downloader.output_dir = Path(output_dir)
+            downloader = VoyoAdapter.create_downloader(resolution, output_dir)
             return downloader.download_video(video_id)
         except Exception as e:
             logger.error("Voyo download failed: %s", e)
@@ -398,9 +396,7 @@ class VoyoAdapter:
     ) -> tuple:
         """Download Voyo series episodes."""
         try:
-            downloader = VoyoAdapter.create_downloader(resolution)
-            if output_dir:
-                downloader.output_dir = Path(output_dir)
+            downloader = VoyoAdapter.create_downloader(resolution, output_dir)
             return downloader.download_series(series_id, episodes_range)
         except Exception as e:
             logger.error("Voyo series download failed: %s", e)

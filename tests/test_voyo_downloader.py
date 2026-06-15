@@ -206,7 +206,7 @@ def test_voyo_job_uses_adapter_create_downloader():
             log_fn=lambda *_a, **_k: None,
         )
         assert ok is True
-        create_dl.assert_called_once_with("720p")
+        create_dl.assert_called_once_with("720p", None)
         dl.download_video.assert_called_once_with(50584)
 
 

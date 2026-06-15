@@ -30,6 +30,7 @@ from requests.adapters import HTTPAdapter
 requests.packages.urllib3.disable_warnings()
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = 20
 
 
 def test_dns(hostname: str) -> bool:
@@ -188,13 +189,13 @@ class RTSPlanetaAuth:
         
         # Step 1: POST to register the device
         logger.debug("POST to register device UUID...")
-        post_response = self.session.post(url, json=payload)
+        post_response = self.session.post(url, json=payload, timeout=REQUEST_TIMEOUT)
         post_response.raise_for_status()
         logger.debug(f"POST response: {post_response.json()}")
         
         # Step 2: PUT to get full config with session_id
         logger.debug("PUT to get session config...")
-        put_response = self.session.put(url, json=payload)
+        put_response = self.session.put(url, json=payload, timeout=REQUEST_TIMEOUT)
         put_response.raise_for_status()
         
         data = put_response.json()
@@ -245,7 +246,7 @@ class RTSPlanetaAuth:
             "password": password
         }
         
-        response = self.session.post(url, json=payload)
+        response = self.session.post(url, json=payload, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         
         data = response.json()
@@ -380,7 +381,7 @@ class RTSPlanetaAuth:
             f"/video_id/{video_id}/format/json"
         )
         
-        response = self.session.get(url)
+        response = self.session.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         
         return response.json()

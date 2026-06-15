@@ -84,7 +84,7 @@ def run_hrti_job(
             label = item["title"] or item["ref_id"]
             log_fn(f"INFO HRTi epizoda {idx}/{total}: {label}")
             try:
-                downloader.download(item["ref_id"], None)
+                downloader.download(item["ref_id"], item["title"] or None)
                 success += 1
             except Exception as exc:
                 log_fn(f"ERROR HRTi epizoda nije uspela: {label} ({exc})")

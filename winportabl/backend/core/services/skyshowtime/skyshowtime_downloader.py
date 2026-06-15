@@ -33,6 +33,7 @@ except ImportError:
     _drm_manager = None
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = 20
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +363,9 @@ class SkyShowtimeDownloader:
             detail = "; ".join(errors) if errors else "nepoznata greška"
             raise RuntimeError(f"Nijedna epizoda nije preuzeta. {detail}")
         if errors:
-            raise RuntimeError("Serija delimicno neuspesno preuzeta: " + "; ".join(errors))
             logger.warning("Serija delimično preuzeta (%d/%d). Greške: %s",
                            len(results), len(episodes), "; ".join(errors))
+            raise RuntimeError("Serija delimicno neuspesno preuzeta: " + "; ".join(errors))
         return results
 
     @staticmethod
@@ -392,6 +393,7 @@ class SkyShowtimeDownloader:
             headers={**sky_hdr,
                      "Accept":           "*/*",
                      "x-sky-signature":  sig},
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()
@@ -455,6 +457,7 @@ class SkyShowtimeDownloader:
                 "content-type":    "application/vnd.playvod.v1+json",
                 "x-sky-signature": sig,
             },
+            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         manifest = resp.json()
@@ -550,7 +553,7 @@ class SkyShowtimeDownloader:
         safe_title = _sanitise_filename(title)
 
         # 1. Fetch MPD
-        mpd_resp = self.auth.session.get(mpd_url)
+        mpd_resp = self.auth.session.get(mpd_url, timeout=REQUEST_TIMEOUT)
         mpd_resp.raise_for_status()
         mpd_text = mpd_resp.text
         raise_if_cancelled()

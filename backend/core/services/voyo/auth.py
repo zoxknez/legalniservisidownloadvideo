@@ -43,6 +43,7 @@ requests.packages.urllib3.disable_warnings()
 logger = logging.getLogger(__name__)
 
 SITE_ID = 30005   # voyo.rs site identifier
+REQUEST_TIMEOUT = 20
 
 
 def _jwt_payload(token: str) -> Dict[str, Any]:
@@ -228,7 +229,7 @@ class VoyoAuth:
             headers['authorization'] = self.state.token
         if extra_headers:
             headers.update(extra_headers)
-        r = self.session.post(target, data=query.encode(), headers=headers)
+        r = self.session.post(target, data=query.encode(), headers=headers, timeout=REQUEST_TIMEOUT)
         if not r.ok:
             logger.error(f'HTTP {r.status_code}: {r.text[:400]}')
         r.raise_for_status()
@@ -509,7 +510,7 @@ class VoyoAuth:
                f'&query={urllib.parse.quote(query_str)}'
                f'&extras={urllib.parse.quote(extras)}')
 
-        r = self.session.get(url)
+        r = self.session.get(url, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         data = r.json()
         if 'errors' in data:
@@ -535,7 +536,7 @@ class VoyoAuth:
                f'&query={urllib.parse.quote(query_str)}'
                f'&extras={urllib.parse.quote(extras)}')
 
-        r = self.session.get(url)
+        r = self.session.get(url, timeout=REQUEST_TIMEOUT)
         r.raise_for_status()
         data = r.json()
         if 'errors' in data:

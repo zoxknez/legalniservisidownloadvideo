@@ -22,6 +22,7 @@ def run_voyo_job(
     cancel_event: Optional[threading.Event] = None,
 ) -> bool:
     resolution = params.get("resolution") or "1080p"
+    output_dir = params.get("output_dir")
     target = str(params.get("target", "")).strip()
     episodes = str(params.get("episodes") or "").strip()
     series_title = str(params.get("series_title") or "").strip()
@@ -30,7 +31,7 @@ def run_voyo_job(
     _check_cancelled(cancel_event)
 
     with capture_job_output(log_fn, ["VoyoDownloader", "backend.core.services.voyo", ""]):
-        downloader = VoyoAdapter.create_downloader(resolution)
+        downloader = VoyoAdapter.create_downloader(resolution, output_dir)
         _check_cancelled(cancel_event)
 
         if action == "video":

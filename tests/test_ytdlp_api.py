@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, patch
+import sys
 
 import pytest
 
@@ -8,6 +9,14 @@ def test_ytdlp_cookies_status(client):
     body = r.json()
     assert body["success"] is True
     assert "configured" in body
+
+
+def test_ytdlp_command_uses_current_python():
+    from backend.services.ytdlp_command_builder import build_ytdlp_cmd
+
+    cmd = build_ytdlp_cmd({"url": "https://example.test/video", "output_dir": "/tmp/out"})
+
+    assert cmd[:3] == [sys.executable, "-m", "yt_dlp"]
 
 
 def test_ytdlp_download_requires_api_key(client):

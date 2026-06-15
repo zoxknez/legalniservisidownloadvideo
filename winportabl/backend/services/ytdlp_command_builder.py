@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from typing import Any, Dict, List, Optional
 
 from backend.config import config
@@ -35,7 +36,7 @@ def build_ytdlp_cmd(params: Dict[str, Any]) -> List[str]:
     output_dir = params.get("output_dir") or config.get_output_dir()
     name_tmpl = params.get("name_template") or config.get_ytdlp_name_template() or "%(title)s.%(ext)s"
 
-    cmd: List[str] = ["python", "-m", "yt_dlp", url, *YTDLP_CLI_NETWORK_ARGS]
+    cmd: List[str] = [sys.executable, "-m", "yt_dlp", url, *YTDLP_CLI_NETWORK_ARGS]
 
     if not params.get("download_playlist"):
         cmd.append("--no-playlist")

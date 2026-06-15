@@ -27,6 +27,19 @@ def test_drm_test_keys_blocked_by_default(client):
     assert r.status_code == 403
 
 
+def test_hbo_direct_rejects_local_license_url(client):
+    r = client.post(
+        "/api/hbo/download-direct",
+        headers={"X-API-Key": "test-secret-key"},
+        json={
+            "manifest_url": "https://cdn.example.test/manifest.mpd",
+            "license_url": "https://127.0.0.1/license",
+        },
+    )
+
+    assert r.status_code == 400
+
+
 def test_ws_ticket_handshake(client):
     r = client.post("/api/ws-ticket")
     assert r.status_code == 401

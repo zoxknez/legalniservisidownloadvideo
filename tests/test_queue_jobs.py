@@ -191,8 +191,90 @@ def test_hrti_batch_job_reuses_one_downloader():
     assert ok is True
     build_mock.assert_called_once()
     assert fake.login_calls == 1
-    assert fake.calls == [("ep-1", None), ("ep-2", None)]
+    assert fake.calls == [("ep-1", "Ep 1"), ("ep-2", "Ep 2")]
     assert any("2/2" in line for line in logs)
+
+
+def test_voyo_job_uses_payload_output_dir():
+    from backend.jobs.voyo_job import run_voyo_job
+
+    class FakeDownloader:
+        def download_video(self, video_id):
+            return True
+
+    logs: list[str] = []
+    with patch(
+        "backend.jobs.voyo_job.VoyoAdapter.create_downloader",
+        return_value=FakeDownloader(),
+    ) as build_mock:
+        ok = run_voyo_job(
+            "video",
+            {"target": "42", "resolution": "720p", "output_dir": "D:/queued-out"},
+            logs.append,
+        )
+
+    assert ok is True
+    build_mock.assert_called_once_with("720p", "D:/queued-out")
+
+
+def test_eon_job_uses_payload_output_dir():
+    from backend.jobs.eon_job import run_eon_job
+
+    seen = {}
+
+    def fake_handle(args):
+        seen["output"] = args.output
+        return 0
+
+    with patch("backend.jobs.eon_job._device_path", return_value=""), patch(
+        "backend.jobs.eon_job.handle_vod_download",
+        side_effect=fake_handle,
+    ):
+        ok = run_eon_job(
+            "vod",
+            {"target": "asset-1", "output_dir": "D:/queued-out"},
+            lambda _line: None,
+        )
+
+    assert ok is True
+    assert seen["output"] == "D:/queued-out"
+
+
+def test_hbo_job_uses_payload_output_dir():
+    from backend.jobs.hbo_job import run_hbo_job
+
+    class FakeAuth:
+        def __init__(self, market):
+            self.market = market
+
+        def is_authenticated(self):
+            return True
+
+    class FakeDownloader:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def download(self, video_id, wanted_subs, audio_mode):
+            self.download_args = (video_id, wanted_subs, audio_mode)
+
+    made = {}
+
+    def fake_downloader(**kwargs):
+        made["kwargs"] = kwargs
+        return FakeDownloader(**kwargs)
+
+    with patch("backend.jobs.hbo_job.HBOMaxAuth", FakeAuth), patch(
+        "backend.jobs.hbo_job.HBOMaxDownloader",
+        side_effect=fake_downloader,
+    ), patch("backend.jobs.hbo_job._device_path", return_value=""):
+        ok = run_hbo_job(
+            "video",
+            {"video_id": "urn:hbo:test", "market": "emea", "output_dir": "D:/queued-out"},
+            lambda _line: None,
+        )
+
+    assert ok is True
+    assert made["kwargs"]["output_dir"] == "D:/queued-out"
 
 
 def test_hrti_batch_job_fails_on_partial_success():

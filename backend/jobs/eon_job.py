@@ -31,7 +31,7 @@ def _device_path() -> str:
 
 def _base_args(params: Dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(
-        output=config.get_output_dir(),
+        output=params.get("output_dir") or config.get_output_dir(),
         device_wvd=_device_path() or None,
         workers=int(params.get("workers") or 16),
         verbose=True,
