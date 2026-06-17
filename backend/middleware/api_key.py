@@ -21,7 +21,7 @@ PUBLIC_PREFIXES = (
     "/api/bridge/",
 )
 
-PUBLIC_EXACT = frozenset({"/", "/api/health", "/api/sniffer/detect"})
+PUBLIC_EXACT = frozenset({"/", "/api/health", "/api/sniffer/detect", "/favicon.ico"})
 
 
 _ws_tickets: Dict[str, float] = {}

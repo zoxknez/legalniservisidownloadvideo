@@ -45,6 +45,23 @@ def main():
     root = Path(__file__).resolve().parent.parent
     winportabl_dir = root / "winportabl"
     
+    # Ensure frontend is built before packaging
+    static_index = root / "backend" / "static" / "index.html"
+    frontend_dir = root / "frontend"
+    if not static_index.exists() and (frontend_dir / "package.json").exists():
+        print("Frontend build is missing. Building frontend...")
+        import subprocess
+        try:
+            if not (frontend_dir / "node_modules").exists():
+                print("Running npm install...")
+                subprocess.run(["npm", "install"], cwd=str(frontend_dir), check=True, shell=os.name == "nt")
+            print("Running npm run build...")
+            subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), check=True, shell=os.name == "nt")
+        except Exception as e:
+            print(f"Error building frontend: {e}")
+            print("Please build the frontend manually: cd frontend && npm install && npm run build")
+            return
+            
     print("Syncing backend directory...")
     backend_ignore = ["__pycache__", ".venv", ".videodownload", "output", "temp", "*.pyc", "*.pyo", "device.wvd"]
     sync_dir(root / "backend", winportabl_dir / "backend", backend_ignore)
