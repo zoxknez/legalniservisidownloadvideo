@@ -153,6 +153,80 @@ def _job_min_mtime(item: "DownloadItem") -> float:
     return 0.0
 
 
+def _display_title_hint(title: str) -> str:
+    hint = (title or "").strip()
+    if ":" in hint:
+        prefix, rest = hint.split(":", 1)
+        if 1 <= len(prefix.strip()) <= 24 and rest.strip():
+            hint = rest.strip()
+    if not hint or re.match(r"^https?://", hint, re.IGNORECASE):
+        return ""
+    return hint
+
+
+def _auto_metadata_for_cmd(_service: str, title: str, cmd: List[str]) -> Dict[str, Any]:
+    """Infer safe file-matching metadata for post-download processing."""
+    try:
+        from backend.jobs.inprocess import is_inprocess_job, parse_job
+
+        if not is_inprocess_job(cmd):
+            return {}
+        payload = parse_job(cmd)
+    except Exception:
+        return {}
+
+    action = str(payload.get("action") or "")
+    params = payload.get("params") or {}
+    if not isinstance(params, dict) or action == "login":
+        return {}
+
+    output_dir = params.get("output_dir")
+    if not output_dir:
+        return {}
+
+    metadata: Dict[str, Any] = {
+        "output_dir": str(output_dir),
+        "allow_recent_media_fallback": True,
+    }
+
+    titles: List[str] = []
+    for key in ("title", "video_title", "series_title"):
+        value = params.get(key)
+        if value and str(value).strip():
+            titles.append(str(value).strip())
+
+    raw_items = params.get("items")
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("title") or item.get("name")
+            if value and str(value).strip():
+                titles.append(str(value).strip())
+        if len(raw_items) > 1:
+            metadata["multi_file"] = True
+
+    if isinstance(params.get("video_ids"), list) and len(params.get("video_ids") or []) > 1:
+        metadata["multi_file"] = True
+    if isinstance(params.get("episode_refs"), list) and len(params.get("episode_refs") or []) > 1:
+        metadata["multi_file"] = True
+    if action in {"series", "downloads", "episodes", "videos"}:
+        metadata["multi_file"] = True
+
+    if titles:
+        deduped = list(dict.fromkeys(titles))
+        if len(deduped) == 1:
+            metadata["file_match_title"] = deduped[0]
+        else:
+            metadata["file_match_titles"] = deduped
+    else:
+        hint = _display_title_hint(title)
+        if hint:
+            metadata["file_match_title"] = hint
+
+    return metadata
+
+
 def clean_temp_files(item: "DownloadItem"):
     """Purge orphaned temporary files (.part, .ytdl, etc.) for a download job."""
     from backend.jobs.inprocess import get_output_dir_from_cmd
@@ -633,6 +707,8 @@ class DownloadQueueManager:
     async def add_download(self, service: str, title: str, cmd: List[str], metadata: Optional[Dict[str, Any]] = None) -> str:
         """Add a new download to the queue. Rejects duplicates that are already active."""
         fingerprint = self._job_fingerprint(service, cmd)
+        inferred_metadata = _auto_metadata_for_cmd(service, title, cmd)
+        final_metadata = {**inferred_metadata, **(metadata or {})}
         async with self.lock:
             for existing in self.items.values():
                 if existing.status in (DownloadStatus.PENDING, DownloadStatus.DOWNLOADING):
@@ -640,7 +716,7 @@ class DownloadQueueManager:
                         logger.info("Duplicate download rejected: %s (%s)", title, service)
                         return existing.id
 
-            item = DownloadItem(service, title, cmd, metadata)
+            item = DownloadItem(service, title, cmd, final_metadata)
             self.items[item.id] = item
             logger.info("Added download: %s (%s)", title, service)
             self.db.save_download(item)

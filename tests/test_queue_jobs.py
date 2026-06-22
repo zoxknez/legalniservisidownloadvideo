@@ -7,7 +7,13 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from backend.jobs.inprocess import build_job, execute_job, is_inprocess_job, parse_job
-from backend.queue_manager import DownloadItem, DownloadQueueManager, redact_command, redact_log_line
+from backend.queue_manager import (
+    DownloadItem,
+    DownloadQueueManager,
+    _auto_metadata_for_cmd,
+    redact_command,
+    redact_log_line,
+)
 
 
 def test_build_job_hrti_eon_rts():
@@ -22,6 +28,40 @@ def test_build_job_hrti_eon_rts():
 
     rts = build_job("rtsplaneta", "download", {"target_url": "https://rtsplaneta.rs/x"})
     assert parse_job(rts)["service"] == "rtsplaneta"
+
+
+def test_auto_metadata_for_hrti_batch_titles():
+    cmd = build_job(
+        "hrti",
+        "downloads",
+        {
+            "output_dir": "D:/out",
+            "items": [
+                {"ref_id": "ep-1", "title": "Ep 1"},
+                {"ref_id": "ep-2", "title": "Ep 2"},
+            ],
+        },
+    )
+
+    meta = _auto_metadata_for_cmd("hrti", "HRTi: 2 epizoda", cmd)
+
+    assert meta["output_dir"] == "D:/out"
+    assert meta["multi_file"] is True
+    assert meta["file_match_titles"] == ["Ep 1", "Ep 2"]
+    assert meta["allow_recent_media_fallback"] is True
+
+
+def test_auto_metadata_for_single_title():
+    cmd = build_job(
+        "skyshowtime",
+        "direct",
+        {"output_dir": "D:/out", "title": "Film Title"},
+    )
+
+    meta = _auto_metadata_for_cmd("skyshowtime", "SkyShowtime: Film Title", cmd)
+
+    assert meta["output_dir"] == "D:/out"
+    assert meta["file_match_title"] == "Film Title"
 
 
 def test_queue_redacts_inprocess_secrets_and_content_keys():

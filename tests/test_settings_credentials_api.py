@@ -116,6 +116,22 @@ def test_select_output_folder_saves_dialog_choice(client, tmp_path, monkeypatch)
     assert selected.is_dir()
 
 
+def test_select_output_folder_timeout_returns_error(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "backend.routes.system._select_output_folder_with_dialog",
+        lambda _initial_dir: (_ for _ in ()).throw(TimeoutError("hidden dialog")),
+    )
+
+    r = client.post(
+        "/api/config/select-output-folder",
+        json={"initial_dir": str(tmp_path)},
+        headers={"X-API-Key": "test-secret-key"},
+    )
+
+    assert r.status_code == 504
+    assert "istekao" in r.json()["detail"]
+
+
 def test_status_reports_network_settings(client, monkeypatch):
     monkeypatch.setenv("VIDEODOWNLOAD_PUBLIC_URL", "http://203.0.113.20:8200")
     monkeypatch.setenv("VIDEODOWNLOAD_PROXY_URL", "http://user:pass@proxy.example:8080")

@@ -163,6 +163,7 @@ class OutputFolderSelectRequest(BaseModel):
 _VALID_TRANSCODE = frozenset({"off", "hevc", "av1"})
 _VALID_OUTPUT_FORMATS = frozenset({"mp4", "mkv"})
 _MAX_YTDLP_TEMPLATE_LEN = 240
+FOLDER_DIALOG_TIMEOUT_SECONDS = 45
 
 
 def _validate_output_dir(out: str) -> str:
@@ -238,7 +239,7 @@ exit 2
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
-                timeout=600,
+                timeout=FOLDER_DIALOG_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError("Folder dialog timeout") from exc
@@ -371,7 +372,13 @@ def select_output_folder(req: OutputFolderSelectRequest):
     try:
         selected = _select_output_folder_with_dialog(initial_dir)
     except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="Izbor foldera je istekao.") from exc
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Izbor foldera je istekao posle {FOLDER_DIALOG_TIMEOUT_SECONDS}s. "
+                "Ako se sistemski prozor nije prikazao, unesite putanju ruÄno i saÄuvajte je."
+            ),
+        ) from exc
     except Exception as exc:
         logger.warning("Output folder dialog failed: %s", exc)
         raise HTTPException(

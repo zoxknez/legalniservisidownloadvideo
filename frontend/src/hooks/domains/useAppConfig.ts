@@ -190,7 +190,7 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initial_dir: outputDir }),
-        timeoutMs: 610_000,
+        timeoutMs: 55_000,
       });
       if (res.ok) {
         const data = await res.json();
@@ -206,7 +206,13 @@ export function useAppConfig({ showToast }: UseAppConfigOptions) {
         showToast(await parseApiError(res, "Ne mogu otvoriti izbor foldera."), "error");
       }
     } catch (e: unknown) {
-      showToast(errorMessage(e, "Greška pri izboru foldera"), "error");
+      showToast(
+        errorMessage(
+          e,
+          "Izbor foldera nije uspeo. Ako se sistemski prozor nije otvorio, unesite putanju ručno i kliknite Sačuvaj unetu putanju.",
+        ),
+        "error",
+      );
     } finally {
       setSelectingOutputDir(false);
     }

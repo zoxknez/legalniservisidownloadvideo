@@ -8,6 +8,7 @@ from backend.services.output_files import (
     find_all_media_files,
     find_best_media_file,
     get_output_dir_from_cmd,
+    name_matches_hints,
     output_dir_from_o_value,
 )
 
@@ -33,6 +34,23 @@ def test_get_output_dir_prefers_metadata():
     cmd = ["python", "-m", "yt_dlp", "-o", r"C:\downloads\%(title)s.%(ext)s"]
     meta = {"output_dir": r"D:\explicit"}
     assert get_output_dir_from_cmd(cmd, meta) == r"D:\explicit"
+
+
+def test_name_matches_hrti_tool_safe_filename():
+    title = "\u017divot \u010dudnovat: \u0160uma? 01"
+
+    assert name_matches_hints("Zivot.cudnovat.Suma.01.mkv", [title])
+
+
+def test_file_match_hints_accepts_title_lists():
+    hints = file_match_hints(
+        {"file_match_titles": ["Ep 1", "Ep 2"], "video_title": "Fallback"},
+        "HRTi: 2 epizoda",
+    )
+
+    assert "Ep 1" in hints
+    assert "Ep 2" in hints
+    assert "Fallback" in hints
 
 
 def test_find_best_media_file_by_video_title(tmp_path):

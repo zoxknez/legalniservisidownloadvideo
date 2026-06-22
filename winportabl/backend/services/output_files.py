@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import logging
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -51,14 +52,29 @@ def get_output_dir_from_cmd(cmd: List[str], metadata: Optional[Dict[str, Any]] =
 
 def file_match_hints(metadata: Optional[Dict[str, Any]], queue_title: str) -> List[str]:
     hints: List[str] = []
+
+    def add_hint(value: Any) -> None:
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                add_hint(item)
+            return
+        if value and str(value).strip():
+            hints.append(str(value).strip())
+
     if metadata:
-        for key in ("file_match_title", "video_title"):
-            val = metadata.get(key)
-            if val and str(val).strip():
-                hints.append(str(val).strip())
+        for key in ("file_match_title", "video_title", "file_match_titles", "video_titles"):
+            add_hint(metadata.get(key))
     if queue_title and queue_title.strip():
         hints.append(queue_title.strip())
     return hints
+
+
+def _normalize_match_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _sanitize_title_fragment(title: str) -> str:
@@ -68,14 +84,20 @@ def _sanitize_title_fragment(title: str) -> str:
 def name_matches_hints(name: str, hints: List[str]) -> bool:
     if not hints:
         return False
+    norm_name = _normalize_match_text(name)
     for hint in hints:
         san = _sanitize_title_fragment(hint)
         if not san or len(san) < 3:
             continue
         if san in name:
             return True
-        for part in san.split():
+        norm_hint = _normalize_match_text(san)
+        if len(norm_hint) >= 3 and norm_hint in norm_name:
+            return True
+        for part in norm_hint.split():
             if len(part) > 3 and part in name:
+                return True
+            if len(part) > 3 and part in norm_name:
                 return True
     return False
 
@@ -85,7 +107,13 @@ def _prefix_matches(name: str, prefix: str) -> bool:
         return False
     san_name = _sanitize_title_fragment(name)
     san_prefix = _sanitize_title_fragment(prefix)
-    return san_name.startswith(san_prefix) or san_prefix in san_name
+    norm_name = _normalize_match_text(san_name)
+    norm_prefix = _normalize_match_text(san_prefix)
+    return (
+        san_name.startswith(san_prefix)
+        or san_prefix in san_name
+        or bool(norm_prefix and (norm_name.startswith(norm_prefix) or norm_prefix in norm_name))
+    )
 
 
 def find_all_media_files(
@@ -245,6 +273,24 @@ def remux_to_target_format(
         multi_file=multi_file,
         match_prefix=str(match_prefix) if match_prefix else None,
     )
+
+    if not targets and (metadata or {}).get("allow_recent_media_fallback"):
+        path = Path(output_dir)
+        if path.exists() and path.is_dir():
+            candidates = sorted(
+                (
+                    f
+                    for f in path.iterdir()
+                    if f.is_file()
+                    and f.suffix.lower() in (".mp4", ".mkv")
+                    and f.stat().st_mtime > min_mtime
+                ),
+                key=lambda p: (p.stat().st_mtime, p.name.lower()),
+            )
+            if multi_file:
+                targets = candidates
+            elif len(candidates) == 1:
+                targets = candidates
 
     if not targets:
         return

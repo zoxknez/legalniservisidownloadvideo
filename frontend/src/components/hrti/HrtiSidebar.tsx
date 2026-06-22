@@ -110,7 +110,7 @@ export function HrtiSidebar({
           </li>
           <li className="flex items-start gap-2">
             <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            Izlaz: MKV (DASH + Widevine dekripcija)
+            Izlaz: MP4 ili MKV prema globalnoj postavci formata
           </li>
         </ul>
       </div>
