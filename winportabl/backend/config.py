@@ -47,6 +47,11 @@ DEFAULT_CONFIG = {
     "voyo": {
         "ignore_catalog_drm_hint": False,
     },
+    "pipeline": {
+        # Checkpoint TTL (days): DONE jobs vs incomplete resume dirs
+        "checkpoint_done_days": 3,
+        "checkpoint_stale_days": 7,
+    },
 }
 
 class AppConfig:

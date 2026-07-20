@@ -19,7 +19,10 @@ API_CONFIG_FILES = [APP_ROOT / "eon_api.json", CONFIG_DIR / "eon_api.json"]
 DEFAULT_API_CONFIG = {
     "base_url": "",
     "headers": {
-        "User-Agent": "Mozilla/5.0 EONSafeDownloader/1.0",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
         "Accept": "application/json",
     },
     "auth_header": "Authorization",
@@ -275,15 +278,33 @@ def api_request(endpoint_name: str, extra: Optional[Dict[str, Any]] = None, requ
     data_body = _render(endpoint.get("data", None), context)
     timeout = int(endpoint.get("timeout", cfg.get("timeout", 25)))
 
-    response = requests.request(
-        method,
-        url,
-        headers=headers,
-        params=params or None,
-        json=json_body,
-        data=data_body,
-        timeout=timeout,
-    )
+    # Prefer shared browser session (TLS fingerprint) over bare requests.
+    try:
+        from backend.services.http_client import create_browser_session
+
+        _sess = getattr(api_request, "_session", None)
+        if _sess is None:
+            _sess = create_browser_session()
+            setattr(api_request, "_session", _sess)
+        response = _sess.request(
+            method,
+            url,
+            headers=headers,
+            params=params or None,
+            json=json_body,
+            data=data_body,
+            timeout=timeout,
+        )
+    except Exception:
+        response = requests.request(
+            method,
+            url,
+            headers=headers,
+            params=params or None,
+            json=json_body,
+            data=data_body,
+            timeout=timeout,
+        )
     response.raise_for_status()
     content_type = response.headers.get("content-type", "")
     if "json" in content_type:

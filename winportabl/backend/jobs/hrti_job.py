@@ -91,4 +91,11 @@ def run_hrti_job(
 
         _check_cancelled(cancel_event)
         log_fn(f"INFO HRTi batch zavrsen: {success}/{total} epizoda")
-        return total > 0 and success == total
+        if success == 0:
+            return False
+        if success < total:
+            log_fn(
+                f"WARNING HRTi delimičan uspeh: {success}/{total} — "
+                "uspešne epizode su sačuvane, ponovi batch za ostale."
+            )
+        return True

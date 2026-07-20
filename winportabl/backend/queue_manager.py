@@ -583,6 +583,57 @@ class DownloadQueueManager:
         for ws in disconnected:
             self.unregister_websocket(ws)
 
+    async def broadcast_resolve_fallback(
+        self,
+        service: str,
+        path: str,
+        title: str = "",
+        failed_paths: Optional[List[str]] = None,
+    ):
+        """Notify UI that stream resolve used a fallback path (sniffer/refresh/catalog)."""
+        if not self.active_websockets:
+            return
+        payload = {
+            "type": "resolve_fallback",
+            "data": {
+                "service": service,
+                "path": path,
+                "title": title,
+                "failed_paths": failed_paths or [],
+            },
+        }
+        disconnected = []
+        for ws in list(self.active_websockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.unregister_websocket(ws)
+
+    def notify_resolve_fallback(
+        self,
+        service: str,
+        path: str,
+        title: str = "",
+        failed_paths: Optional[List[str]] = None,
+    ) -> None:
+        """Thread-safe schedule of resolve_fallback WS event (from download workers)."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                self.broadcast_resolve_fallback(service, path, title, failed_paths)
+            )
+            return
+        except RuntimeError:
+            pass
+        main_loop = getattr(self, "_main_loop", None)
+        if main_loop is not None and main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast_resolve_fallback(service, path, title, failed_paths),
+                main_loop,
+            )
+
     async def broadcast_session_import(
         self,
         services: List[str],
@@ -653,6 +704,7 @@ class DownloadQueueManager:
         return self.db.load_scheduled()
 
     async def scheduler_daemon_loop(self):
+        self._main_loop = asyncio.get_running_loop()
         """Continuously polls the scheduled recordings and triggers tasks when start time is reached."""
         logger.info("IPTV scheduled recording daemon started!")
         while True:

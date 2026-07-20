@@ -401,8 +401,13 @@ class HRTIDownloader:
         logger.info("Received %d CONTENT key(s).", len(keys))
         return keys
 
-    def download_fragments(self, mpd_url: str, output_name: str,
-                           workers: int = 16) -> tuple[Path, Path]:
+    def download_fragments(
+        self,
+        mpd_url: str,
+        output_name: str,
+        workers: int = 16,
+        continuedl: bool = False,
+    ) -> tuple[Path, Path]:
         """
         Download encrypted audio and video fragments via yt-dlp.
         Uses concurrent fragment downloads for speed.
@@ -410,8 +415,9 @@ class HRTIDownloader:
         """
         video_out = self.temp_dir / f"{output_name}_enc_video.mp4"
         audio_out = self.temp_dir / f"{output_name}_enc_audio.mp4"
-        video_out.unlink(missing_ok=True)
-        audio_out.unlink(missing_ok=True)
+        if not continuedl:
+            video_out.unlink(missing_ok=True)
+            audio_out.unlink(missing_ok=True)
 
         aria2c = self.bins.get("aria2c")
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
@@ -456,7 +462,7 @@ class HRTIDownloader:
             "no_warnings": True,
             "noprogress": True,
             "updatetime": False,
-            "continuedl": False,
+            "continuedl": bool(continuedl),
             "fixup": "never",
             "merge_output_format": None,
             "postprocessors": [],
@@ -478,7 +484,7 @@ class HRTIDownloader:
         else:
             logger.info(f"Using yt-dlp with {workers} concurrent fragments")
 
-        logger.info(f"Downloading fragments from: {mpd_url}")
+        logger.info(f"Downloading fragments from: {mpd_url} (continuedl={continuedl})")
         download_started = time.time()
         with YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(mpd_url, download=True)
@@ -611,27 +617,73 @@ class HRTIDownloader:
         ref_id = self.resolve_reference_id(url_or_ref)
         logger.info(f"Reference ID: {ref_id}")
 
-        info = self.auth.get_stream_info(ref_id)
-        mpd_url = info["mpd_url"]
-        license_url = info["license_url"]
-        drm_headers = info["drm_headers"]
-        title = title_override or info["title"]
+        from backend.core.pipeline import MediaPipeline, StreamResolve, with_api_refresh_sniffer
+
+        def path_api() -> StreamResolve:
+            info = self.auth.get_stream_info(ref_id)
+            mpd = info.get("mpd_url") or ""
+            if not mpd:
+                raise RuntimeError("HRTi API nije vratio MPD URL")
+            return StreamResolve(
+                mpd_url=mpd,
+                license_url=info.get("license_url") or "",
+                headers=dict(info.get("drm_headers") or {}),
+                title=title_override or info.get("title") or ref_id,
+                source="api",
+                meta={"info": info},
+            )
+
+        def path_refresh() -> StreamResolve:
+            # Re-auth session if token soft-expired
+            try:
+                if not self.auth.is_authenticated():
+                    self.auth.login()
+            except Exception as exc:
+                logger.warning("HRTi re-login: %s", exc)
+            return path_api()
+
+        resolved = with_api_refresh_sniffer(
+            "hrti",
+            api=path_api,
+            refresh=path_refresh,
+            require_license=True,
+        )
+        mpd_url = resolved.mpd_url
+        license_url = resolved.license_url
+        drm_headers = resolved.headers or {}
+        title = title_override or resolved.title or ref_id
 
         safe_name = self.sanitize_filename(title)
         logger.info(f"Title: {title}")
         logger.info(f"MPD:   {mpd_url}")
+        if resolved.source == "sniffer":
+            logger.info("HRTi: stream iz sniffer bridge-a")
 
-        keys = self.get_decryption_keys(mpd_url, license_url, drm_headers)
-        enc_video, enc_audio = self.download_fragments(mpd_url, safe_name, self.workers)
+        pipeline = MediaPipeline(
+            service="hrti",
+            mpd_url=mpd_url,
+            license_url=license_url or "",
+            title=title,
+            output_dir=self.output_dir,
+            bins=self.bins,
+            resume=True,
+        )
 
-        dec_video = self.decrypt_file(enc_video, keys)
-        dec_audio = self.decrypt_file(enc_audio, keys)
+        def _acquire_keys():
+            return self.get_decryption_keys(mpd_url, license_url, drm_headers)
 
-        output_path = self.output_dir / f"{safe_name}.mkv"
-        self.mux_output(dec_video, dec_audio, output_path)
+        def _download_frags(continuedl: bool):
+            return self.download_fragments(
+                mpd_url, safe_name, self.workers, continuedl=continuedl
+            )
+
+        result = pipeline.run(
+            acquire_keys=_acquire_keys,
+            download_fragments=_download_frags,
+            output_name=safe_name,
+        )
         self.cleanup(safe_name)
-
-        return output_path
+        return result.output_path
 
 
 # ---------------------------------------------------------------------------

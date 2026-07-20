@@ -242,8 +242,22 @@ class DRMManager:
         self._init_lock = threading.Lock()
         # Serialize CDM session open/challenge/parse — pywidevine is not thread-safe
         self._session_lock = threading.Lock()
+        # Shared browser-like session for license POSTs when callers omit one
+        self._license_http = None
 
         self._init_cdm()
+
+    def _get_license_http(self, http_session=None):
+        """Return caller session or a lazy browser-like license session."""
+        if http_session is not None:
+            return http_session
+        if self._license_http is None:
+            try:
+                from backend.services.http_client import create_browser_session
+                self._license_http = create_browser_session()
+            except Exception:
+                self._license_http = requests.Session()
+        return self._license_http
 
     # ── CDM Initialization ────────────────────────────────────────────────────
 
@@ -332,23 +346,59 @@ class DRMManager:
         self.key_cache.invalidate_all()
         with self._cert_lock:
             self._provider_certs.clear()
+        self._license_http = None
         self._init_cdm()
         logger.info("[DRMManager] CDM reloaded.")
 
     def is_ready(self) -> bool:
         return self.cdm is not None or self.legacy_mode
 
+    def get_quality_policy(self) -> Dict[str, Any]:
+        """
+        Runtime quality policy based on WVD security level.
+        L3 (software) is typical on PC; L1 allows higher ladders when available.
+        """
+        sl = int(self.wvd_metadata.get("security_level") or 3)
+        if sl == 1:
+            return {
+                "security_level": 1,
+                "max_height": 2160,
+                "hdr_allowed": True,
+                "label": "L1",
+                "description": "L1 CDM – do 4K/HDR kada servis dozvoli.",
+            }
+        if sl == 2:
+            return {
+                "security_level": 2,
+                "max_height": 1080,
+                "hdr_allowed": False,
+                "label": "L2",
+                "description": "L2 CDM – ograničen hardverski nivo.",
+            }
+        return {
+            "security_level": 3,
+            "max_height": 720,
+            "hdr_allowed": False,
+            "label": "L3",
+            "description": "L3 softverski CDM – tipično max 720p na Max/sličnim servisima.",
+        }
+
     # ── Provider Certificate ──────────────────────────────────────────────────
 
-    def prefetch_provider_cert(self, service_name: str, license_url: str,
-                                headers: Optional[Dict[str, str]] = None) -> bool:
+    def prefetch_provider_cert(
+        self,
+        service_name: str,
+        license_url: str,
+        headers: Optional[Dict[str, str]] = None,
+        http_session=None,
+    ) -> bool:
         """
         Fetch the provider's Widevine service certificate.
         This certificate is used to encrypt the client ID in license requests,
         improving privacy and sometimes required by certain license servers.
         Returns True on success.
         """
-        if not self.cdm:
+        if not self.cdm or not service_name:
             return False
         with self._cert_lock:
             if service_name in self._provider_certs:
@@ -359,26 +409,37 @@ class DRMManager:
                 session_id = self.cdm.open()
                 try:
                     challenge = self.cdm.get_service_certificate_challenge(session_id)
-                    resp = requests.post(license_url, data=challenge,
-                                         headers=headers or {"Content-Type": "application/octet-stream"},
-                                         timeout=15)
+                    http = self._get_license_http(http_session)
+                    resp = http.post(
+                        license_url,
+                        data=challenge,
+                        headers=headers or {"Content-Type": "application/octet-stream"},
+                        timeout=15,
+                    )
                     if resp.status_code == 200 and resp.content:
                         self.cdm.set_service_certificate(session_id, resp.content)
                         cert_data = resp.content
                         with self._cert_lock:
                             self._provider_certs[service_name] = cert_data
-                        logger.info(f"[DRMManager] Provider cert fetched for '{service_name}' "
-                                    f"({len(cert_data)} bytes)")
+                        logger.info(
+                            "[DRMManager] Provider cert fetched for '%s' (%s bytes)",
+                            service_name,
+                            len(cert_data),
+                        )
                         return True
                 finally:
                     self.cdm.close(session_id)
         except Exception as e:
-            logger.debug(f"[DRMManager] Provider cert prefetch failed for '{service_name}': {e}")
+            logger.debug(
+                "[DRMManager] Provider cert prefetch failed for '%s': %s",
+                service_name,
+                e,
+            )
         return False
 
     # ── License Exchange ──────────────────────────────────────────────────────
 
-    def _unwrap_license(self, resp: requests.Response) -> bytes:
+    def _unwrap_license(self, resp) -> bytes:
         """
         Handle all known license response formats:
           - DRMtoday: {"status":"OK","license":"<base64>"}
@@ -400,8 +461,14 @@ class DRMManager:
             pass
         return resp.content
 
-    def _get_keys_modern(self, pssh_b64: str, license_url: str,
-                         headers: dict, service_name: str = "") -> List[str]:
+    def _get_keys_modern(
+        self,
+        pssh_b64: str,
+        license_url: str,
+        headers: dict,
+        service_name: str = "",
+        http_session=None,
+    ) -> List[str]:
         if not self.cdm:
             raise RuntimeError("CDM not initialized. Check device.wvd file.")
 
@@ -421,7 +488,8 @@ class DRMManager:
                 challenge = self.cdm.get_license_challenge(session_id, pssh)
                 logger.debug(f"[DRMManager] Challenge size: {len(challenge)}B → {license_url}")
 
-                resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
+                http = self._get_license_http(http_session)
+                resp = http.post(license_url, data=challenge, headers=headers, timeout=20)
                 resp.raise_for_status()
 
                 logger.debug(
@@ -448,15 +516,22 @@ class DRMManager:
             finally:
                 self.cdm.close(session_id)
 
-    def _get_keys_legacy(self, pssh_b64: str, license_url: str,
-                         headers: dict, service_name: str = "") -> List[str]:
+    def _get_keys_legacy(
+        self,
+        pssh_b64: str,
+        license_url: str,
+        headers: dict,
+        service_name: str = "",
+        http_session=None,
+    ) -> List[str]:
         from pywidevine.decrypt.wvdecryptcustom import WvDecrypt
         with self._session_lock:
             for attempt in range(3):
                 try:
                     wvd = WvDecrypt(init_data_b64=pssh_b64.encode(), cert_data_b64=None)
                     challenge = wvd.get_challenge()
-                    resp = requests.post(license_url, data=challenge, headers=headers, timeout=20)
+                    http = self._get_license_http(http_session)
+                    resp = http.post(license_url, data=challenge, headers=headers, timeout=20)
                     resp.raise_for_status()
                     wvd.update_license(base64.b64encode(resp.content))
                     success, keys = wvd.start_process()
@@ -468,21 +543,40 @@ class DRMManager:
                         time.sleep(2)
         raise Exception("Failed to get decryption keys after 3 legacy attempts")
 
-    def get_keys(self, pssh_b64: str, license_url: str, headers: dict,
-                 service_name: str = "") -> List[str]:
+    def get_keys(
+        self,
+        pssh_b64: str,
+        license_url: str,
+        headers: dict,
+        service_name: str = "",
+        http_session=None,
+        auto_prefetch_cert: bool = True,
+    ) -> List[str]:
         """
         Main entry point. Checks cache first, then fetches from license server.
+
+        http_session: optional service auth/CDN session (TLS fingerprint + cookies).
+        auto_prefetch_cert: attempt provider service certificate before challenge.
         """
         # Cache lookup
         cached = self.key_cache.get(pssh_b64, license_url)
         if cached:
             return cached
 
+        if auto_prefetch_cert and service_name and not self.legacy_mode:
+            self.prefetch_provider_cert(
+                service_name, license_url, headers, http_session=http_session
+            )
+
         # Fetch from server
         if self.legacy_mode:
-            keys = self._get_keys_legacy(pssh_b64, license_url, headers, service_name)
+            keys = self._get_keys_legacy(
+                pssh_b64, license_url, headers, service_name, http_session=http_session
+            )
         else:
-            keys = self._get_keys_modern(pssh_b64, license_url, headers, service_name)
+            keys = self._get_keys_modern(
+                pssh_b64, license_url, headers, service_name, http_session=http_session
+            )
 
         if keys:
             self.key_cache.put(pssh_b64, license_url, keys)
@@ -490,18 +584,38 @@ class DRMManager:
 
     # ── Multi-PSSH Fallback ───────────────────────────────────────────────────
 
-    def get_keys_multi_pssh(self, pssh_list: List[str], license_url: str,
-                             headers: dict, service_name: str = "") -> List[str]:
+    def get_keys_multi_pssh(
+        self,
+        pssh_list: List[str],
+        license_url: str,
+        headers: dict,
+        service_name: str = "",
+        http_session=None,
+        auto_prefetch_cert: bool = True,
+    ) -> List[str]:
         """
         Try each PSSH in the list until keys are obtained.
         Merges keys from all successful attempts (de-duplicated by KID).
+        Prefers video PSSH first when extract_all_pssh_from_mpd ordered the list.
         """
         all_keys: Dict[str, str] = {}  # kid -> key
+
+        if auto_prefetch_cert and service_name and not self.legacy_mode and pssh_list:
+            self.prefetch_provider_cert(
+                service_name, license_url, headers, http_session=http_session
+            )
 
         for i, pssh in enumerate(pssh_list):
             try:
                 logger.info(f"[DRMManager] Trying PSSH {i + 1}/{len(pssh_list)}: {pssh[:32]}…")
-                keys = self.get_keys(pssh, license_url, headers, service_name)
+                keys = self.get_keys(
+                    pssh,
+                    license_url,
+                    headers,
+                    service_name,
+                    http_session=http_session,
+                    auto_prefetch_cert=False,
+                )
                 for pair in keys:
                     if ":" in pair:
                         kid, key = pair.split(":", 1)
@@ -520,12 +634,39 @@ class DRMManager:
     def extract_all_pssh_from_mpd(mpd_text: str) -> List[str]:
         """
         Extract ALL Widevine PSSH boxes from an MPD manifest.
-        Returns a deduplicated list (most specific/video PSSH first).
+        Returns a deduplicated list with **video PSSH first**, then audio, then other.
         """
         import xmltodict
 
-        pssh_list: List[str] = []
+        video_pssh: List[str] = []
+        audio_pssh: List[str] = []
+        other_pssh: List[str] = []
         seen: set = set()
+
+        def _push(bucket: List[str], val: str) -> None:
+            if val and val not in seen:
+                bucket.append(val)
+                seen.add(val)
+
+        def _adapt_kind(adapt: dict) -> str:
+            ctype = str(adapt.get("@contentType") or "").lower()
+            mime = str(adapt.get("@mimeType") or "").lower()
+            blob = f"{ctype} {mime}"
+            if "video" in blob:
+                return "video"
+            if "audio" in blob:
+                return "audio"
+            # Representation mime fallback
+            reps = adapt.get("Representation", [])
+            if isinstance(reps, dict):
+                reps = [reps]
+            for rep in reps or []:
+                rm = str(rep.get("@mimeType") or "").lower()
+                if "video" in rm:
+                    return "video"
+                if "audio" in rm:
+                    return "audio"
+            return "other"
 
         try:
             mpd = xmltodict.parse(mpd_text)
@@ -538,6 +679,12 @@ class DRMManager:
                 if isinstance(adapt_sets, dict):
                     adapt_sets = [adapt_sets]
                 for adapt in adapt_sets:
+                    kind = _adapt_kind(adapt if isinstance(adapt, dict) else {})
+                    bucket = (
+                        video_pssh if kind == "video"
+                        else audio_pssh if kind == "audio"
+                        else other_pssh
+                    )
                     cp = adapt.get("ContentProtection", [])
                     if isinstance(cp, dict):
                         cp = [cp]
@@ -550,23 +697,25 @@ class DRMManager:
                                 val = pssh_elem.strip()
                             elif isinstance(pssh_elem, dict):
                                 val = pssh_elem.get("#text", "").strip()
-                            if val and val not in seen:
-                                pssh_list.append(val)
-                                seen.add(val)
+                            _push(bucket, val)
         except Exception as e:
             logger.warning(f"[DRMManager] MPD XML parse error: {e}")
 
-        # Regex fallback
+        # Regex fallback (unknown kind → other)
         for m in re.finditer(
             r"<(?:cenc:)?pssh[^>]*>([A-Za-z0-9+/=]+)</(?:cenc:)?pssh>",
             mpd_text, re.IGNORECASE
         ):
-            val = m.group(1).strip()
-            if val and val not in seen:
-                pssh_list.append(val)
-                seen.add(val)
+            _push(other_pssh, m.group(1).strip())
 
-        logger.info(f"[DRMManager] Found {len(pssh_list)} PSSH(s) in MPD")
+        pssh_list = video_pssh + audio_pssh + other_pssh
+        logger.info(
+            "[DRMManager] Found %s PSSH(s) in MPD (video=%s audio=%s other=%s)",
+            len(pssh_list),
+            len(video_pssh),
+            len(audio_pssh),
+            len(other_pssh),
+        )
         return pssh_list
 
     # ── Health / Diagnostics ──────────────────────────────────────────────────
@@ -575,6 +724,7 @@ class DRMManager:
         """
         Full DRM health report for the UI.
         """
+        policy = self.get_quality_policy()
         report: Dict[str, Any] = {
             "cdm_ready": self.is_ready(),
             "legacy_mode": self.legacy_mode,
@@ -583,6 +733,7 @@ class DRMManager:
             "key_cache": self.key_cache.stats(),
             "provider_certs_fetched": list(self._provider_certs.keys()),
             "pywidevine_version": None,
+            "quality_policy": policy,
             "recommendations": [],
         }
 
@@ -601,12 +752,12 @@ class DRMManager:
             )
         elif sl == 3 or sl == 0:
             report["recommendations"].append(
-                "Koristite L3 (softverski) CDM. Za 1080p+ i SDR streaming to je dovoljno. "
-                "L1 zahtijeva fizički TEE čip i nije dostupan na PC-u."
+                f"L3 softverski CDM – preporučeni max {policy['max_height']}p "
+                f"(npr. Max). L1 zahtijeva hardverski TEE i nije tipičan na PC-u."
             )
         elif sl == 1:
             report["recommendations"].append(
-                "L1 CDM aktivan – maksimalna zaštita sadržaja, podržan hardverski output."
+                f"L1 CDM aktivan – policy do {policy['max_height']}p, HDR dozvoljen."
             )
 
         if report["wvd_metadata"].get("is_valid") and not self.wvd_path:
@@ -617,7 +768,8 @@ class DRMManager:
         if not self._provider_certs:
             report["recommendations"].append(
                 "Nema prefetch-ovanih provider sertifikata. "
-                "Koristite /api/drm/prefetch-cert za unaprijeđen license handshake."
+                "Automatski se pokušavaju pri prvom license requestu, "
+                "ili ručno preko /api/drm/prefetch-cert."
             )
 
         return report

@@ -29,6 +29,38 @@ Fajlovi u rootu (`voyo_downloader.py`, `hrti_*.py`, …) su **tanke shim launche
 - `hrti.hrti_downloader`
 - `eon.eon_downloader`
 
+## Shared pipeline (Faza 2)
+
+`backend/core/pipeline/` — zajednički stage pipeline sa checkpoint resume-om:
+
+| Modul | Uloga |
+|-------|--------|
+| `orchestrator.MediaPipeline` | keys → fragments → decrypt → mux |
+| `checkpoint.JobCheckpoint` | `~/.videodownload/jobs/<id>/checkpoint.json` |
+| `segments` | native URL-list resume (po segmentu) |
+| `decrypt` / `mux` | mp4decrypt + mkvmerge/ffmpeg |
+
+| Servis | MediaPipeline | Segment resume | Multi-path ladder |
+|--------|---------------|----------------|-------------------|
+| EON | da | stage | api → catalog → sniffer |
+| HRTi | da | stage | api → re-login → sniffer |
+| SkyShowtime | da + finalize | stage | api → re-auth → sniffer |
+| RTS Planeta | da + keys_after_fragments | stage | api → re-login → sniffer |
+| HBO Max | partial | **segment** | api → refresh → sniffer |
+| Voyo | native HLS | **segment** | api → re-link → sniffer |
+
+`pipeline.resolve.with_api_refresh_sniffer` / `resolve_stream_ladder` — standardni ladder.
+
+Checkpoints: `~/.videodownload/jobs/<id>/`  
+- TTL cleanup pri startu: DONE posle 3 dana, ostalo posle 7 dana (`cleanup_old_jobs`)  
+  (podešava se u `config.pipeline.checkpoint_done_days` / `checkpoint_stale_days`)  
+- WS `resolve_fallback` → UI toast kad resolve ide preko sniffer/refresh/catalog  
+
+### Batch / serije
+
+Delimičan uspeh (**neke** epizode OK) = job **finished** sa WARNING logom (Sky, HRTi, Voyo, EON).  
+Fail samo ako **nijedna** epizoda nije preuzeta.
+
 ## Zastarjelo
 
 - `Eon/` — uklonjen legacy engine (vidi `Eon/README.md`)

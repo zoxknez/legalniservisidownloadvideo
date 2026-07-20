@@ -65,18 +65,24 @@ except ImportError:
     _USE_CENTRAL_DRM = False
     _drm_manager = None
 
-try:
-    from curl_cffi import requests as cffi_requests
-    _HAS_CURL_CFFI = True
-except ImportError:
-    _HAS_CURL_CFFI = False
-
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-# For L3 (software) CDM cap height at 720 (some servers enforce 580 for browser L3)
+# Fallback when CDM metadata is unavailable. Runtime policy uses WVD security level.
 L3_MAX_HEIGHT = 720
+
+
+def _max_height_for_cdm() -> int:
+    """Pick max video height from central DRM quality policy (L3→720, L1→2160)."""
+    if _USE_CENTRAL_DRM and _drm_manager:
+        try:
+            policy = _drm_manager.get_quality_policy()
+            h = int(policy.get("max_height") or L3_MAX_HEIGHT)
+            return max(360, h)
+        except Exception:
+            pass
+    return L3_MAX_HEIGHT
 
 API_BASE     = "https://default.any-any.prd.api.max.com/ara"
 LICENSE_URL  = "https://widevine.any-any.prd.max.com/widevine/v1/license"
@@ -222,18 +228,21 @@ class MaxAPI:
     """HTTP client for the Max/HBO Max API."""
 
     def __init__(self, auth: HBOMaxAuth):
+        from backend.services.http_client import chrome_user_agent, create_browser_session
+
         self.auth = auth
-        if _HAS_CURL_CFFI:
-            self._session = cffi_requests.Session(impersonate="chrome124")
-        else:
-            self._session = requests.Session()
-            logger.warning("curl_cffi nije instaliran; neke Max CDN rute mogu biti blokirane.")
+        self._session = create_browser_session(
+            extra_headers={
+                "Origin": "https://www.max.com",
+                "Referer": "https://www.max.com/",
+            }
+        )
+        self._ua = chrome_user_agent()
 
     def _headers(self, extra: Optional[Dict] = None) -> Dict[str, str]:
         h = {
             "Authorization": f"Bearer {self.auth.get_access_token()}",
-            "User-Agent":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent":    self._ua,
             "Accept":        "application/json",
             "Origin":        "https://www.max.com",
             "Referer":       "https://www.max.com/",
@@ -687,16 +696,14 @@ def _extract_segment_urls(adapt_rep: Dict, mpd_base_url: str) -> List[str]:
 
 # ── Download helpers ───────────────────────────────────────────────────────────
 
-_seg_session: Optional[requests.Session] = None
+_seg_session = None
 
-def _get_seg_session() -> requests.Session:
+def _get_seg_session():
     global _seg_session
     if _seg_session is None:
-        _seg_session = requests.Session()
-        _seg_session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        })
+        from backend.services.http_client import create_browser_session
+
+        _seg_session = create_browser_session()
     return _seg_session
 
 
@@ -705,8 +712,40 @@ def _download_segments(
     out_path: Path,
     label: str,
     workers: int = 16,
+    checkpoint=None,
+    track: str = "video",
 ) -> None:
-    """Download a list of segment URLs and concatenate into out_path."""
+    """
+    Download a list of segment URLs and concatenate into out_path.
+
+    When *checkpoint* is provided, uses disk-backed resumable segment store
+    (survives process restart mid-download).
+    """
+    if not urls:
+        raise RuntimeError(f"{label}: nema segment URL-ova")
+
+    # Prefer resumable native path when checkpoint is available
+    if checkpoint is not None:
+        from backend.core.pipeline import download_segments_resumable, merge_segment_files
+
+        def _progress(done: int, total: int) -> None:
+            if total:
+                pct = done * 100 // total
+                if done == total or done % max(1, total // 20) == 0:
+                    logger.info("  %s: %3d%% (%s/%s segmenata)", label, pct, done, total)
+
+        paths = download_segments_resumable(
+            urls,
+            track=track,
+            checkpoint=checkpoint,
+            headers={},
+            workers=workers,
+            progress=_progress,
+            session=_get_seg_session(),
+        )
+        merge_segment_files(paths, out_path)
+        return
+
     total = len(urls)
     data_map: Dict[int, bytes] = {}
     sess = _get_seg_session()
@@ -863,6 +902,7 @@ def _download_decrypt_audio_tracks(
     mp4decrypt_bin: str,
     workers: int,
     audio_mode: str = "all",
+    checkpoint=None,
 ) -> List[Dict[str, Any]]:
     """Download and decrypt all (or primary) audio tracks from the manifest."""
     if not audio_tracks:
@@ -885,6 +925,7 @@ def _download_decrypt_audio_tracks(
         safe_name = _safe_filename_part(f"{lang}_{role}_{rep_id}")
         enc_audio = tmp / f"audio_{safe_name}.mp4"
         dec_audio = tmp / f"audio_{safe_name}_dec.mp4"
+        track_key = f"audio_{safe_name}"
 
         label = _audio_display_name(lang, role)
         logger.info("Preuzimam audio segmente (%s) …", label)
@@ -892,12 +933,24 @@ def _download_decrypt_audio_tracks(
         if not aud_urls:
             logger.warning("Preskačem audio %s — nema segmenata.", label)
             continue
-        _download_segments(aud_urls, enc_audio, f"Audio {label}", workers)
+        if enc_audio.exists() and enc_audio.stat().st_size > 10_000:
+            logger.info("Audio %s već postoji — preskačem download", label)
+        else:
+            _download_segments(
+                aud_urls,
+                enc_audio,
+                f"Audio {label}",
+                workers,
+                checkpoint=checkpoint,
+                track=track_key,
+            )
 
         if keys:
-            _decrypt_file(enc_audio, dec_audio, keys, mp4decrypt_bin)
+            if not (dec_audio.exists() and dec_audio.stat().st_size > 10_000):
+                _decrypt_file(enc_audio, dec_audio, keys, mp4decrypt_bin)
         else:
-            enc_audio.rename(dec_audio)
+            if not dec_audio.exists():
+                shutil.copy2(enc_audio, dec_audio)
 
         decrypted.append({
             "lang": lang,
@@ -985,11 +1038,9 @@ class HBOMaxDownloader:
         self.mp4decrypt_path = None
         self.mkvmerge_path = None
 
-        if _HAS_CURL_CFFI:
-            from curl_cffi import requests as cffi_requests
-            self._sess = cffi_requests.Session(impersonate="chrome124")
-        else:
-            self._sess = requests.Session()
+        from backend.services.http_client import create_browser_session
+
+        self._sess = create_browser_session()
 
     # ── Video ID extraction ───────────────────────────────────────────────────
 
@@ -1025,7 +1076,9 @@ class HBOMaxDownloader:
         """Download segments, decrypt, subtitles and mux from parsed MPD."""
         audio_tracks = _normalize_audio_tracks(parsed)
         if not parsed.get("video"):
-            raise RuntimeError(f"Nije pronađena video reprezentacija ≤{L3_MAX_HEIGHT}p u MPD.")
+            raise RuntimeError(
+                f"Nije pronađena video reprezentacija ≤{_max_height_for_cdm()}p u MPD."
+            )
         if not audio_tracks:
             raise RuntimeError("Nije pronađena audio reprezentacija u MPD.")
 
@@ -1046,16 +1099,41 @@ class HBOMaxDownloader:
             [f"{t.get('lang', 'und')}{'/' + t['role'] if t.get('role') else ''}" for t in parsed["subtitles"]],
         )
 
-        tmp = Path(tempfile.mkdtemp(prefix="hbomax_"))
+        from backend.core.pipeline import JobCheckpoint
+
+        # Stable checkpoint for segment resume across restarts
+        cp = JobCheckpoint.open(
+            service="hbomax",
+            mpd_url=mpd_url,
+            title=safe_title,
+        )
+        if keys and not cp.keys:
+            cp.set_keys([f"{k['kid']}:{k['key']}" for k in keys if k.get("kid") and k.get("key")])
+
+        # Prefer job segment dir for durable partial downloads
+        work_dir = cp.segments_dir / "work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        tmp = work_dir
         try:
             enc_video = tmp / "video.mp4"
             dec_video = tmp / "video_dec.mp4"
 
-            logger.info("Preuzimam video segmente …")
+            logger.info("Preuzimam video segmente (resumable) …")
             vid_urls = _extract_segment_urls(parsed["video"], mpd_url)
             if not vid_urls:
                 raise RuntimeError("Nije pronađen nijedan video segment URL.")
-            _download_segments(vid_urls, enc_video, "Video", self.workers)
+            if enc_video.exists() and enc_video.stat().st_size > 50_000:
+                logger.info("Video fragment već postoji — preskačem download")
+            else:
+                _download_segments(
+                    vid_urls,
+                    enc_video,
+                    "Video",
+                    self.workers,
+                    checkpoint=cp,
+                    track="video",
+                )
+            cp.set_fragments(enc_video, enc_video)
 
             bins = _require_binaries(self.mp4decrypt_path, self.mkvmerge_path)
 
@@ -1063,7 +1141,8 @@ class HBOMaxDownloader:
                 logger.info("Dekripcija videa …")
                 _decrypt_file(enc_video, dec_video, keys, bins["mp4decrypt"])
             else:
-                enc_video.rename(dec_video)
+                if not dec_video.exists():
+                    shutil.copy2(enc_video, dec_video)
 
             decrypted_audio = _download_decrypt_audio_tracks(
                 audio_tracks,
@@ -1073,6 +1152,7 @@ class HBOMaxDownloader:
                 bins["mp4decrypt"],
                 self.workers,
                 audio_mode=audio_mode,
+                checkpoint=cp,
             )
 
             subs: List[Dict] = []
@@ -1090,9 +1170,19 @@ class HBOMaxDownloader:
             logger.info(f"Muxing → {out_path} …")
             _mux_mkv(dec_video, decrypted_audio, out_path, subs or None, bins["mkvmerge"])
             logger.info(f"✓ Završeno: {out_path} ({len(decrypted_audio)} audio, {len(subs)} titlova)")
-        finally:
-            import shutil as _shutil
-            _shutil.rmtree(tmp, ignore_errors=True)
+            cp.set_output(out_path)
+            # Cleanup only after successful mux (keep segments for resume on failure)
+            try:
+                shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+        except Exception:
+            logger.info(
+                "HBO checkpoint zadržan za resume: job=%s dir=%s",
+                cp.job_id,
+                cp.dir,
+            )
+            raise
 
     def download(
         self,
@@ -1100,7 +1190,9 @@ class HBOMaxDownloader:
         wanted_subs: List[str],
         audio_mode: str = "all",
     ) -> None:
-        """Full download pipeline for one video."""
+        """Full download pipeline for one video (API → refresh → sniffer ladder)."""
+        from backend.core.pipeline import StreamResolve, with_api_refresh_sniffer
+
         video_id = self.extract_video_id(video_id)
         logger.info(f"Preuzimam video ID: {video_id}")
 
@@ -1116,37 +1208,86 @@ class HBOMaxDownloader:
         safe_title = re.sub(r'[<>:"/\\|?*]', "_", title)
         logger.info(f"Naslov: {title}")
 
-        # ── 2. Playback URL + DRM headers ─────────────────────────────────────
-        logger.info("Tražim stream URL …")
-        # Try to find the edit/asset ID
-        edit_id = self._find_edit_id(content, video_id)
-        try:
+        # ── 2. Resolve stream (API → token refresh → sniffer) ─────────────────
+        def path_api() -> StreamResolve:
+            edit_id = self._find_edit_id(content, video_id)
             playback = self.api.get_playback(edit_id)
-        except Exception as e:
-            raise RuntimeError(f"Ne mogu dobiti playback info: {e}")
+            mpd = self._extract_mpd_url(playback)
+            if not mpd:
+                raise RuntimeError("MPD URL nije pronađen u playback odgovoru.")
+            return StreamResolve(
+                mpd_url=mpd,
+                license_url=LICENSE_URL,
+                headers=self.api.get_license_headers(playback),
+                title=title,
+                source="api",
+                meta={"playback": playback},
+            )
 
-        mpd_url = self._extract_mpd_url(playback)
-        if not mpd_url:
-            raise RuntimeError("MPD URL nije pronađen u playback odgovoru.")
+        def path_refresh() -> StreamResolve:
+            # Force access token re-read / refresh via auth layer
+            try:
+                _ = self.auth.get_access_token()
+            except Exception as exc:
+                logger.warning("HBO token refresh attempt: %s", exc)
+            return path_api()
+
+        try:
+            resolved = with_api_refresh_sniffer(
+                "hbomax",
+                api=path_api,
+                refresh=path_refresh,
+                require_license=True,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ne mogu dobiti stream (API/sniffer): {e}") from e
+
+        if resolved.source == "sniffer":
+            logger.info("HBO: koristim sniffer fallback (manifest+license)")
+            self.download_direct(
+                resolved.mpd_url,
+                resolved.license_url,
+                resolved.title or title,
+                wanted_subs,
+                audio_mode,
+            )
+            return
+
+        mpd_url = resolved.mpd_url
+        playback = (resolved.meta or {}).get("playback") or {}
         logger.info(f"MPD: {mpd_url[:80]}…")
 
         # ── 3. Parse manifest ─────────────────────────────────────────────────
-        logger.info("Parsiranje MPD manifesta …")
+        max_h = _max_height_for_cdm()
+        logger.info("Parsiranje MPD manifesta (max height=%sp) …", max_h)
         mpd_text = self.api.get_manifest(mpd_url)
-        parsed   = _parse_mpd(mpd_text, max_height=L3_MAX_HEIGHT)
+        parsed   = _parse_mpd(mpd_text, max_height=max_h)
 
         # ── 4. Widevine keys ──────────────────────────────────────────────────
         pssh = parsed.get("pssh")
         keys: List[Dict] = []
         if pssh:
             logger.info("Dobavljam Widevine ključeve …")
-            lic_headers = self.api.get_license_headers(playback)
+            lic_headers = resolved.headers or self.api.get_license_headers(playback)
             try:
-                keys = self.cdm.get_keys(pssh, LICENSE_URL, lic_headers)
+                keys = self.cdm.get_keys(pssh, resolved.license_url or LICENSE_URL, lic_headers)
                 logger.info(f"Dobijeno {len(keys)} ključ(eva)")
                 for k in keys:
                     logger.debug(f"  KID={k['kid']} KEY={k['key']}")
             except Exception as e:
+                # Last chance: sniffer path
+                from backend.core.pipeline import sniffer_resolve
+                sniff = sniffer_resolve("hbomax")
+                if sniff and sniff.license_url and sniff.mpd_url:
+                    logger.warning("License fail (%s) — sniffer fallback", e)
+                    self.download_direct(
+                        sniff.mpd_url,
+                        sniff.license_url,
+                        sniff.title or title,
+                        wanted_subs,
+                        audio_mode,
+                    )
+                    return
                 raise RuntimeError(f"Widevine licenca nije uspela: {e}")
         else:
             logger.warning("PSSH nije pronađen — sadržaj možda nije zaštićen ili je manifest nestandardan.")
@@ -1171,9 +1312,10 @@ class HBOMaxDownloader:
         logger.info(f"Naslov: {title}")
 
         # ── 1. Parse manifest ─────────────────────────────────────────────────
-        logger.info("Parsiranje MPD manifesta …")
+        max_h = _max_height_for_cdm()
+        logger.info("Parsiranje MPD manifesta (max height=%sp) …", max_h)
         mpd_text = self.api.get_manifest(manifest_url)
-        parsed   = _parse_mpd(mpd_text, max_height=L3_MAX_HEIGHT)
+        parsed   = _parse_mpd(mpd_text, max_height=max_h)
 
         # ── 2. Widevine keys ──────────────────────────────────────────────────
         pssh = parsed.get("pssh")
