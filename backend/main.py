@@ -84,14 +84,24 @@ async def lifespan(app: FastAPI):
     try:
         from backend.core.pipeline import cleanup_old_jobs
 
-        purged = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: cleanup_old_jobs()
-        )
+        pipe_cfg = config.data.get("pipeline") or {}
+        done_days = float(pipe_cfg.get("checkpoint_done_days", 3) or 3)
+        stale_days = float(pipe_cfg.get("checkpoint_stale_days", 7) or 7)
+
+        def _purge():
+            return cleanup_old_jobs(
+                done_seconds=int(done_days * 24 * 3600),
+                stale_seconds=int(stale_days * 24 * 3600),
+            )
+
+        purged = await asyncio.get_running_loop().run_in_executor(None, _purge)
         if purged.get("removed"):
             logger.info(
-                "Checkpoint cleanup: removed=%s kept=%s",
+                "Checkpoint cleanup: removed=%s kept=%s (done=%sd stale=%sd)",
                 purged.get("removed"),
                 purged.get("kept"),
+                done_days,
+                stale_days,
             )
     except Exception as exc:
         logger.debug("Checkpoint cleanup preskočen: %s", exc)

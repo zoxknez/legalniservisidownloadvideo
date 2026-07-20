@@ -53,7 +53,13 @@ Fajlovi u rootu (`voyo_downloader.py`, `hrti_*.py`, …) su **tanke shim launche
 
 Checkpoints: `~/.videodownload/jobs/<id>/`  
 - TTL cleanup pri startu: DONE posle 3 dana, ostalo posle 7 dana (`cleanup_old_jobs`)  
-- WS `resolve_fallback` → UI toast kad resolve ide preko sniffer/refresh/catalog
+  (podešava se u `config.pipeline.checkpoint_done_days` / `checkpoint_stale_days`)  
+- WS `resolve_fallback` → UI toast kad resolve ide preko sniffer/refresh/catalog  
+
+### Batch / serije
+
+Delimičan uspeh (**neke** epizode OK) = job **finished** sa WARNING logom (Sky, HRTi, Voyo, EON).  
+Fail samo ako **nijedna** epizoda nije preuzeta.
 
 ## Zastarjelo
 

@@ -210,7 +210,8 @@ def test_voyo_job_uses_adapter_create_downloader():
         dl.download_video.assert_called_once_with(50584)
 
 
-def test_voyo_batch_job_fails_when_any_episode_fails():
+def test_voyo_batch_job_partial_success_is_ok():
+    """Partial batch success keeps job green (downloaded eps preserved)."""
     fake = MagicMock()
     fake.download_video.side_effect = [True, False]
     logs: list[str] = []
@@ -226,8 +227,25 @@ def test_voyo_batch_job_fails_when_any_episode_fails():
             log_fn=logs.append,
         )
 
-    assert ok is False
+    assert ok is True
     assert any("1/2" in line for line in logs)
+    assert any("delimičan" in line.lower() or "WARNING" in line for line in logs)
+
+
+def test_voyo_batch_job_fails_when_all_fail():
+    fake = MagicMock()
+    fake.download_video.return_value = False
+    with patch.object(voyo_job, "capture_job_output") as cap_ctx, patch.object(
+        voyo_job.VoyoAdapter, "create_downloader", return_value=fake
+    ):
+        cap_ctx.return_value.__enter__ = lambda *a, **k: None
+        cap_ctx.return_value.__exit__ = lambda *a, **k: None
+        ok = voyo_job.run_voyo_job(
+            "videos",
+            {"video_ids": [11], "resolution": "1080p"},
+            log_fn=lambda *_a, **_k: None,
+        )
+    assert ok is False
 
 
 def test_smart_parser_detects_voyo_hr_url():

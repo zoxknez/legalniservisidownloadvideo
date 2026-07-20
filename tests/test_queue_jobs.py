@@ -317,7 +317,8 @@ def test_hbo_job_uses_payload_output_dir():
     assert made["kwargs"]["output_dir"] == "D:/queued-out"
 
 
-def test_hrti_batch_job_fails_on_partial_success():
+def test_hrti_batch_job_partial_success_still_ok():
+    """Partial batch keeps job success so downloaded episodes are not marked failed."""
     from backend.jobs.hrti_job import run_hrti_job
 
     class FakeDownloader:
@@ -345,8 +346,31 @@ def test_hrti_batch_job_fails_on_partial_success():
             logs.append,
         )
 
-    assert ok is False
+    assert ok is True
     assert any("1/2" in line for line in logs)
+    assert any("delimičan" in line.lower() or "WARNING" in line for line in logs)
+
+
+def test_hrti_batch_job_fails_when_all_fail():
+    from backend.jobs.hrti_job import run_hrti_job
+
+    class FakeDownloader:
+        def login(self):
+            pass
+
+        def download(self, ref_id, title=None):
+            raise RuntimeError("boom")
+
+    with patch("backend.jobs.hrti_job._device_path", return_value=""), patch(
+        "backend.jobs.hrti_job.HRTIDownloader",
+        return_value=FakeDownloader(),
+    ):
+        ok = run_hrti_job(
+            "downloads",
+            {"items": [{"ref_id": "ep-1", "title": "Ep 1"}]},
+            lambda _l: None,
+        )
+    assert ok is False
 
 
 @pytest.mark.integration

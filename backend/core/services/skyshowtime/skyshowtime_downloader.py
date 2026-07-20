@@ -304,8 +304,17 @@ class SkyShowtimeDownloader:
         if not results:
             raise RuntimeError("; ".join(errors) if errors else "Batch preuzimanje nije uspelo.")
         if errors:
-            raise RuntimeError("Batch preuzimanje delimicno neuspesno: " + "; ".join(errors))
-            logger.warning("Delimično batch preuzimanje: %s", "; ".join(errors))
+            # Partial success is still success for the job (keep downloaded episodes)
+            logger.warning(
+                "Batch delimično uspeo %d/%d. Greške: %s",
+                len(results),
+                len(episodes),
+                "; ".join(errors),
+            )
+            print(
+                f"[SkyShowtime] Delimično: {len(results)}/{len(episodes)} epizoda. "
+                f"Neuspešno: {'; '.join(errors)}"
+            )
         return results
 
     def download(self, url: str,
@@ -395,9 +404,16 @@ class SkyShowtimeDownloader:
             detail = "; ".join(errors) if errors else "nepoznata greška"
             raise RuntimeError(f"Nijedna epizoda nije preuzeta. {detail}")
         if errors:
-            logger.warning("Serija delimično preuzeta (%d/%d). Greške: %s",
-                           len(results), len(episodes), "; ".join(errors))
-            raise RuntimeError("Serija delimicno neuspesno preuzeta: " + "; ".join(errors))
+            logger.warning(
+                "Serija delimično preuzeta (%d/%d). Greške: %s",
+                len(results),
+                len(episodes),
+                "; ".join(errors),
+            )
+            print(
+                f"[SkyShowtime] Delimično: {len(results)}/{len(episodes)} epizoda. "
+                f"Neuspešno: {'; '.join(errors)}"
+            )
         return results
 
     @staticmethod

@@ -31,6 +31,53 @@ class FakeYoutubeDL:
         return {"downloaded": download}
 
 
+def test_download_series_partial_success_does_not_raise(tmp_path, monkeypatch):
+    """If some episodes succeed, return paths instead of failing the whole series."""
+    dl = SkyShowtimeDownloader(output_dir=str(tmp_path), temp_dir=str(tmp_path / "t"))
+
+    series = {
+        "attributes": {"title": "Show"},
+        "relationships": {
+            "items": {
+                "data": [
+                    {
+                        "attributes": {"seasonNumber": 1, "season": 1},
+                        "relationships": {
+                            "items": {
+                                "data": [
+                                    {"attributes": {"episodeNumber": 1, "title": "A"}},
+                                    {"attributes": {"episodeNumber": 2, "title": "B"}},
+                                ]
+                            }
+                        },
+                    }
+                ]
+            }
+        },
+    }
+
+    def fake_collect(self, series_data, season_num, start_ep, end_ep):
+        return series["relationships"]["items"]["data"][0]["relationships"]["items"]["data"]
+
+    calls = {"n": 0}
+
+    def fake_ep(self, ep_node, series_title=""):
+        calls["n"] += 1
+        num = ep_node["attributes"]["episodeNumber"]
+        if num == 2:
+            raise RuntimeError("cdn fail")
+        p = tmp_path / f"ep{num}.mkv"
+        p.write_bytes(b"x" * 100)
+        return p
+
+    monkeypatch.setattr(SkyShowtimeDownloader, "_collect_episodes", fake_collect)
+    monkeypatch.setattr(SkyShowtimeDownloader, "_download_episode", fake_ep)
+
+    out = dl._download_series_data(series, season_num=1, start_ep=1, end_ep=2)
+    assert len(out) == 1
+    assert out[0].name == "ep1.mkv"
+
+
 def test_extract_slug():
     url_movie = "https://www.skyshowtime.com/watch/asset/movies/yellowstone/123456789?some=query"
     url_tv = "https://www.skyshowtime.com/watch/asset/tv/series-name/123456789"

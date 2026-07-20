@@ -1795,7 +1795,9 @@ def handle_series(args: argparse.Namespace) -> int:
         return 1
 
     license_url = args.license_url or ""
-    final_code = 0
+    ok_count = 0
+    fail_count = 0
+    total = len(selected)
 
     for number in selected:
         episode = episodes[number - 1]
@@ -1804,7 +1806,7 @@ def handle_series(args: argparse.Namespace) -> int:
 
         if not ep_url:
             print(f"[EON] Episode {number} has no URL, skipping", file=sys.stderr)
-            final_code = 1
+            fail_count += 1
             continue
 
         # Check DRM
@@ -1816,11 +1818,16 @@ def handle_series(args: argparse.Namespace) -> int:
 
         if has_drm:
             ep_license = license_url
+            ep_headers = {}
             if not ep_license:
                 ep_license = extract_license_url_from_mpd(mpd_text) or ""
             if not ep_license:
-                stream_info = resolve_stream_info(episode.get("id", ""), "vod")
+                stream_info = resolve_stream_info(episode.get("id", "") or ep_url, "vod")
                 ep_license = stream_info.get("license_url", "")
+                ep_headers = stream_info.get("drm_headers") or {}
+                # Prefer resolved MPD if episode url was only a target id
+                if stream_info.get("mpd_url") and is_url(stream_info["mpd_url"]):
+                    ep_url = stream_info["mpd_url"]
 
             if ep_license:
                 try:
@@ -1833,21 +1840,34 @@ def handle_series(args: argparse.Namespace) -> int:
                     downloader.download(
                         mpd_url=ep_url,
                         license_url=ep_license,
+                        drm_headers=ep_headers,
                         title=title,
                         workers=args.workers,
                     )
+                    ok_count += 1
                 except Exception as exc:
                     print(f"[EON] Episode {number} failed: {exc}", file=sys.stderr)
-                    final_code = 1
+                    fail_count += 1
             else:
                 print(f"[EON] Episode {number} is DRM-protected but no license URL found.", file=sys.stderr)
-                final_code = 2
+                fail_count += 1
         else:
             code = run_yt_dlp(ep_url, output_dir, title, args.verbose, args.quality, args.subs)
             if code != 0:
-                final_code = code
+                fail_count += 1
+            else:
+                ok_count += 1
 
-    return final_code
+    print(f"[EON] Series batch: {ok_count}/{total} ok, {fail_count} failed")
+    if ok_count == 0:
+        return 1
+    if fail_count > 0:
+        # Partial success: keep job green so downloaded eps are not treated as total failure
+        print(
+            f"[EON] Delimičan uspeh ({ok_count}/{total}) — ponovi za neuspele epizode.",
+            file=sys.stderr,
+        )
+    return 0
 
 
 def main() -> int:
