@@ -726,6 +726,7 @@ def resolve_stream_info(target: str, kind: str) -> Dict[str, Any]:
             headers=find_drm_headers_in_payload(payload) or {},
             title=title,
             source="api",
+            meta={"service": "eon"},
         )
 
     def path_catalog() -> StreamResolve:
@@ -744,12 +745,14 @@ def resolve_stream_info(target: str, kind: str) -> Dict[str, Any]:
             headers=find_drm_headers_in_payload(info) or {},
             title=title,
             source="catalog",
+            meta={"service": "eon"},
         )
 
     def path_sniffer() -> StreamResolve:
         sniff = sniffer_resolve("eon")
         if not sniff or not sniff.is_valid():
             raise EonSafeError("Nema sniffer capture za EON")
+        sniff.meta = {**(sniff.meta or {}), "service": "eon"}
         return sniff
 
     steps = [("api", path_api)]

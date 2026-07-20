@@ -157,7 +157,20 @@ class MediaPipeline:
         # Already finished successfully — skip full re-download
         if self.resume and cp.stage == Stage.DONE:
             out = Path(cp.data.get("output_path") or "")
-            if out.is_file() and out.stat().st_size > 50_000:
+            ok_file = out.is_file() and out.stat().st_size > 50_000
+            if ok_file:
+                try:
+                    from backend.utils.media_validation import is_complete_media_file
+
+                    ok_file = is_complete_media_file(
+                        out,
+                        min_bytes=50_000,
+                        mkvmerge_path=self.bins.get("mkvmerge"),
+                        probe=True,
+                    )
+                except Exception:
+                    pass
+            if ok_file:
                 logger.info("[pipeline] output already exists: %s", out.name)
                 print(f"[pipeline] Već gotovo: {out.name}")
                 return PipelineResult(
