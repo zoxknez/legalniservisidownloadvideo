@@ -105,7 +105,7 @@ def test_subtitle_extension_by_mime():
 def test_download_decrypt_audio_first_mode(tmp_path):
     parsed = _parse_mpd(_SAMPLE_MPD)
 
-    def fake_segments(urls, out_path, label, workers=16):
+    def fake_segments(urls, out_path, label, workers=16, **kwargs):
         out_path.write_bytes(b"enc")
 
     def fake_decrypt(enc, dec, keys, bin_path):

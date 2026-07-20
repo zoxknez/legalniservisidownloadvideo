@@ -324,13 +324,45 @@ class SkyShowtimeDownloader:
             return [self._download_single(data)]
 
     def _download_single(self, data: Dict[str, Any]) -> Path:
+        from backend.core.pipeline import StreamResolve, with_api_refresh_sniffer
+
         content_id, variant_id, title_name = self._pick_content(data)
         year = data.get("attributes", {}).get("year")
         logger.info(f"Film: {title_name} ({year})")
-        mpd_url, license_url, license_token = self._get_playback(content_id, variant_id)
-        self._license_url   = license_url
-        self._license_token = license_token
-        return self._do_download(mpd_url, title_name, year=year, is_episode=False)
+
+        def path_api() -> StreamResolve:
+            mpd_url, license_url, license_token = self._get_playback(content_id, variant_id)
+            return StreamResolve(
+                mpd_url=mpd_url,
+                license_url=license_url,
+                headers={"X-License-Token": license_token} if license_token else {},
+                title=title_name,
+                source="api",
+                meta={"license_token": license_token},
+            )
+
+        def path_refresh() -> StreamResolve:
+            try:
+                self.auth.ensure_authenticated()
+            except Exception as exc:
+                logger.warning("Sky re-auth: %s", exc)
+            return path_api()
+
+        resolved = with_api_refresh_sniffer(
+            "skyshowtime",
+            api=path_api,
+            refresh=path_refresh,
+            require_license=True,
+        )
+        self._license_url = resolved.license_url
+        self._license_token = (resolved.meta or {}).get("license_token") or (
+            resolved.headers or {}
+        ).get("X-License-Token", "")
+        if resolved.source == "sniffer":
+            logger.info("Sky: sniffer fallback za film %s", title_name)
+        return self._do_download(
+            resolved.mpd_url, title_name, year=year, is_episode=False
+        )
 
     def _download_series_data(self, series_data: Dict[str, Any],
                                season_num: Optional[int] = None,
@@ -530,6 +562,8 @@ class SkyShowtimeDownloader:
         ))
 
     def _download_episode(self, ep_node: Dict[str, Any], series_title: str = "") -> Path:
+        from backend.core.pipeline import StreamResolve, with_api_refresh_sniffer
+
         content_id, variant_id, ep_title = self._pick_content(ep_node)
         attrs   = ep_node.get("attributes", {})
         season  = attrs.get("seasonNumber", 0)
@@ -540,11 +574,37 @@ class SkyShowtimeDownloader:
         label  = f"{prefix}S{season:02d}E{episode:02d}.{_sanitise_filename(ep_title)}"
         logger.info(f"Preuzimanje epizode: {label}")
 
-        mpd_url, license_url, license_token = self._get_playback(content_id, variant_id)
-        self._license_url   = license_url
-        self._license_token = license_token
+        def path_api() -> StreamResolve:
+            mpd_url, license_url, license_token = self._get_playback(content_id, variant_id)
+            return StreamResolve(
+                mpd_url=mpd_url,
+                license_url=license_url,
+                headers={"X-License-Token": license_token} if license_token else {},
+                title=label,
+                source="api",
+                meta={"license_token": license_token},
+            )
 
-        return self._do_download(mpd_url, label, year=year, is_episode=True)
+        def path_refresh() -> StreamResolve:
+            try:
+                self.auth.ensure_authenticated()
+            except Exception as exc:
+                logger.warning("Sky re-auth: %s", exc)
+            return path_api()
+
+        resolved = with_api_refresh_sniffer(
+            "skyshowtime",
+            api=path_api,
+            refresh=path_refresh,
+            require_license=True,
+        )
+        self._license_url = resolved.license_url
+        self._license_token = (resolved.meta or {}).get("license_token") or (
+            resolved.headers or {}
+        ).get("X-License-Token", "")
+        if resolved.source == "sniffer":
+            logger.info("Sky: sniffer fallback za %s", label)
+        return self._do_download(resolved.mpd_url, label, year=year, is_episode=True)
 
     def _do_download(self, mpd_url: str, title: str,
                      year: Optional[int] = None,
@@ -552,71 +612,102 @@ class SkyShowtimeDownloader:
         raise_if_cancelled()
         safe_title = _sanitise_filename(title)
 
-        # 1. Fetch MPD
-        mpd_resp = self.auth.session.get(mpd_url, timeout=REQUEST_TIMEOUT)
-        mpd_resp.raise_for_status()
-        mpd_text = mpd_resp.text
-        raise_if_cancelled()
+        from backend.core.pipeline import MediaPipeline, sniffer_resolve
 
-        # 2. Extract PSSH
-        pssh_list = _parse_all_pssh_from_mpd(mpd_text)
-        if not pssh_list:
-            raise RuntimeError("Nije pronađen Widevine PSSH u MPD manifestu.")
-        logger.info("Pronađeno %d PSSH box(ova).", len(pssh_list))
+        # Optional: if API license missing but sniffer has a fresh pair for this service
+        if not self._license_url:
+            sniff = sniffer_resolve("skyshowtime")
+            if sniff and sniff.license_url:
+                logger.info("Sky license iz sniffera")
+                self._license_url = sniff.license_url
+                tok = (sniff.headers or {}).get("X-License-Token") or ""
+                if tok:
+                    self._license_token = tok
 
-        # 3. Keys
-        keys = self._get_keys(pssh_list)
-        if not keys:
-            raise RuntimeError("Nema ključeva od servera licenci.")
-        logger.info("Dobijeno %d Widevine kljuca.", len(keys))
+        bins = {
+            "mp4decrypt": self.mp4decrypt_path or config.get_binary_path("mp4decrypt"),
+            "mkvmerge": self.mkvmerge_path or config.get_binary_path("mkvmerge"),
+            "ffmpeg": config.get_binary_path("ffmpeg"),
+        }
+        state: Dict[str, Any] = {
+            "resolution": "1080p",
+            "sub_files": [],
+            "download_started": 0.0,
+        }
 
-        # 4. Download fragments using yt-dlp native
-        raise_if_cancelled()
-        download_started = time.time()
-        video_enc, audio_enc = self._download_fragments(mpd_url, safe_title)
-        resolution = _resolution_from_format_id(video_enc.stem)
-        raise_if_cancelled()
+        def acquire_keys() -> List[str]:
+            raise_if_cancelled()
+            mpd_resp = self.auth.session.get(mpd_url, timeout=REQUEST_TIMEOUT)
+            mpd_resp.raise_for_status()
+            pssh_list = _parse_all_pssh_from_mpd(mpd_resp.text)
+            if not pssh_list:
+                raise RuntimeError("Nije pronađen Widevine PSSH u MPD manifestu.")
+            logger.info("Pronađeno %d PSSH box(ova).", len(pssh_list))
+            keys = self._get_keys(pssh_list)
+            if not keys:
+                raise RuntimeError("Nema ključeva od servera licenci.")
+            logger.info("Dobijeno %d Widevine kljuca.", len(keys))
+            return keys
 
-        # 5. Collect subtitles (sr-RS, hr-HR, sl-SI, en-US)
-        WANTED_SUBS = {"sr-rs", "hr-hr", "sl-si", "en-us", "sr", "hr", "sl", "en"}
-        all_subs = (list(self.temp_dir.glob(f"{safe_title}.*.vtt")) +
-                    list(self.temp_dir.glob(f"{safe_title}.*.srt")) +
-                    list(self.temp_dir.glob(f"{safe_title}.*.ttml")))
-        all_subs = [f for f in all_subs if f.stat().st_mtime >= download_started - 1]
-        
-        LANG_ORDER = ["sr-rs", "hr-hr", "sl-si", "en-us", "sr", "hr", "sl", "en"]
+        def download_frags(continuedl: bool) -> Tuple[Path, Path]:
+            raise_if_cancelled()
+            state["download_started"] = time.time()
+            video_enc, audio_enc = self._download_fragments(
+                mpd_url, safe_title, continuedl=continuedl
+            )
+            state["resolution"] = _resolution_from_format_id(video_enc.stem)
+            # Subtitles written by yt-dlp alongside fragments
+            WANTED_SUBS = {"sr-rs", "hr-hr", "sl-si", "en-us", "sr", "hr", "sl", "en"}
+            LANG_ORDER = ["sr-rs", "hr-hr", "sl-si", "en-us", "sr", "hr", "sl", "en"]
+            started = state["download_started"]
+            all_subs = (
+                list(self.temp_dir.glob(f"{safe_title}.*.vtt"))
+                + list(self.temp_dir.glob(f"{safe_title}.*.srt"))
+                + list(self.temp_dir.glob(f"{safe_title}.*.ttml"))
+            )
+            all_subs = [f for f in all_subs if f.stat().st_mtime >= started - 1]
 
-        def sub_sort_key(f):
-            lang = f.suffixes[-2].lstrip(".").lower() if len(f.suffixes) >= 2 else "zz"
-            try:
-                return LANG_ORDER.index(lang)
-            except ValueError:
-                return 99
+            def sub_sort_key(f: Path):
+                lang = f.suffixes[-2].lstrip(".").lower() if len(f.suffixes) >= 2 else "zz"
+                try:
+                    return LANG_ORDER.index(lang)
+                except ValueError:
+                    return 99
 
-        sub_files = [f for f in all_subs
-                     if f.suffixes and f.suffixes[-2].lstrip(".").lower() in WANTED_SUBS]
-        sub_files.sort(key=sub_sort_key)
-        if sub_files:
-            logger.info(f"Pronađeni titlovi: {[f.name for f in sub_files]}")
+            sub_files = [
+                f for f in all_subs
+                if f.suffixes and f.suffixes[-2].lstrip(".").lower() in WANTED_SUBS
+            ]
+            sub_files.sort(key=sub_sort_key)
+            state["sub_files"] = sub_files
+            if sub_files:
+                logger.info("Pronađeni titlovi: %s", [f.name for f in sub_files])
+            return video_enc, audio_enc
 
-        # 6. Decrypt
-        raise_if_cancelled()
-        video_dec = self._decrypt(video_enc, keys, safe_title + ".video.dec.mp4")
-        audio_dec = self._decrypt(audio_enc, keys, safe_title + ".audio.dec.mp4")
-        raise_if_cancelled()
+        def finalize(dec_v: Path, dec_a: Path, keys: List[str], cp) -> Path:
+            raise_if_cancelled()
+            release_name = _build_filename(
+                title, year, state["resolution"], self.vcodec, is_episode
+            )
+            return self._mux(dec_v, dec_a, release_name, state.get("sub_files") or [])
 
-        # 7. Fix timestamps with ffmpeg copy-transcoding
-        video_fixed = self._fix_mp4(video_dec, safe_title + ".video.fixed.mp4")
-        audio_fixed = self._fix_mp4(audio_dec, safe_title + ".audio.fixed.mp4")
-        raise_if_cancelled()
-
-        # 8. Mux
-        release_name = _build_filename(title, year, resolution, self.vcodec, is_episode)
-        out = self._mux(video_fixed, audio_fixed, release_name, sub_files)
-
-        # 9. Cleanup
+        pipeline = MediaPipeline(
+            service="skyshowtime",
+            mpd_url=mpd_url,
+            license_url=self._license_url or "",
+            title=title,
+            output_dir=self.output_dir,
+            bins=bins,
+            resume=True,
+        )
+        result = pipeline.run(
+            acquire_keys=acquire_keys,
+            download_fragments=download_frags,
+            output_name=safe_title,
+            finalize=finalize,
+        )
         self.cleanup(safe_title)
-        return out
+        return result.output_path
 
     def _get_keys(self, pssh_list: List[str]) -> List[str]:
         assert self._license_url, "license_url nije postavljen."
@@ -650,11 +741,15 @@ class SkyShowtimeDownloader:
             video_pref = "bestvideo[vcodec^=avc1]/bestvideo"
         return f"{video_pref}+({lang_pref})/best"
 
-    def _download_fragments(self, mpd_url: str, title: str) -> Tuple[Path, Path]:
+    def _download_fragments(
+        self, mpd_url: str, title: str, continuedl: bool = False
+    ) -> Tuple[Path, Path]:
+        from backend.services.http_client import chrome_user_agent
+
         http_headers = {
-            "User-Agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Origin":      "https://www.skyshowtime.com",
-            "Referer":     "https://www.skyshowtime.com/",
+            "User-Agent": chrome_user_agent(),
+            "Origin": "https://www.skyshowtime.com",
+            "Referer": "https://www.skyshowtime.com/",
         }
 
         # Progress hook that supports task cancellation
@@ -672,6 +767,7 @@ class SkyShowtimeDownloader:
             "http_headers":             http_headers,
             "external_downloader":      "native",
             "concurrent_fragment_downloads": 5,
+            "continuedl":               bool(continuedl),
             "updatetime":               False,
             "writesubtitles":           True,
             "writeautomaticsub":        False,

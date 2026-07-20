@@ -792,12 +792,13 @@ class RTSPlanetaDownloader:
         except Exception as e:
             logger.warning(f"Cleanup error: {e}")
     
-    def _download_streams_ytdlp(self, mpd_url: str) -> tuple:
+    def _download_streams_ytdlp(self, mpd_url: str, continuedl: bool = False) -> tuple:
         """Download encrypted video/audio streams via yt-dlp (handles CDN redirects)."""
         enc_video = self.temp_dir / 'encrypted_video.mp4'
         enc_audio = self.temp_dir / 'encrypted_audio.m4a'
-        enc_video.unlink(missing_ok=True)
-        enc_audio.unlink(missing_ok=True)
+        if not continuedl:
+            enc_video.unlink(missing_ok=True)
+            enc_audio.unlink(missing_ok=True)
 
         def _progress(_data):
             raise_if_cancelled()
@@ -808,7 +809,7 @@ class RTSPlanetaDownloader:
             'allow_unplayable_formats': True,
             'format': 'bestvideo',
             'outtmpl': str(enc_video),
-            'continuedl': False,
+            'continuedl': bool(continuedl),
             'fixup': 'never',
             'updatetime': False,
             'progress_hooks': [_progress],
@@ -819,7 +820,7 @@ class RTSPlanetaDownloader:
             'allow_unplayable_formats': True,
             'format': 'bestaudio',
             'outtmpl': str(enc_audio),
-            'continuedl': False,
+            'continuedl': bool(continuedl),
             'fixup': 'never',
             'updatetime': False,
             'progress_hooks': [_progress],
@@ -866,6 +867,8 @@ class RTSPlanetaDownloader:
         Returns:
             Path to downloaded MKV file
         """
+        from backend.core.pipeline import MediaPipeline, StreamResolve, with_api_refresh_sniffer
+
         video_id = self.extract_video_id(url)
         logger.info(f"Video ID: {video_id}")
 
@@ -886,53 +889,145 @@ class RTSPlanetaDownloader:
                 title = raw_title
         logger.info(f"Title: {title}")
 
-        mpd_info = self.get_mpd_info(video_id)
-        mpd_url = mpd_info['mpd_url']
-        license_url = mpd_info['license_url']
+        def path_api() -> StreamResolve:
+            mpd_info = self.get_mpd_info(video_id)
+            mpd = mpd_info.get("mpd_url") or ""
+            if not mpd:
+                raise RuntimeError("RTS API nije vratio MPD URL")
+            return StreamResolve(
+                mpd_url=mpd,
+                license_url=mpd_info.get("license_url") or "",
+                title=title,
+                source="api",
+                meta={"mpd_info": mpd_info},
+            )
+
+        def path_refresh() -> StreamResolve:
+            try:
+                # Re-login / session refresh when streaming token expired
+                if hasattr(self, "auth") and self.auth:
+                    if hasattr(self.auth, "login") and hasattr(self.auth, "is_authenticated"):
+                        if not self.auth.is_authenticated():
+                            self.auth.login()
+                    elif hasattr(self.auth, "ensure_session"):
+                        self.auth.ensure_session()
+            except Exception as exc:
+                logger.warning("RTS session refresh: %s", exc)
+            return path_api()
+
+        resolved = with_api_refresh_sniffer(
+            "rtsplaneta",
+            api=path_api,
+            refresh=path_refresh,
+            require_license=True,
+        )
+        mpd_url = resolved.mpd_url
+        license_url = resolved.license_url
+        if resolved.source == "sniffer":
+            logger.info("RTS: stream iz sniffer bridge-a")
+            if resolved.title:
+                title = resolved.title
 
         logger.info(f"MPD URL: {mpd_url[:80]}...")
         logger.info(f"License URL: {license_url}")
 
         self._setup_directories()
+        safe_title = self.sanitize_filename(title)
 
-        # Use yt-dlp to download streams (handles CDN redirects properly)
-        enc_video, enc_audio = self._download_streams_ytdlp(mpd_url)
+        # Hold fragment paths for keys_after_fragments license exchange
+        held: Dict[str, Path] = {}
 
-        # Check if content is actually encrypted (codec == encv/enca)
-        encrypted = self._is_encrypted(enc_video)
+        def download_frags(continuedl: bool):
+            enc_video, enc_audio = self._download_streams_ytdlp(
+                mpd_url, continuedl=continuedl
+            )
+            held["video"] = Path(enc_video)
+            held["audio"] = Path(enc_audio)
+            return enc_video, enc_audio
+
+        def acquire_keys():
+            enc_v = held.get("video")
+            enc_a = held.get("audio")
+            if not enc_v or not enc_v.exists():
+                raise RuntimeError("Encrypted video missing before key exchange")
+            if not self._is_encrypted(enc_v):
+                # Non-DRM: signal empty keys; pipeline still needs skip_decrypt
+                return []
+            keys = self.get_decryption_keys(
+                mpd_url, license_url, enc_v, enc_a or enc_v
+            )
+            logger.info("Got %s decryption key(s)", len(keys))
+            return keys
+
+        # Probe encryption after first fragment download via keys_after_fragments.
+        # If file is clear, re-run path with skip_decrypt by treating empty keys as clear.
+        # We detect encryption once fragments exist inside acquire_keys — if empty,
+        # use a thin wrapper that sets skip when no keys needed.
+        # Simpler: always download first, then decide skip_decrypt from file.
+        enc_video, enc_audio = download_frags(False)
+        encrypted = self._is_encrypted(Path(enc_video))
+        held["video"] = Path(enc_video)
+        held["audio"] = Path(enc_audio)
+
+        bins = {
+            "mp4decrypt": self.binaries.get("mp4decrypt", "mp4decrypt"),
+            "ffmpeg": self.binaries.get("ffmpeg", "ffmpeg"),
+            "mkvmerge": self.binaries.get("mkvmerge", "mkvmerge"),
+        }
+
+        pipeline = MediaPipeline(
+            service="rtsplaneta",
+            mpd_url=mpd_url,
+            license_url=license_url or "",
+            title=title,
+            output_dir=self.output_dir,
+            bins=bins,
+            resume=True,
+        )
+
+        # Seed checkpoint with already-downloaded fragments so resume works
+        # and second download is skipped.
+        pipeline.checkpoint.set_fragments(enc_video, enc_audio)
+
+        def redownload_if_needed(continuedl: bool):
+            if pipeline.checkpoint.can_resume_fragments():
+                return (
+                    Path(pipeline.checkpoint.data["enc_video"]),
+                    Path(pipeline.checkpoint.data["enc_audio"]),
+                )
+            return download_frags(continuedl)
+
+        def keys_fn():
+            if not encrypted:
+                return []
+            return acquire_keys()
+
+        def finalize(dec_v: Path, dec_a: Path, keys: List[str], cp) -> Path:
+            output_file = self.output_dir / f"{safe_title}.WEB-DL.mkv"
+            self._mux_with_ffmpeg(dec_v, dec_a, output_file)
+            return output_file
 
         if encrypted:
-            logger.info("Content is DRM-encrypted, fetching keys...")
-            keys = self.get_decryption_keys(mpd_url, license_url, enc_video, enc_audio)
-            logger.info(f"Got {len(keys)} decryption key(s)")
-
-            dec_audio = self.temp_dir / 'decrypted_audio.mp4'
-            dec_video = self.temp_dir / 'decrypted_video.mp4'
-
-            self.decrypt_media(enc_video, dec_video, keys)
-            self.decrypt_media(enc_audio, dec_audio, keys)
-
-            fixed_audio = self.temp_dir / 'audio.aac'
-            fixed_video = self.temp_dir / 'video.h264'
-
-            self.fix_media_container(dec_audio, fixed_audio)
-            self.fix_media_container(dec_video, fixed_video)
+            result = pipeline.run(
+                acquire_keys=keys_fn,
+                download_fragments=redownload_if_needed,
+                output_name=f"{safe_title}.WEB-DL",
+                keys_after_fragments=True,
+                finalize=finalize,
+            )
         else:
             logger.info("Content is NOT encrypted, skipping decryption")
-            fixed_video = enc_video
-            fixed_audio = enc_audio
+            result = pipeline.run(
+                acquire_keys=lambda: [],
+                download_fragments=redownload_if_needed,
+                output_name=f"{safe_title}.WEB-DL",
+                skip_decrypt=True,
+                finalize=finalize,
+            )
 
-        # Mux to MKV using ffmpeg
-        safe_title = self.sanitize_filename(title)
-        output_file = self.output_dir / f"{safe_title}.WEB-DL.mkv"
-
-        self._mux_with_ffmpeg(fixed_video, fixed_audio, output_file)
-
-        # Cleanup
         self.cleanup()
-
-        logger.info(f"Download complete: {output_file}")
-        return output_file
+        logger.info("Download complete: %s", result.output_path)
+        return result.output_path
 
 
 def main():

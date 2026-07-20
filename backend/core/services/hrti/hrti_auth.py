@@ -24,8 +24,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import base64
 
-from backend.services.tls_client_helper import apply_chrome_fingerprint
-
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://hrti.hrt.hr/api/api/ott"
@@ -148,8 +146,9 @@ class HRTIAuth:
     }
 
     def __init__(self, config_path: Optional[str] = None):
-        self.session = requests.Session()
-        apply_chrome_fingerprint(self.session)
+        from backend.services.http_client import create_browser_session
+
+        self.session = create_browser_session()
         self.session.headers.update(self.DEFAULT_HEADERS)
         self.state = HRTIAuthState()
         self.config_path = Path(config_path) if config_path else Path.home() / ".hrti" / "config.json"

@@ -63,21 +63,14 @@ class SkyConfig:
 # ---------------------------------------------------------------------------
 
 def _make_session() -> requests.Session:
-    s = requests.Session()
-    retry = Retry(total=3, backoff_factor=1,
-                  status_forcelist=[429, 500, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
-    s.mount("http://", adapter)
-    s.mount("https://", adapter)
-    s.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Origin":  "https://www.skyshowtime.com",
-        "Referer": "https://www.skyshowtime.com/",
-    })
+    from backend.services.http_client import create_browser_session
+
+    s = create_browser_session(
+        extra_headers={
+            "Origin": "https://www.skyshowtime.com",
+            "Referer": "https://www.skyshowtime.com/",
+        }
+    )
     return s
 
 

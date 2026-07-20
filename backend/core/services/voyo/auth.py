@@ -104,24 +104,10 @@ class ChromeTLSAdapter(HTTPAdapter):
 
 def _make_session():
     """Build HTTP session for Voyo API (curl_cffi preferred, Chrome TLS fallback)."""
-    try:
-        from curl_cffi import requests as cffi_requests
+    from backend.services.http_client import create_browser_session
 
-        session = cffi_requests.Session(impersonate="chrome131")
-        logger.debug("VoyoAuth using curl_cffi session (chrome131)")
-        return session
-    except ImportError:
-        logger.debug("curl_cffi not installed; using requests ChromeTLSAdapter")
-
-    session = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    adapter = ChromeTLSAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
+    session = create_browser_session()
+    logger.debug("VoyoAuth using shared browser HTTP session")
     return session
 
 

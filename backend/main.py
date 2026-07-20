@@ -79,7 +79,25 @@ async def lifespan(app: FastAPI):
             logger.debug("Browser sync pri startu preskočen: %s", exc)
 
     asyncio.create_task(_startup_browser_sync())
+
+    # Purge stale resume checkpoints (done jobs + very old incomplete)
+    try:
+        from backend.core.pipeline import cleanup_old_jobs
+
+        purged = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: cleanup_old_jobs()
+        )
+        if purged.get("removed"):
+            logger.info(
+                "Checkpoint cleanup: removed=%s kept=%s",
+                purged.get("removed"),
+                purged.get("kept"),
+            )
+    except Exception as exc:
+        logger.debug("Checkpoint cleanup preskočen: %s", exc)
+
     logger.info("Initializing background daemons...")
+    queue_manager._main_loop = asyncio.get_running_loop()
     scheduler_task = asyncio.create_task(queue_manager.scheduler_daemon_loop())
     await queue_manager.resume_pending_downloads()
     yield

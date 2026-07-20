@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import base64
 import logging
 import os
 import platform
@@ -393,6 +394,185 @@ def decrypt_segment(encrypted_data: bytes, key: bytes, sequence_number: int, key
     cipher = AES.new(key, AES.MODE_CBC, iv)
     return cipher.decrypt(encrypted_data)
 
+def _voyo_headers(auth: VoyoAuth) -> Dict[str, str]:
+    headers = dict(auth.session.headers)
+    headers.pop("Content-Type", None)
+    headers["device-id"] = auth.state.device_id
+    return headers
+
+
+def _fetch_text(session, url: str, headers: Dict[str, str]) -> str:
+    resp = session.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    return resp.text
+
+
+def download_native_resumable(
+    m3u8_url: str,
+    temp_stem: str,
+    auth: VoyoAuth,
+    title: str = "video",
+    max_height: Optional[int] = None,
+) -> Optional[str]:
+    """
+    Native HLS download with segment-level checkpoint resume.
+
+    Segments live under ~/.videodownload/jobs/<id>/segments/hls/ so a failed
+    job can continue without re-downloading completed pieces.
+    """
+    from backend.core.pipeline import JobCheckpoint, download_segments_resumable
+
+    raise_if_cancelled()
+    logger.info("Voyo native HLS (resumable segments): %s", title)
+
+    headers = _voyo_headers(auth)
+    session = auth.session
+    output_path = Path(temp_stem + ".ts")
+
+    # Fast resume: already-assembled TS for this title/url
+    # (open checkpoint after we know final variant URL when possible)
+    try:
+        content = _fetch_text(session, m3u8_url, headers)
+    except Exception as e:
+        logger.error("Failed to fetch master playlist: %s", e)
+        return None
+
+    if "#EXT-X-STREAM-INF" in content:
+        variant_url = resolve_variant_url(content, m3u8_url, max_height=max_height)
+        logger.info("Resolved master playlist to variant: %s", variant_url)
+        try:
+            content = _fetch_text(session, variant_url, headers)
+            m3u8_url = variant_url
+        except Exception as e:
+            logger.error("Failed to fetch variant playlist: %s", e)
+            return None
+
+    segments, key_info = parse_m3u8(content, m3u8_url)
+    if not segments:
+        logger.error("No HLS segments found in playlist.")
+        return None
+    logger.info("HLS variant: %s segments", len(segments))
+
+    # AES-128 keys (cached in checkpoint meta as base64 for resume without re-fetch)
+    cp = JobCheckpoint.open(
+        service="voyo",
+        mpd_url=m3u8_url,
+        title=title or "voyo",
+    )
+    # Reuse previous assemble if still valid
+    prev_ts = (cp.data.get("meta") or {}).get("assembled_ts") or ""
+    if prev_ts:
+        prev_path = Path(prev_ts)
+        if prev_path.is_file() and prev_path.stat().st_size > 100_000:
+            logger.info("Voyo: reuse assembled TS from checkpoint (%s)", prev_path.name)
+            return str(prev_path)
+    if output_path.is_file() and output_path.stat().st_size > 100_000:
+        # Temp stem from previous interrupted mux attempt
+        logger.info("Voyo: reuse existing temp TS %s", output_path.name)
+        return str(output_path)
+    key_cache: Dict[str, bytes] = {}
+    meta_keys = (cp.data.get("meta") or {}).get("aes_keys") or {}
+    for uri, b64 in meta_keys.items():
+        try:
+            key_cache[uri] = base64.b64decode(b64)
+        except Exception:
+            pass
+
+    if key_info:
+        segment_keys = key_info.get("segment_keys") or []
+        key_uris = sorted({k["uri"] for k in segment_keys if k and k.get("uri")})
+        logger.info("AES-128 stream — %s key URI(s)", len(key_uris))
+        for key_uri in key_uris:
+            if key_uri in key_cache:
+                continue
+            try:
+                resp = session.get(key_uri, headers=headers, timeout=20)
+                resp.raise_for_status()
+                key_cache[key_uri] = resp.content
+            except Exception as e:
+                logger.error("Failed to fetch AES-128 key: %s", e)
+                return None
+        # Persist keys for resume
+        meta = dict(cp.data.get("meta") or {})
+        meta["aes_keys"] = {
+            uri: base64.b64encode(raw).decode("ascii") for uri, raw in key_cache.items()
+        }
+        if key_info.get("segment_keys"):
+            # lightweight serializable map for IV/sequence
+            meta["segment_key_meta"] = [
+                {
+                    "uri": (sk or {}).get("uri"),
+                    "iv": (sk or {}).get("iv"),
+                    "sequence": (sk or {}).get("sequence"),
+                }
+                if sk
+                else None
+                for sk in key_info.get("segment_keys") or []
+            ]
+        cp.data["meta"] = meta
+        cp.save()
+
+    def progress(done: int, total: int) -> None:
+        raise_if_cancelled()
+        if total and (done == total or done % max(1, total // 20) == 0):
+            logger.info("Voyo segments %s/%s (%.0f%%)", done, total, 100.0 * done / total)
+
+    try:
+        dest_paths = download_segments_resumable(
+            segments,
+            track="hls",
+            checkpoint=cp,
+            headers=headers,
+            workers=16,
+            progress=progress,
+            session=session,
+        )
+    except Exception as e:
+        logger.error("HLS segment download failed: %s", e)
+        return None
+
+    logger.info("Assembling and decrypting sequential TS…")
+    segment_keys = (key_info or {}).get("segment_keys") or []
+    # Prefer live key_info; fall back to checkpoint meta
+    if not segment_keys and (cp.data.get("meta") or {}).get("segment_key_meta"):
+        segment_keys = cp.data["meta"]["segment_key_meta"]
+
+    try:
+        with open(output_path, "wb") as out_f:
+            for i, path in enumerate(dest_paths):
+                raise_if_cancelled()
+                if not path.exists():
+                    logger.error("Segment %s missing after download", i)
+                    output_path.unlink(missing_ok=True)
+                    return None
+                data = path.read_bytes()
+                sk = segment_keys[i] if i < len(segment_keys) else None
+                if sk and sk.get("uri"):
+                    key_bytes = key_cache.get(sk["uri"])
+                    if not key_bytes:
+                        logger.error("Missing AES key for segment %s", i)
+                        output_path.unlink(missing_ok=True)
+                        return None
+                    data = decrypt_segment(
+                        data,
+                        key_bytes,
+                        int(sk.get("sequence", i)),
+                        sk.get("iv"),
+                    )
+                out_f.write(data)
+    except Exception as e:
+        logger.error("Assemble/decrypt failed: %s", e)
+        output_path.unlink(missing_ok=True)
+        return None
+
+    cp.set_output(output_path)
+    # Keep segment files for potential re-mux; cleanup after successful mux in caller
+    # Optionally prune on success via flag in meta
+    cp.data.setdefault("meta", {})["assembled_ts"] = str(output_path)
+    cp.save()
+    return str(output_path)
+
+
 async def download_native_async(
     m3u8_url: str,
     temp_stem: str,
@@ -400,144 +580,11 @@ async def download_native_async(
     title: str = 'video',
     max_height: Optional[int] = None,
 ) -> Optional[str]:
-    """Download HLS natively using asynchronous connection pool and parallel workers."""
-    from backend.core.services.async_engine import AsyncDownloadEngine
-    import aiohttp
-    
-    raise_if_cancelled()
-    logger.info(f"Using high-performance native HLS async engine for: {title}")
-    
-    headers = dict(auth.session.headers)
-    headers.pop('Content-Type', None)
-    headers['device-id'] = auth.state.device_id
-    
-    connector = aiohttp.TCPConnector(limit=16, force_close=False, enable_cleanup_closed=True)
-    timeout = aiohttp.ClientTimeout(total=60, sock_connect=20, sock_read=30)
-    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        # 1. Fetch playlist content
-        async with session.get(m3u8_url, headers=headers) as resp:
-            if resp.status != 200:
-                logger.error(f"Failed to fetch master playlist: HTTP {resp.status}")
-                return None
-            content = await resp.text()
-            
-        # 2. Handle master playlist variants
-        if "#EXT-X-STREAM-INF" in content:
-            variant_url = resolve_variant_url(content, m3u8_url, max_height=max_height)
-            logger.info(f"Resolved master playlist to variant: {variant_url}")
-            async with session.get(variant_url, headers=headers) as resp:
-                if resp.status != 200:
-                    logger.error(f"Failed to fetch variant playlist: HTTP {resp.status}")
-                    return None
-                content = await resp.text()
-                m3u8_url = variant_url
-                
-        # 3. Parse segments and keys
-        segments, key_info = parse_m3u8(content, m3u8_url)
-        if not segments:
-            logger.error("No HLS segments found in playlist.")
-            return None
-            
-        logger.info(f"HLS Variant parsed: {len(segments)} segments detected.")
-        
-        # 4. Fetch AES keys
-        key_cache: Dict[str, bytes] = {}
-        if key_info:
-            segment_keys = key_info.get("segment_keys") or []
-            key_uris = sorted({k["uri"] for k in segment_keys if k and k.get("uri")})
-            logger.info(f"Stream is AES-128 encrypted. Fetching {len(key_uris)} key(s).")
-            for key_uri in key_uris:
-                async with session.get(key_uri, headers=headers) as resp:
-                    if resp.status == 200:
-                        key_cache[key_uri] = await resp.read()
-                    else:
-                        logger.error(f"Failed to fetch AES-128 decryption key: HTTP {resp.status}")
-                        return None
-                    
-        # 5. Prepare temp segments folder
-        temp_dir = Path(temp_stem).parent / f"hls_temp_{uuid.uuid4().hex}"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        
-        dest_paths = [temp_dir / f"seg_{i:05d}.ts" for i in range(len(segments))]
-        
-        # 6. Initialize AsyncDownloadEngine
-        engine = AsyncDownloadEngine(max_workers=16)
-        
-        # Real-time progress tracker with speed/ETA in yt-dlp format
-        start_time = time.monotonic()
-        total_estimated_bytes = len(segments) * 1.5 * 1024 * 1024  # estimate 1.5MB per segment
-        
-        def progress_callback(downloaded_bytes, total_bytes):
-            raise_if_cancelled()
-            pct = (downloaded_bytes / total_bytes) * 100 if total_bytes > 0 else 0
-            if pct > 100: pct = 100.0
-            elapsed = time.monotonic() - start_time
-            speed_bps = downloaded_bytes / elapsed if elapsed > 0 else 0
-            speed_str = f"{speed_bps / (1024*1024):.2f}MiB/s"
-            eta_sec = (total_bytes - downloaded_bytes) / speed_bps if speed_bps > 0 else 0
-            eta_str = f"{int(eta_sec)}s" if eta_sec < 3600 else f"{int(eta_sec/3600)}h{int((eta_sec%3600)/60)}m"
-            logger.info(f"Download {pct:.1f}%  speed={speed_str}  eta={eta_str}")
+    """Backward-compatible wrapper → resumable native HLS."""
+    return download_native_resumable(
+        m3u8_url, temp_stem, auth, title, max_height=max_height
+    )
 
-        logger.info(f"Downloading {len(segments)} segments concurrently...")
-        success = await engine.download_segments(
-            urls=segments,
-            dest_paths=dest_paths,
-            headers=headers,
-            progress_callback=progress_callback
-        )
-        
-        if not success:
-            logger.error("HLS segment download failed.")
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return None
-            
-        # 7. Decrypt & assemble sequential file block
-        output_path = Path(temp_stem + ".ts")
-        output_ts = str(output_path)
-        logger.info("Assembling and decrypting sequential TS file...")
-
-        assembly_ok = False
-        try:
-            with open(output_ts, "wb") as out_f:
-                for i, path in enumerate(dest_paths):
-                    raise_if_cancelled()
-                    if not path.exists():
-                        logger.error(f"Decryption failed: segment {i} file missing!")
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-
-                    with open(path, "rb") as seg_f:
-                        data = seg_f.read()
-
-                    segment_key = None
-                    if key_info:
-                        segment_keys = key_info.get("segment_keys") or []
-                        if i < len(segment_keys):
-                            segment_key = segment_keys[i]
-
-                    if segment_key:
-                        key_bytes = key_cache.get(segment_key["uri"])
-                        if not key_bytes:
-                            logger.error(f"Missing AES-128 decryption key for segment {i}")
-                            shutil.rmtree(temp_dir, ignore_errors=True)
-                            return None
-                        decrypted_data = decrypt_segment(
-                            data,
-                            key_bytes,
-                            int(segment_key.get("sequence", i)),
-                            segment_key.get("iv"),
-                        )
-                        out_f.write(decrypted_data)
-                    else:
-                        out_f.write(data)
-            assembly_ok = True
-        finally:
-            if not assembly_ok:
-                output_path.unlink(missing_ok=True)
-                    
-        # Cleanup segments
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return output_ts
 
 def download_with_ytdlp(
     m3u8_url: str,
@@ -547,18 +594,17 @@ def download_with_ytdlp(
     max_height: Optional[int] = None,
 ) -> Optional[str]:
     """
-    Download HLS using native parallel async engine, falling back to yt-dlp if needed.
+    Download HLS using resumable native segment engine, falling back to yt-dlp.
     """
-    import asyncio
     try:
-        native_result = asyncio.run(
-            download_native_async(m3u8_url, temp_stem, auth, title, max_height=max_height)
+        native_result = download_native_resumable(
+            m3u8_url, temp_stem, auth, title, max_height=max_height
         )
         if native_result:
             return native_result
-        logger.warning("Native async engine did not produce output. Falling back to standard yt-dlp...")
+        logger.warning("Native resumable engine did not produce output. Falling back to yt-dlp...")
     except Exception as e:
-        logger.error(f"Native async engine failed: {e}. Falling back to standard yt-dlp...")
+        logger.error(f"Native resumable engine failed: {e}. Falling back to standard yt-dlp...")
 
     try:
         import yt_dlp
@@ -756,18 +802,47 @@ class VoyoDownloader:
             output_stem:  Full filename stem override (no extension)
         """
         logger.info(f'Fetching stream URL for video {video_id}...')
+        m3u8_url = ""
         try:
-            url_info = self.auth.get_video_url(video_id)
+            from backend.core.pipeline import StreamResolve, with_api_refresh_sniffer
+
+            def path_api():
+                info = self.auth.get_video_url(video_id)
+                probe = classify_url_info(info)
+                if not probe.get("streamable"):
+                    raise RuntimeError(probe.get("reason") or "stream unavailable")
+                return StreamResolve(
+                    mpd_url=info["url"],
+                    license_url="",
+                    title=str(video_id),
+                    source="api",
+                    meta={"url_info": info},
+                )
+
+            def path_refresh():
+                # Re-link device (mandatory for videoUrlV2) then retry stream URL
+                try:
+                    self.auth.link_device()
+                except Exception as relink_err:
+                    logger.warning("Voyo device re-link: %s", relink_err)
+                return path_api()
+
+            resolved = with_api_refresh_sniffer(
+                "voyo",
+                api=path_api,
+                refresh=path_refresh,
+                require_license=False,
+            )
+            m3u8_url = resolved.mpd_url
+            if resolved.source == "sniffer":
+                logger.info("Voyo stream URL iz sniffera")
         except Exception as e:
             logger.error(f'Failed to get stream URL: {e}')
             return False
 
-        probe = classify_url_info(url_info)
-        if not probe.get('streamable'):
-            logger.error('Video %s: %s', video_id, probe.get('reason') or 'stream unavailable')
+        if not m3u8_url:
+            logger.error("Video %s: empty stream URL", video_id)
             return False
-
-        m3u8_url = url_info['url']
 
         # Fetch metadata for filename
         meta = {}
@@ -812,7 +887,22 @@ class VoyoDownloader:
             return False
 
         embed_title = meta.get('title', output_stem) if meta else output_stem
-        return mux_to_mkv(downloaded, final_path, title=embed_title)
+        ok = mux_to_mkv(downloaded, final_path, title=embed_title)
+        if ok:
+            # Free disk: drop resumable segment store for this stream
+            try:
+                from backend.core.pipeline import JobCheckpoint, purge_job_segments
+
+                # Best-effort: open by known m3u8 + title stem used during download
+                jid = None
+                # Job id is stable for (voyo, m3u8, title) — title was output_stem
+                from backend.core.pipeline.checkpoint import make_job_id
+
+                jid = make_job_id("voyo", m3u8_url, output_stem or "voyo")
+                purge_job_segments(jid)
+            except Exception as purge_err:
+                logger.debug("Voyo segment purge skipped: %s", purge_err)
+        return ok
 
     def download_video_url(self, url: str) -> bool:
         vid_id = _parse_id(url)

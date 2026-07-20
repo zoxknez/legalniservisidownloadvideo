@@ -111,14 +111,9 @@ class HBOMaxAuth:
         self.client_id = _CLIENT_IDS.get(self.market, _CLIENT_IDS["emea"])
         self._token: Dict[str, Any] = {}
 
-        # Import here so other modules can import hbomax_auth without curl_cffi
-        try:
-            from curl_cffi import requests as cffi_requests
-            self._session = cffi_requests.Session(impersonate="chrome124")
-        except ImportError:
-            import requests as std_requests
-            self._session = std_requests.Session()
-            logger.warning("curl_cffi not found; falling back to standard requests (may fail TLS fingerprint check)")
+        from backend.services.http_client import create_browser_session
+
+        self._session = create_browser_session()
 
     # ── public API ────────────────────────────────────────────────────────────
 

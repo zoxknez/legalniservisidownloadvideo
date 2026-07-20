@@ -66,21 +66,10 @@ class ChromeTLSAdapter(HTTPAdapter):
         return super().init_poolmanager(*args, **kwargs)
 
 def create_session_with_retries() -> requests.Session:
-    """Create a requests session with retry logic"""
-    session = requests.Session()
-    
-    # Configure retries
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    
-    adapter = ChromeTLSAdapter(max_retries=retry_strategy)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    
-    return session
+    """Create a browser-like session (curl_cffi preferred). SSL verify off for RTS CDN quirks."""
+    from backend.services.http_client import create_browser_session
+
+    return create_browser_session(verify=False)
 
 
 @dataclass

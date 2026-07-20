@@ -692,37 +692,86 @@ def resolve_media_url(target: str, kind: str) -> str:
 
 
 def resolve_stream_info(target: str, kind: str) -> Dict[str, Any]:
-    """Resolve target to stream info including mpd_url, license_url, drm_headers."""
-    result = {"mpd_url": "", "license_url": "", "drm_headers": {}, "title": target}
+    """
+    Resolve target to stream info including mpd_url, license_url, drm_headers.
+
+    Ladder: API resolve → VOD catalog fallback → sniffer capture.
+    """
+    result = {
+        "mpd_url": "",
+        "license_url": "",
+        "drm_headers": {},
+        "title": target,
+        "source": "",
+    }
 
     if is_direct_media_url(target):
         result["mpd_url"] = target
+        result["source"] = "direct"
         return result
 
-    try:
+    from backend.core.pipeline import StreamResolve, resolve_stream_ladder, sniffer_resolve
+
+    def path_api() -> StreamResolve:
         payload = api_request("resolve", {"target": target, "kind": kind}, require_auth=True)
         url = find_first_media_url(payload)
-        if url:
-            result["mpd_url"] = url
-        result["license_url"] = find_license_url_in_payload(payload)
-        result["drm_headers"] = find_drm_headers_in_payload(payload)
+        if not url:
+            raise EonSafeError("EON resolve nije vratio media URL")
+        title = target
         if isinstance(payload, dict):
-            result["title"] = str(payload.get("title") or payload.get("name") or target)
-        return result
-    except Exception:
-        pass
+            title = str(payload.get("title") or payload.get("name") or target)
+        return StreamResolve(
+            mpd_url=url,
+            license_url=find_license_url_in_payload(payload) or "",
+            headers=find_drm_headers_in_payload(payload) or {},
+            title=title,
+            source="api",
+        )
 
-    if kind == "vod":
+    def path_catalog() -> StreamResolve:
+        if kind != "vod":
+            raise EonSafeError("catalog fallback only for VOD")
         info = get_vod_info(target)
         url = find_first_media_url(info)
-        if url:
-            result["mpd_url"] = url
-        result["license_url"] = find_license_url_in_payload(info)
-        result["drm_headers"] = find_drm_headers_in_payload(info)
+        if not url:
+            raise EonSafeError("EON VOD catalog nema media URL")
+        title = target
         if isinstance(info, dict):
-            result["title"] = str(info.get("title") or info.get("name") or target)
+            title = str(info.get("title") or info.get("name") or target)
+        return StreamResolve(
+            mpd_url=url,
+            license_url=find_license_url_in_payload(info) or "",
+            headers=find_drm_headers_in_payload(info) or {},
+            title=title,
+            source="catalog",
+        )
 
-    return result
+    def path_sniffer() -> StreamResolve:
+        sniff = sniffer_resolve("eon")
+        if not sniff or not sniff.is_valid():
+            raise EonSafeError("Nema sniffer capture za EON")
+        return sniff
+
+    steps = [("api", path_api)]
+    if kind == "vod":
+        steps.append(("catalog", path_catalog))
+    steps.append(("sniffer", path_sniffer))
+
+    try:
+        # Do not require license here — non-DRM MPD is valid; download path checks DRM.
+        resolved = resolve_stream_ladder(steps, require_license=False)
+        result["mpd_url"] = resolved.mpd_url
+        result["license_url"] = resolved.license_url or ""
+        result["drm_headers"] = resolved.headers or {}
+        result["title"] = resolved.title or target
+        result["source"] = resolved.source or ""
+        if resolved.source == "sniffer":
+            logger.info("EON stream iz sniffera: %s…", resolved.mpd_url[:64])
+        return result
+    except Exception as exc:
+        logger.warning("EON resolve ladder failed: %s", exc)
+        # Legacy soft return (empty mpd) for callers that handle it
+        return result
 
 
 def parse_episode_selection(selection: str, total: int) -> List[int]:
@@ -747,10 +796,29 @@ def parse_episode_selection(selection: str, total: int) -> List[int]:
 
 
 def fetch_text(url: str) -> str:
-    headers = {"User-Agent": "Mozilla/5.0 EONDownloader/2.0"}
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response.text
+    """Fetch MPD/text with browser-like UA (curl_cffi when available)."""
+    try:
+        from backend.services.http_client import chrome_user_agent, create_browser_session
+
+        sess = getattr(fetch_text, "_session", None)
+        if sess is None:
+            sess = create_browser_session()
+            setattr(fetch_text, "_session", sess)
+        headers = {"User-Agent": chrome_user_agent(), "Accept": "*/*"}
+        response = sess.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.text
+    except Exception:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.text
 
 
 def ensure_output_dir(path: str) -> Path:
@@ -793,10 +861,12 @@ class EONDownloader:
         mpd_url: str,
         license_url: str,
         drm_headers: Optional[Dict[str, str]] = None,
+        service_name: str = "eon",
     ) -> List[str]:
         """Fetch MPD, extract all PSSHs, get Widevine decryption keys via DRM Manager."""
         logger.info(f"Fetching MPD: {mpd_url}")
         mpd_text = fetch_text(mpd_url)
+        svc = (service_name or "eon").strip().lower() or "eon"
 
         # Log stream quality
         streams = get_best_streams(mpd_text)
@@ -813,21 +883,41 @@ class EONDownloader:
                 "No license URL available. Provide --license-url or configure the API to return it."
             )
 
-        # License request headers
-        lic_headers = {
-            "Content-Type": "application/octet-stream",
-            "User-Agent": "Mozilla/5.0 EONDownloader/2.0",
-        }
-        if drm_headers:
-            lic_headers.update(drm_headers)
+        # License request headers — browser UA when shared client is available
+        try:
+            from backend.services.http_client import chrome_user_agent, normalize_drm_headers
+
+            lic_headers = {
+                "Content-Type": "application/octet-stream",
+                "User-Agent": chrome_user_agent(),
+            }
+            if drm_headers:
+                lic_headers.update(normalize_drm_headers(drm_headers))
+        except Exception:
+            lic_headers = {
+                "Content-Type": "application/octet-stream",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                ),
+            }
+            if drm_headers:
+                lic_headers.update(drm_headers)
 
         # Use multi-PSSH via centralized DRM Manager (with key caching)
         if _USE_CENTRAL_DRM and _drm_manager and hasattr(_drm_manager, 'extract_all_pssh_from_mpd'):
             pssh_list = _drm_manager.extract_all_pssh_from_mpd(mpd_text)
             if not pssh_list:
                 raise EonSafeError("Could not find Widevine PSSH in MPD manifest")
-            logger.info(f"Found {len(pssh_list)} PSSH(s). Fetching keys from: {license_url}")
-            keys = _drm_manager.get_keys_multi_pssh(pssh_list, license_url, lic_headers, "eon")
+            logger.info(
+                "Found %s PSSH(s). Fetching keys from: %s (service=%s)",
+                len(pssh_list),
+                license_url,
+                svc,
+            )
+            keys = _drm_manager.get_keys_multi_pssh(
+                pssh_list, license_url, lic_headers, svc
+            )
         else:
             pssh = extract_pssh_from_mpd(mpd_text)
             if not pssh:
@@ -838,23 +928,35 @@ class EONDownloader:
 
         if not keys:
             raise EonSafeError("No CONTENT keys returned from license server")
+        # Never log raw kid:key material (queue redaction helps, but avoid at source)
+        logger.info("Received %s CONTENT key(s) for service=%s", len(keys), svc)
         for k in keys:
-            logger.info(f"  Key: {k}")
+            kid = k.split(":", 1)[0] if ":" in k else "?"
+            logger.debug("  KID=%s…", kid[:12])
         return keys
 
-    def download_fragments(self, mpd_url: str, output_name: str,
-                           workers: int = 16) -> Tuple[Path, Path]:
+    def download_fragments(
+        self,
+        mpd_url: str,
+        output_name: str,
+        workers: int = 16,
+        continuedl: bool = False,
+    ) -> Tuple[Path, Path]:
         """
         Download encrypted audio and video fragments via yt-dlp.
         Uses concurrent fragment downloads for speed.
         Returns (video_path, audio_path).
+
+        continuedl: when True, allow yt-dlp to resume partial fragment files
+        (used by MediaPipeline stage resume).
         """
         from yt_dlp import YoutubeDL
 
         video_out = self.temp_dir / f"{output_name}_enc_video.mp4"
         audio_out = self.temp_dir / f"{output_name}_enc_audio.mp4"
-        video_out.unlink(missing_ok=True)
-        audio_out.unlink(missing_ok=True)
+        if not continuedl:
+            video_out.unlink(missing_ok=True)
+            audio_out.unlink(missing_ok=True)
 
         aria2c = self.bins.get("aria2c")
         use_aria2c = aria2c and (shutil.which(aria2c) or Path(aria2c).exists())
@@ -898,7 +1000,7 @@ class EONDownloader:
             "no_warnings": True,
             "noprogress": True,
             "updatetime": False,
-            "continuedl": False,
+            "continuedl": bool(continuedl),
             "fixup": "never",
             "merge_output_format": None,
             "postprocessors": [],
@@ -1067,18 +1169,24 @@ class EONDownloader:
         drm_headers: Optional[Dict[str, str]] = None,
         title: str = "EON.Video",
         workers: int = 16,
+        service_name: str = "eon",
+        resume: bool = True,
     ) -> Path:
         """
-        Full DRM download pipeline:
+        Full DRM download pipeline (via shared MediaPipeline when DRM present):
         1. Fetch MPD, extract PSSH
         2. License exchange to get content keys
         3. Download encrypted fragments via yt-dlp
         4. Decrypt with mp4decrypt
         5. Fix with ffmpeg if needed
         6. Mux with mkvmerge/ffmpeg
+
+        service_name: tags license cert/key cache (e.g. sniffer source service).
+        resume: stage checkpoint under ~/.videodownload/jobs/ (keys/fragments/decrypt).
         """
         safe_name = safe_filename(title)
-        logger.info(f"=== EON DRM Download: {title} ===")
+        svc = (service_name or "eon").strip().lower() or "eon"
+        logger.info(f"=== EON DRM Download: {title} (service={svc}) ===")
         logger.info(f"MPD: {mpd_url}")
         print(f"\n[EON] Starting download: {title}")
         print(f"[EON] MPD: {mpd_url}")
@@ -1092,40 +1200,44 @@ class EONDownloader:
             print("[EON] Stream is not DRM-protected, downloading directly...")
             return self._download_direct(mpd_url, safe_name, workers)
 
-        print("[EON] Widevine DRM detected, starting decryption pipeline...")
+        print("[EON] Widevine DRM detected — MediaPipeline (resumable stages)…")
 
-        # Step 2: Extract PSSH and get keys
-        keys = self.get_decryption_keys(mpd_url, license_url, drm_headers)
-        print(f"[EON] Got {len(keys)} decryption key(s)")
+        from backend.core.pipeline import MediaPipeline, TrackPolicy
 
-        # Step 3: Download encrypted fragments
-        print("[EON] Downloading encrypted fragments...")
-        enc_video, enc_audio = self.download_fragments(mpd_url, safe_name, workers)
+        pipeline = MediaPipeline(
+            service=svc,
+            mpd_url=mpd_url,
+            license_url=license_url or "",
+            title=title,
+            output_dir=self.output_dir,
+            bins=self.bins,
+            resume=resume,
+        )
 
-        # Step 4: Decrypt
-        print("[EON] Decrypting video...")
-        dec_video = self.decrypt_file(enc_video, keys)
-        dec_audio = dec_video  # default if same file
-        if enc_audio != enc_video and enc_audio.exists():
-            print("[EON] Decrypting audio...")
-            dec_audio = self.decrypt_file(enc_audio, keys)
+        def _acquire_keys():
+            return self.get_decryption_keys(
+                mpd_url, license_url, drm_headers, service_name=svc
+            )
 
-        # Step 5: Fix with ffmpeg if needed
-        dec_video = self.fix_with_ffmpeg(dec_video)
-        if dec_audio != dec_video:
-            dec_audio = self.fix_with_ffmpeg(dec_audio)
+        def _download_frags(continuedl: bool):
+            return self.download_fragments(
+                mpd_url, safe_name, workers, continuedl=continuedl
+            )
 
-        # Step 6: Mux
-        output_path = self.output_dir / f"{safe_name}.mkv"
-        print("[EON] Muxing final output...")
-        result = self.mux_output(dec_video, dec_audio, output_path)
+        result = pipeline.run(
+            acquire_keys=_acquire_keys,
+            download_fragments=_download_frags,
+            output_name=safe_name,
+        )
 
-        # Step 7: Cleanup
+        # Cleanup temp fragments only after successful mux
         self.cleanup(safe_name)
 
-        print(f"\n[EON] ✓ Download complete: {result}")
-        print(f"[EON] ✓ Size: {result.stat().st_size / 1024 / 1024:.1f} MB")
-        return result
+        print(f"\n[EON] ✓ Download complete: {result.output_path}")
+        if result.resumed:
+            print(f"[EON] ✓ Resumed from checkpoint job={result.job_id}")
+        print(f"[EON] ✓ Size: {result.output_path.stat().st_size / 1024 / 1024:.1f} MB")
+        return result.output_path
 
     def _download_direct(self, url: str, safe_name: str, workers: int) -> Path:
         """Download a non-DRM stream directly with yt-dlp."""

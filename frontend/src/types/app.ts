@@ -311,6 +311,14 @@ export interface RtsVideoInfo {
   thumbnail?: string;
 }
 
+export interface DrmQualityPolicy {
+  security_level: number;
+  max_height: number;
+  hdr_allowed: boolean;
+  label: string;
+  description: string;
+}
+
 export interface DrmHealth {
   cdm_ready: boolean;
   legacy_mode: boolean;
@@ -329,5 +337,6 @@ export interface DrmHealth {
   key_cache: { total_entries: number; alive_entries: number };
   provider_certs_fetched: string[];
   pywidevine_version: string | null;
+  quality_policy?: DrmQualityPolicy;
   recommendations: string[];
 }

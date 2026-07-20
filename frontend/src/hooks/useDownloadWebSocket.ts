@@ -189,6 +189,31 @@ export function useDownloadWebSocket({
             "success",
           );
           setShowSnifferToast(false);
+        } else if (payload.type === "resolve_fallback") {
+          const { service, path, title, failed_paths } = (payload.data || {}) as {
+            service?: string;
+            path?: string;
+            title?: string;
+            failed_paths?: string[];
+          };
+          const svc = (service || "servis").toUpperCase();
+          const via =
+            path === "sniffer"
+              ? "sniffer bridge"
+              : path === "refresh"
+                ? "osveženu sesiju"
+                : path === "catalog"
+                  ? "katalog"
+                  : path || "fallback";
+          const failed =
+            Array.isArray(failed_paths) && failed_paths.length
+              ? ` (API: ${failed_paths.join(" → ")})`
+              : "";
+          const label = title ? `: ${title}` : "";
+          showToastRef.current(
+            `🔀 ${svc} preko ${via}${label}${failed}`,
+            "info",
+          );
         } else if (payload.type === "transcode_update") {
           const { title, status, detail } = (payload.data || {}) as {
             title?: string;

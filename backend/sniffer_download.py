@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from backend.config import config
 from backend.jobs.inprocess import build_job
 from backend.services.hbo_adapter import HboAdapter
+from backend.services.http_client import normalize_drm_headers
 from backend.services.skyshowtime_adapter import SkyShowtimeAdapter
 from backend.sniffer_store import SnifferCapture, _norm_service
 
@@ -20,6 +21,32 @@ def _device_path() -> str:
     return path if path and Path(path).exists() else ""
 
 
+def _service_default_headers(svc: str) -> Dict[str, str]:
+    """Browser-like Origin/Referer defaults when sniffer missed them."""
+    origins = {
+        "hbomax": ("https://www.max.com", "https://www.max.com/"),
+        "skyshowtime": ("https://www.skyshowtime.com", "https://www.skyshowtime.com/"),
+        "hrti": ("https://hrti.hrt.hr", "https://hrti.hrt.hr/"),
+        "rtsplaneta": ("https://rtsplaneta.rs", "https://rtsplaneta.rs/"),
+        "eon": ("https://eon.tv", "https://eon.tv/"),
+        "voyo": ("https://voyo.rs", "https://voyo.rs/"),
+    }
+    origin, referer = origins.get(svc, ("", ""))
+    out: Dict[str, str] = {}
+    if origin:
+        out["Origin"] = origin
+        out["Referer"] = referer
+    return out
+
+
+def build_sniffer_drm_headers(capture: SnifferCapture) -> Dict[str, str]:
+    """Merge normalized sniffer headers with service Origin/Referer defaults."""
+    svc = _norm_service(capture.service)
+    headers = _service_default_headers(svc)
+    headers.update(normalize_drm_headers(capture.headers or {}))
+    return headers
+
+
 def build_sniffer_download_cmd(
     capture: SnifferCapture,
     *,
@@ -30,10 +57,12 @@ def build_sniffer_download_cmd(
     manifest = capture.manifest_url.strip()
     license_url = (capture.license_url or "").strip()
     title = capture.title.strip() or f"{svc} Sniffer"
+    drm_headers = build_sniffer_drm_headers(capture)
 
     if not manifest:
         raise ValueError("Manifest URL nije snifovan.")
 
+    # Dedicated direct pipelines (API-native license headers / tokens).
     if svc in ("hbomax", "hbo"):
         if not license_url:
             raise ValueError("License URL nije snifovan (potreban za HBO Max).")
@@ -42,7 +71,12 @@ def build_sniffer_download_cmd(
     if svc == "skyshowtime":
         if not license_url:
             raise ValueError("License URL nije snifovan (potreban za SkyShowtime).")
-        license_token = (capture.headers or {}).get("X-License-Token", "")
+        license_token = (
+            drm_headers.get("X-License-Token")
+            or (capture.headers or {}).get("X-License-Token")
+            or (capture.headers or {}).get("x-license-token")
+            or ""
+        )
         return SkyShowtimeAdapter.make_download_direct_cmd(
             manifest,
             license_url,
@@ -50,6 +84,9 @@ def build_sniffer_download_cmd(
             license_token=license_token,
         )
 
+    # Service-aware generic MPD+license path (not always labeled as "eon").
+    # Uses EONDownloader as shared DASH/CENC engine but tags source_service for
+    # license cert cache, logging, and default headers.
     return build_job(
         "sniffer",
         "direct",
@@ -58,7 +95,7 @@ def build_sniffer_download_cmd(
             "manifest_url": manifest,
             "license_url": license_url,
             "title": title,
-            "drm_headers": capture.headers or {},
+            "drm_headers": drm_headers,
             "output_dir": config.get_output_dir(),
             "device_path": _device_path(),
         },

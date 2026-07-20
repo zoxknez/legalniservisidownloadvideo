@@ -53,12 +53,18 @@ export function DrmCdmStatus({ health, loading, reloading, onReload }: DrmCdmSta
               </p>
               {sl === 3 && (
                 <p className="text-[10px] text-text-muted mt-1">
-                  Software CDM – dovoljno za 1080p/SDR. L1 zahtijeva hardverski TEE čip.
+                  Software CDM – tipično max {health.quality_policy?.max_height ?? 720}p na Max/sličnim servisima. L1 zahtijeva hardverski TEE čip.
                 </p>
               )}
               {sl === 1 && (
                 <p className="text-[10px] text-text-muted mt-1">
-                  Hardverski zaštićen – maksimalna razina zaštite sadržaja.
+                  Hardverski zaštićen – policy do {health.quality_policy?.max_height ?? 2160}p{health.quality_policy?.hdr_allowed ? ", HDR dozvoljen" : ""}.
+                </p>
+              )}
+              {health.quality_policy && (
+                <p className="text-[10px] text-violet-300/90 mt-2 font-semibold">
+                  Quality policy: max {health.quality_policy.max_height}p · {health.quality_policy.label}
+                  {health.quality_policy.hdr_allowed ? " · HDR" : " · SDR"}
                 </p>
               )}
             </div>
